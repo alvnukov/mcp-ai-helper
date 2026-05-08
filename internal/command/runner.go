@@ -1,0 +1,398 @@
+// Package command runs bounded local shell commands and extracts compact evidence.
+package command
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/zol/mcp-ai-helper/internal/config"
+	"github.com/zol/mcp-ai-helper/internal/evidence"
+)
+
+// Runner executes shell commands under repository and output policies.
+type Runner struct {
+	policy  config.CommandPolicy
+	history *History
+}
+
+// Result is the compact, redacted command execution record returned to callers.
+type Result struct {
+	CommandID     string          `json:"command_id"`
+	Command       string          `json:"command"`
+	CWD           string          `json:"cwd"`
+	ExitCode      int             `json:"exit_code"`
+	DurationMS    int64           `json:"duration_ms"`
+	Truncated     bool            `json:"truncated"`
+	StdoutTail    []string        `json:"stdout_tail"`
+	StderrTail    []string        `json:"stderr_tail"`
+	FilteredLines []string        `json:"filtered_lines,omitempty"`
+	EvidenceLines []evidence.Line `json:"evidence_lines"`
+	OutputHash    string          `json:"output_hash"`
+}
+
+// Filter selects a compact slice from command output before it reaches the caller.
+type Filter struct {
+	Include         string   `json:"include"`
+	Exclude         string   `json:"exclude"`
+	CaseInsensitive bool     `json:"case_insensitive"`
+	MaxLines        int      `json:"max_lines"`
+	ContextBefore   int      `json:"context_before"`
+	ContextAfter    int      `json:"context_after"`
+	Preset          string   `json:"preset"`
+	Keywords        []string `json:"keywords"`
+}
+
+// NewRunner creates a command runner from policy limits.
+func NewRunner(policy config.CommandPolicy) *Runner {
+	if policy.LogEnabled != nil && !*policy.LogEnabled {
+		return &Runner{policy: policy, history: NewInMemoryHistory()}
+	}
+	history, err := NewHistory(HistoryPolicy{Dir: policy.LogDir, RetentionDays: policy.LogRetentionDays, MaxRecords: policy.LogMaxRecords, Compress: policy.LogCompress})
+	if err != nil {
+		history = NewInMemoryHistory()
+	}
+	return &Runner{policy: policy, history: history}
+}
+
+// Run executes cmd in cwd after validating cwd against the configured allowlist.
+func (r *Runner) Run(ctx context.Context, cmd string, cwd string, timeoutSeconds int) (Result, error) {
+	return r.RunFiltered(ctx, cmd, cwd, timeoutSeconds, Filter{})
+}
+
+// RunFiltered executes cmd and applies a deterministic grep-like output filter.
+func (r *Runner) RunFiltered(ctx context.Context, cmd string, cwd string, timeoutSeconds int, filter Filter) (Result, error) {
+	return r.runFiltered(ctx, cmd, cwd, timeoutSeconds, filter, "")
+}
+
+func (r *Runner) runFiltered(
+	ctx context.Context,
+	cmd string,
+	cwd string,
+	timeoutSeconds int,
+	filter Filter,
+	repoPath string,
+) (Result, error) {
+	if strings.TrimSpace(cmd) == "" {
+		return Result{}, errors.New("command is required")
+	}
+	runCWD, err := r.safeCWD(cwd)
+	if err != nil {
+		return Result{}, err
+	}
+	if timeoutSeconds <= 0 {
+		timeoutSeconds = r.policy.DefaultTimeoutSeconds
+	}
+	runCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
+	defer cancel()
+
+	stdout := newLimitBuffer(r.policy.MaxOutputBytes)
+	stderr := newLimitBuffer(r.policy.MaxOutputBytes)
+	// #nosec G204 -- command execution is this package's explicit MCP capability and is constrained by cwd, timeout, and output policy.
+	command := exec.CommandContext(runCtx, "/bin/sh", "-lc", cmd)
+	command.Dir = runCWD
+	command.Stdout = stdout
+	command.Stderr = stderr
+
+	started := time.Now()
+	err = command.Run()
+	duration := time.Since(started)
+
+	exitCode := 0
+	if err != nil {
+		var exitErr *exec.ExitError
+		switch {
+		case errors.As(err, &exitErr):
+			exitCode = exitErr.ExitCode()
+		case errors.Is(runCtx.Err(), context.DeadlineExceeded):
+			exitCode = 124
+		default:
+			return Result{}, err
+		}
+	}
+
+	stdoutText := redact(stdout.String())
+	stderrText := redact(stderr.String())
+	stdoutLines := normalizeLines(stdoutText)
+	stderrLines := normalizeLines(stderrText)
+	combined := append([]string{}, stdoutLines...)
+	combined = append(combined, stderrLines...)
+	truncatedLines := false
+	if len(combined) > r.policy.MaxLines {
+		truncatedLines = true
+		combined = combined[len(combined)-r.policy.MaxLines:]
+	}
+	sum := sha256.Sum256([]byte(stdoutText + "\n" + stderrText))
+	filteredLines, filterTruncated, err := applyFilter(combined, filter)
+	if err != nil {
+		return Result{}, err
+	}
+	commandID := hex.EncodeToString(sum[:8])
+	outputHash := hex.EncodeToString(sum[:])
+	if err := r.history.Put(Record{
+		CommandID:  commandID,
+		RepoPath:   repoPath,
+		Command:    cmd,
+		CWD:        runCWD,
+		ExitCode:   exitCode,
+		Truncated:  stdout.Truncated() || stderr.Truncated() || truncatedLines,
+		Stdout:     stdoutLines,
+		Stderr:     stderrLines,
+		Combined:   combined,
+		OutputHash: outputHash,
+	}); err != nil {
+		return Result{}, err
+	}
+	return Result{
+		CommandID:     commandID,
+		Command:       cmd,
+		CWD:           runCWD,
+		ExitCode:      exitCode,
+		DurationMS:    duration.Milliseconds(),
+		Truncated:     stdout.Truncated() || stderr.Truncated() || truncatedLines || filterTruncated,
+		StdoutTail:    tail80(stdoutLines),
+		StderrTail:    tail80(stderrLines),
+		FilteredLines: filteredLines,
+		EvidenceLines: evidence.Select(combined, 30),
+		OutputHash:    outputHash,
+	}, nil
+}
+
+// RunInRepo executes cmd in repoPath or a repo-relative cwd without allowing path escape.
+func (r *Runner) RunInRepo(ctx context.Context, cmd string, repoPath string, cwd string, timeoutSeconds int) (Result, error) {
+	return r.RunFilteredInRepo(ctx, cmd, repoPath, cwd, timeoutSeconds, Filter{})
+}
+
+// RunFilteredInRepo executes cmd in a repo and applies a deterministic output filter.
+func (r *Runner) RunFilteredInRepo(ctx context.Context, cmd string, repoPath string, cwd string, timeoutSeconds int, filter Filter) (Result, error) {
+	if strings.TrimSpace(repoPath) == "" {
+		return Result{}, errors.New("repo_path is required")
+	}
+	repo, err := r.safeCWD(repoPath)
+	if err != nil {
+		return Result{}, err
+	}
+	runCWD := repo
+	if strings.TrimSpace(cwd) != "" {
+		if filepath.IsAbs(cwd) {
+			return Result{}, errors.New("cwd must be repo-relative when repo_path is set")
+		}
+		runCWD = filepath.Join(repo, filepath.Clean(cwd))
+		if !insideDir(repo, runCWD) {
+			return Result{}, fmt.Errorf("cwd %q escapes repo_path", cwd)
+		}
+	}
+	return r.runFiltered(ctx, cmd, runCWD, timeoutSeconds, filter, repo)
+}
+
+// FilterHistory applies filter to a retained command output record.
+func (r *Runner) FilterHistory(commandID string, filter Filter) (Result, error) {
+	return r.history.Filter(commandID, filter)
+}
+
+func (r *Runner) safeCWD(cwd string) (string, error) {
+	if cwd == "" {
+		cwd = "."
+	}
+	abs, err := filepath.Abs(cwd)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("cwd %q is not a directory", abs)
+	}
+	for _, allowed := range r.policy.AllowedCWDs {
+		allowedAbs, err := filepath.Abs(allowed)
+		if err != nil {
+			continue
+		}
+		if abs == allowedAbs || strings.HasPrefix(abs, allowedAbs+string(os.PathSeparator)) {
+			return abs, nil
+		}
+	}
+	return "", fmt.Errorf("cwd %q is outside allowed_cwds", abs)
+}
+
+func insideDir(root string, child string) bool {
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		return false
+	}
+	childAbs, err := filepath.Abs(child)
+	if err != nil {
+		return false
+	}
+	return childAbs == rootAbs || strings.HasPrefix(childAbs, rootAbs+string(os.PathSeparator))
+}
+
+type limitBuffer struct {
+	buf       bytes.Buffer
+	maxBytes  int
+	truncated bool
+}
+
+func newLimitBuffer(maxBytes int) *limitBuffer {
+	if maxBytes <= 0 {
+		maxBytes = 200000
+	}
+	return &limitBuffer{maxBytes: maxBytes}
+}
+
+func (b *limitBuffer) Write(p []byte) (int, error) {
+	if b.buf.Len()+len(p) <= b.maxBytes {
+		_, _ = b.buf.Write(p)
+		return len(p), nil
+	}
+	b.truncated = true
+	remaining := b.maxBytes - b.buf.Len()
+	if remaining > 0 {
+		_, _ = b.buf.Write(p[:remaining])
+	}
+	return len(p), nil
+}
+
+func (b *limitBuffer) String() string {
+	return b.buf.String()
+}
+
+func (b *limitBuffer) Truncated() bool {
+	return b.truncated
+}
+
+var secretPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)(authorization:\s*bearer\s+)[^\s]+`),
+	regexp.MustCompile(`(?i)(api[_-]?key["']?\s*[:=]\s*["']?)[A-Za-z0-9._\-]+`),
+	regexp.MustCompile(`(?i)(token["']?\s*[:=]\s*["']?)[A-Za-z0-9._\-]+`),
+}
+
+func redact(text string) string {
+	out := text
+	for _, pattern := range secretPatterns {
+		out = pattern.ReplaceAllString(out, `${1}[REDACTED]`)
+	}
+	return out
+}
+
+func applyFilter(lines []string, filter Filter) ([]string, bool, error) {
+	filter = normalizeFilter(filter)
+	if filter.Include == "" && filter.Exclude == "" && len(filter.Keywords) == 0 {
+		return nil, false, nil
+	}
+	include, err := compileFilterPattern(filter.Include, filter.CaseInsensitive)
+	if err != nil {
+		return nil, false, err
+	}
+	exclude, err := compileFilterPattern(filter.Exclude, filter.CaseInsensitive)
+	if err != nil {
+		return nil, false, err
+	}
+	selected := map[int]struct{}{}
+	for i, line := range lines {
+		if exclude != nil && exclude.MatchString(line) {
+			continue
+		}
+		if include != nil && !include.MatchString(line) {
+			continue
+		}
+		if len(filter.Keywords) > 0 && !matchesKeyword(line, filter.Keywords, filter.CaseInsensitive) {
+			continue
+		}
+		start := max(0, i-filter.ContextBefore)
+		end := min(len(lines)-1, i+filter.ContextAfter)
+		for j := start; j <= end; j++ {
+			selected[j] = struct{}{}
+		}
+	}
+	indexes := make([]int, 0, len(selected))
+	for index := range selected {
+		indexes = append(indexes, index)
+	}
+	sort.Ints(indexes)
+	truncated := false
+	if filter.MaxLines > 0 && len(indexes) > filter.MaxLines {
+		truncated = true
+		indexes = indexes[:filter.MaxLines]
+	}
+	out := make([]string, 0, len(indexes))
+	for _, index := range indexes {
+		out = append(out, lines[index])
+	}
+	return out, truncated, nil
+}
+
+func normalizeFilter(filter Filter) Filter {
+	switch filter.Preset {
+	case "errors":
+		if filter.Include == "" && len(filter.Keywords) == 0 {
+			filter.Keywords = []string{"error", "failed", "failure", "panic", "fatal", "exception", "timeout"}
+		}
+	case "tests":
+		if filter.Include == "" && len(filter.Keywords) == 0 {
+			filter.Include = `(?i)(FAIL|PASS|RUN|panic|error|failed|---)`
+		}
+	}
+	if filter.MaxLines <= 0 {
+		filter.MaxLines = 80
+	}
+	return filter
+}
+
+func compileFilterPattern(pattern string, caseInsensitive bool) (*regexp.Regexp, error) {
+	if pattern == "" {
+		return nil, nil
+	}
+	if caseInsensitive && !strings.HasPrefix(pattern, "(?i)") {
+		pattern = "(?i)" + pattern
+	}
+	return regexp.Compile(pattern)
+}
+
+func matchesKeyword(line string, keywords []string, caseInsensitive bool) bool {
+	candidate := line
+	if caseInsensitive {
+		candidate = strings.ToLower(candidate)
+	}
+	for _, keyword := range keywords {
+		value := keyword
+		if caseInsensitive {
+			value = strings.ToLower(value)
+		}
+		if strings.Contains(candidate, value) {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeLines(text string) []string {
+	raw := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	lines := make([]string, 0, len(raw))
+	for _, line := range raw {
+		if strings.TrimSpace(line) != "" {
+			lines = append(lines, line)
+		}
+	}
+	return lines
+}
+
+func tail80(values []string) []string {
+	const limit = 80
+	if len(values) <= limit {
+		return values
+	}
+	return values[len(values)-limit:]
+}

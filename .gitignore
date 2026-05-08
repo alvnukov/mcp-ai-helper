@@ -1,0 +1,8 @@
+.DS_Store
+.idea/
+bin/
+dist/
+coverage.out
+*.log
+config.yaml
+*.local.yaml

@@ -1,0 +1,94 @@
+assistant_guidance: |
+  mcp-ai-helper operating guidance:
+
+  1. Prefer one long run_workflow or run_pipeline call when intermediate results are not needed by the calling model.
+  2. Put command execution, output filters, deterministic conditions, guarded edits, checks, and commit into that workflow instead of making many low-level calls.
+  3. Use low-level tools only for bootstrapping, schema discovery, or when the returned result must change the caller's next decision.
+  4. Always pass repo_path. Treat cwd and file paths as repo-relative unless a tool explicitly says otherwise.
+  5. Never use broad staging or destructive git operations. Commit only explicit owned files after relevant checks pass.
+  6. Keep output compact and evidence-linked. Re-filter retained command history instead of rerunning commands or returning raw logs.
+  7. For project memory, read task_current or task_list before work, then synchronize the backlog with one task_batch_upsert call whenever you already know the full task set.
+  8. Use task statuses consistently: todo for planned work, in_progress for the current owner, blocked when external input is needed, and done for completed or intentionally closed work.
+  9. Prefer task_update or task_set_status for one targeted change; avoid long sequences of task_add calls when batch_upsert can express the desired state.
+  10. If a workflow cannot express the needed operation, improve the workflow DSL instead of normalizing repeated manual tool calls.
+
+layers:
+  logs:
+    enabled: true
+  tasks:
+    enabled: true
+  issues:
+    enabled: false
+  guidance:
+    enabled: true
+  models:
+    enabled: true
+  commands:
+    enabled: true
+  workflows:
+    enabled: true
+
+providers:
+  example:
+    type: generic
+    base_url: https://api.example.com/v1
+    api_key_env: EXAMPLE_API_KEY
+    timeout_seconds: 120
+    max_retries: 2
+
+models:
+  routine_summary:
+    provider: example
+    model: provider/routine-model
+    tier: low
+    roles: [summarizer, classifier, routine_debug]
+    purpose: cheap grounded summaries from logs and command output
+    system_prompt: |
+      Extract only grounded facts from command output.
+      Return concise JSON when requested. Do not invent causes.
+      Every non-trivial claim must cite evidence ids like [E1].
+    max_input_chars: 30000
+    max_output_tokens: 1800
+    temperature: 0
+    capabilities:
+      json: true
+      code: false
+      reasoning: medium
+
+  strong_analysis:
+    provider: example
+    model: provider/strong-model
+    tier: high
+    roles: [code_reasoning, verification]
+    purpose: code-aware analysis over compressed evidence
+    system_prompt: |
+      Use only provided evidence. If evidence is insufficient, say INSUFFICIENT_DATA.
+      Cite evidence ids like [E1] for every conclusion.
+    max_input_chars: 45000
+    max_output_tokens: 2600
+    temperature: 0
+    capabilities:
+      json: true
+      code: true
+      reasoning: high
+
+routing:
+  query_default: routine_summary
+  log_summary: routine_summary
+  evidence_analysis: strong_analysis
+
+command_policy:
+  default_timeout_seconds: 20
+  max_output_bytes: 200000
+  max_lines: 400
+  log_dir: ~/.mcp-ai-helper/repos
+  log_enabled: true
+  log_retention_days: 30
+  log_max_records: 2000
+  log_compress: true
+  allowed_cwds:
+    - .
+
+pipeline_policy:
+  max_return_chars: 4000
+  require_evidence_for_analysis: true
