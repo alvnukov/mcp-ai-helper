@@ -10,15 +10,19 @@ import (
 
 const guidanceURI = "mcp-ai-helper://guidance"
 
-func registerGuidance(srv *server.MCPServer, cfg *config.Config) {
-	guidanceText := cfg.AssistantGuidance
-	if guidanceText == "" {
-		guidanceText = config.DefaultAssistantGuidance()
+func currentGuidance(cfg *config.Config) string {
+	if cfg == nil || cfg.AssistantGuidance == "" {
+		return config.DefaultAssistantGuidance()
 	}
+	return cfg.AssistantGuidance
+}
+
+func registerGuidance(srv *server.MCPServer, cfg *config.Config) {
+	guidanceText := func() string { return currentGuidance(cfg) }
 	srv.AddTool(basemcp.NewTool("assistant_guidance",
 		basemcp.WithDescription("Return mandatory operating guidance for using mcp-ai-helper efficiently and safely."),
 	), func(_ context.Context, _ basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
-		return structured(map[string]string{"guidance": guidanceText})
+		return structured(map[string]string{"guidance": guidanceText()})
 	})
 	srv.AddTool(basemcp.NewTool("server_setup_guidance",
 		basemcp.WithDescription("Return recommendations for configuring mcp-ai-helper and its repo-local config file."),
@@ -32,7 +36,7 @@ func registerGuidance(srv *server.MCPServer, cfg *config.Config) {
 		MIMEType:    "text/plain",
 	}, func(_ context.Context, _ basemcp.ReadResourceRequest) ([]basemcp.ResourceContents, error) {
 		return []basemcp.ResourceContents{
-			basemcp.TextResourceContents{URI: guidanceURI, MIMEType: "text/plain", Text: guidanceText},
+			basemcp.TextResourceContents{URI: guidanceURI, MIMEType: "text/plain", Text: guidanceText()},
 		}, nil
 	})
 	srv.AddPrompt(basemcp.Prompt{
@@ -42,7 +46,7 @@ func registerGuidance(srv *server.MCPServer, cfg *config.Config) {
 		return basemcp.NewGetPromptResult(
 			"mcp-ai-helper operating guidance",
 			[]basemcp.PromptMessage{
-				basemcp.NewPromptMessage(basemcp.RoleUser, basemcp.NewTextContent(guidanceText)),
+				basemcp.NewPromptMessage(basemcp.RoleUser, basemcp.NewTextContent(guidanceText())),
 			},
 		), nil
 	})

@@ -242,3 +242,15 @@ func TestLanguageToolsRegistered(t *testing.T) {
 		}
 	}
 }
+
+func TestCurrentGuidanceUsesUpdatedConfig(t *testing.T) {
+	t.Parallel()
+	cfg := &config.Config{AssistantGuidance: "first guidance"}
+	if got := currentGuidance(cfg); got != "first guidance" {
+		t.Fatalf("guidance = %q", got)
+	}
+	cfg.AssistantGuidance = "second guidance"
+	if got := currentGuidance(cfg); got != "second guidance" {
+		t.Fatalf("guidance after update = %q", got)
+	}
+}
