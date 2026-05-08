@@ -1,10 +1,13 @@
 package pipeline
 
 import (
+	"context"
+	"encoding/json"
 	"github.com/zol/mcp-ai-helper/internal/tasks"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/zol/mcp-ai-helper/internal/config"
@@ -220,5 +223,62 @@ func TestRunPipelineUpdatesCurrentTaskStatus(t *testing.T) {
 	}
 	if got.Status != "done" {
 		t.Fatalf("status = %q, want done", got.Status)
+	}
+}
+
+func TestRunMarshalJSONCompactsSuccessfulOutputByDefault(t *testing.T) {
+	repoPath := t.TempDir()
+	runner := NewRunner(testConfig(repoPath), nil)
+	result, err := runner.Run(context.Background(), Request{RepoPath: repoPath, Command: "printf 'large output should not be returned'"})
+	if err != nil {
+		t.Fatalf("run pipeline: %v", err)
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("marshal result: %v", err)
+	}
+	text := string(encoded)
+	if !strings.Contains(text, "\"compact\":true") || !strings.Contains(text, "output: collapsed") {
+		t.Fatalf("compact json missing markers: %s", text)
+	}
+	for _, forbidden := range []string{"large output should not be returned", "stdout_tail", "stderr_tail", "evidence_lines", "command\":"} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("compact json leaked %q: %s", forbidden, text)
+		}
+	}
+}
+
+func TestRunMarshalJSONKeepsFailureDetails(t *testing.T) {
+	repoPath := t.TempDir()
+	runner := NewRunner(testConfig(repoPath), nil)
+	result, err := runner.Run(context.Background(), Request{RepoPath: repoPath, Command: "sh -c 'echo fail >&2; exit 7'"})
+	if err != nil {
+		t.Fatalf("run pipeline: %v", err)
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("marshal result: %v", err)
+	}
+	text := string(encoded)
+	if !strings.Contains(text, "fail") || !strings.Contains(text, "\"command\"") {
+		t.Fatalf("failure json should retain details: %s", text)
+	}
+}
+
+func TestRunMarshalJSONKeepsDetailsWhenCompactDisabled(t *testing.T) {
+	repoPath := t.TempDir()
+	runner := NewRunner(testConfig(repoPath), nil)
+	compact := false
+	result, err := runner.Run(context.Background(), Request{RepoPath: repoPath, Command: "printf 'needed detail'", CompactOutput: &compact})
+	if err != nil {
+		t.Fatalf("run pipeline: %v", err)
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("marshal result: %v", err)
+	}
+	text := string(encoded)
+	if !strings.Contains(text, "needed detail") || !strings.Contains(text, "\"command\"") {
+		t.Fatalf("non-compact json should retain details: %s", text)
 	}
 }

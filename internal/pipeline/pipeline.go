@@ -40,16 +40,38 @@ type Request struct {
 	Analyze        bool   `json:"analyze"`
 	Task           string `json:"task"`
 	ModelID        string `json:"model_id"`
+	CompactOutput  *bool  `json:"compact_output,omitempty"`
 }
 
 // Result is the command-analysis pipeline output.
 type Result struct {
 	Status     string              `json:"status"`
+	Compact    bool                `json:"compact"`
 	Command    command.Result      `json:"command"`
 	Summary    evidence.Summary    `json:"summary"`
 	Analysis   string              `json:"analysis,omitempty"`
 	Validation evidence.Validation `json:"validation"`
 	Handoff    string              `json:"handoff"`
+}
+
+func (r Result) MarshalJSON() ([]byte, error) {
+	if r.Compact && r.Status == "ok" && r.Command.ExitCode == 0 {
+		return json.Marshal(struct {
+			Status    string `json:"status"`
+			CommandID string `json:"command_id,omitempty"`
+			ExitCode  int    `json:"exit_code"`
+			Compact   bool   `json:"compact"`
+			Handoff   string `json:"handoff"`
+		}{
+			Status:    r.Status,
+			CommandID: r.Command.CommandID,
+			ExitCode:  r.Command.ExitCode,
+			Compact:   true,
+			Handoff:   r.Handoff,
+		})
+	}
+	type full Result
+	return json.Marshal(full(r))
 }
 
 // WorkflowRequest describes a complete repository workflow request.
@@ -455,8 +477,12 @@ func (r *Runner) Run(ctx context.Context, req Request) (result Result, err error
 	if !validation.Valid {
 		status = "INSUFFICIENT_DATA"
 	}
+	compact := req.CompactOutput == nil || *req.CompactOutput
 	handoff := composeHandoff(status, cmdResult, summary, analysis, validation, r.cfg.PipelinePolicy.MaxReturnChars)
-	return Result{Status: status, Command: cmdResult, Summary: summary, Analysis: analysis, Validation: validation, Handoff: handoff}, nil
+	if compact && status == "ok" && cmdResult.ExitCode == 0 {
+		handoff = compactHandoff(status, cmdResult)
+	}
+	return Result{Status: status, Compact: compact, Command: cmdResult, Summary: summary, Analysis: analysis, Validation: validation, Handoff: handoff}, nil
 }
 
 func deterministicAnalysis(_ string, result command.Result) string {
@@ -485,6 +511,10 @@ func buildAnalysisPrompt(task string, result command.Result, summary evidence.Su
 	}
 	b.WriteString("\nReturn concise analysis. Cite evidence ids like [E1]. If evidence is insufficient, return INSUFFICIENT_DATA.")
 	return b.String()
+}
+
+func compactHandoff(status string, result command.Result) string {
+	return fmt.Sprintf("status: %s\ncommand_id: %s\nexit_code: %d\noutput: collapsed; use filter_command_history with command_id for details", status, result.CommandID, result.ExitCode)
 }
 
 func composeHandoff(status string, result command.Result, summary evidence.Summary, analysis string, validation evidence.Validation, maxChars int) string {

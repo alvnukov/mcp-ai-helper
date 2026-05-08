@@ -52,6 +52,8 @@ On discovery, clients should read `assistant_guidance`, the `mcp-ai-helper://gui
 
 Models can configure the helper without a restart: call `config_schema` to understand every field, `config_read` to inspect the sanitized active config, `config_replace` to validate and atomically write a complete YAML config, and `config_reload` after external edits. `config_replace` reloads runtime clients by default. Tool visibility still changes on process restart because MCP clients discover tools at session startup.
 
+`run_pipeline` collapses successful command output by default: callers get only `status`, `command_id`, `exit_code`, and a short handoff. Set `compact_output=false` or use `filter_command_history` with `command_id` when details are needed. Failed commands keep relevant error details.
+
 `run_workflow` is the preferred tool for code work. The caller sends the whole task in one request: guarded text edits, checks, and optional commit. The workflow stops before commit on edit conflicts or failed checks.
 
 `run_workflow` also accepts a stable `steps` DSL so future workflow improvements do not require changing the MCP schema. Supported step tools today: `guarded_replace`, `run_command`, `git_commit_owned`. Supported deterministic conditions today: `always`, `changed_files_count > 0`, and `steps.<id>.status == <status>`.

@@ -145,6 +145,7 @@ func New(cfg *config.Config) *server.MCPServer {
 			basemcp.WithString("repo_path", basemcp.Required()),
 			basemcp.WithString("cwd", basemcp.Description("Optional repo-relative working directory.")),
 			basemcp.WithString("task"),
+			basemcp.WithBoolean("compact_output", basemcp.Description("Collapse successful command output. Defaults to true.")),
 		), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
 			var args pipeline.Request
 			if err := bind(req, &args); err != nil {
