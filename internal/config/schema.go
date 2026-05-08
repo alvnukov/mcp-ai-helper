@@ -20,6 +20,7 @@ func Schema() map[string]any {
 			"Use config_read to inspect the active sanitized config.",
 			"Use config_replace with a complete YAML document; the helper validates it before replacing the file.",
 			"Use config_reload after an external config edit; config_replace reloads by default.",
+			"Use language_profiles before code edits so format/test/lint commands are selected by language instead of ad hoc shell habits.",
 		},
 		"fields": []FieldDoc{
 			{Path: "assistant_guidance", Type: "string", Default: "built-in workflow-first guidance", Description: "Instructions returned to calling models. Keep it short, mandatory, and focused on one-pipeline operation, task hygiene, output filtering, and safety."},
@@ -30,6 +31,7 @@ func Schema() map[string]any {
 			{Path: "layers.models.enabled", Type: "bool", Default: "true", Description: "Enables model listing and remote model query tools."},
 			{Path: "layers.commands.enabled", Type: "bool", Default: "true", Description: "Enables local command execution, output filtering, and command history."},
 			{Path: "layers.workflows.enabled", Type: "bool", Default: "true", Description: "Enables multi-step repo workflows with guarded edits, checks, task updates, and owned-file commits."},
+			{Path: "language_profiles", Type: "built-in registry", Default: "go", Description: "Language-aware guardrails used by callers before code edits: file matching, formatter, targeted tests, broad tests, static checks, and common safety rules."},
 			{Path: "providers.<id>.type", Type: "string", Default: "generic", Description: "Provider adapter type. Currently only generic OpenAI-compatible providers are supported.", Examples: []string{"generic"}},
 			{Path: "providers.<id>.base_url", Type: "string", Description: "OpenAI-compatible base URL used to derive /chat/completions when completions_url is not set."},
 			{Path: "providers.<id>.completions_url", Type: "string", Description: "Explicit chat completions endpoint. Use when the provider does not follow the standard base_url layout."},

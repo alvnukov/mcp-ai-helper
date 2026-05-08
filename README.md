@@ -25,6 +25,8 @@ On first run the server creates `~/.mcp-ai-helper/config.yaml` with safe local-c
 - `config_read`
 - `config_replace`
 - `config_reload`
+- `language_profiles`
+- `language_detect`
 - `list_models`
 - `assistant_guidance`
 - `server_setup_guidance`
@@ -51,6 +53,8 @@ The server is intentionally policy-first. Local tools require `repo_path` from t
 On discovery, clients should read `assistant_guidance`, the `mcp-ai-helper://guidance` resource, or the `mcp-ai-helper-guidance` prompt. They publish the workflow-first operating rules from `~/.mcp-ai-helper/config.yaml`. Use `server_setup_guidance` to learn how to configure the server.
 
 Models can configure the helper without a restart: call `config_schema` to understand every field, `config_read` to inspect the sanitized active config, `config_replace` to validate and atomically write a complete YAML config, and `config_reload` after external edits. `config_replace` reloads runtime clients by default. Tool visibility still changes on process restart because MCP clients discover tools at session startup.
+
+Language profiles give callers deterministic guardrails before code edits. The built-in Go profile tells the model to run `gofmt` only on `.go` files, prefer targeted `go test <affected_packages>` before `go test ./...`, run `go vet ./...`, and treat missing imports or undefined symbols as compile blockers. Use `language_detect` with owned files when constructing a workflow.
 
 `run_pipeline` collapses successful command output by default: callers get only `status`, `command_id`, `exit_code`, and a short handoff. Set `compact_output=false` or use `filter_command_history` with `command_id` when details are needed. Failed commands keep relevant error details.
 

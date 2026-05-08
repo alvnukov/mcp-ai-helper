@@ -230,3 +230,15 @@ func TestWriteValidatedConfigWritesValidConfig(t *testing.T) {
 		t.Fatalf("written config missing guidance: %s", string(data))
 	}
 }
+
+func TestLanguageToolsRegistered(t *testing.T) {
+	t.Parallel()
+	cfg := &config.Config{AssistantGuidance: config.DefaultAssistantGuidance()}
+	srv := New(cfg)
+	tools := srv.ListTools()
+	for _, name := range []string{"language_profiles", "language_detect"} {
+		if _, ok := tools[name]; !ok {
+			t.Fatalf("%s tool is not registered", name)
+		}
+	}
+}
