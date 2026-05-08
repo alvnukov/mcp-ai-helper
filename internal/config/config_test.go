@@ -131,3 +131,28 @@ func TestDefaultConfigPathUsesHomeHelperDir(t *testing.T) {
 		t.Fatalf("default config path should be absolute: %q", path)
 	}
 }
+
+func TestSchemaDocumentsModelDrivenConfig(t *testing.T) {
+	schema := Schema()
+	fields, ok := schema["fields"].([]FieldDoc)
+	if !ok || len(fields) == 0 {
+		t.Fatalf("schema fields missing: %#v", schema["fields"])
+	}
+	want := map[string]bool{
+		"assistant_guidance":                            false,
+		"providers.<id>.api_key_env":                    false,
+		"models.<id>.system_prompt":                     false,
+		"command_policy.log_dir":                        false,
+		"pipeline_policy.require_evidence_for_analysis": false,
+	}
+	for _, field := range fields {
+		if _, ok := want[field.Path]; ok && field.Description != "" {
+			want[field.Path] = true
+		}
+	}
+	for path, seen := range want {
+		if !seen {
+			t.Fatalf("schema does not document %s", path)
+		}
+	}
+}

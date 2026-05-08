@@ -2,7 +2,10 @@ package mcp
 
 import (
 	"encoding/json"
+	"errors"
 	"github.com/zol/mcp-ai-helper/internal/project"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -182,5 +185,48 @@ func TestNewHidesDisabledIssuesLayer(t *testing.T) {
 	}
 	if _, ok := tools["task_add"]; !ok {
 		t.Fatal("task_add should stay visible when only issues layer is disabled")
+	}
+}
+
+func TestConfigToolsRegistered(t *testing.T) {
+	t.Parallel()
+	cfg := &config.Config{AssistantGuidance: config.DefaultAssistantGuidance()}
+	srv := New(cfg)
+	tools := srv.ListTools()
+	for _, name := range []string{"config_schema", "config_read", "config_replace", "config_reload"} {
+		if _, ok := tools[name]; !ok {
+			t.Fatalf("%s tool is not registered", name)
+		}
+	}
+}
+
+func TestWriteValidatedConfigRejectsInvalidConfig(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	_, err := writeValidatedConfig(path, "providers:\n  bad:\n    type: nope\n")
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if _, statErr := os.Stat(path); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("invalid config should not be written, stat err = %v", statErr)
+	}
+}
+
+func TestWriteValidatedConfigWritesValidConfig(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	loaded, err := writeValidatedConfig(path, "assistant_guidance: test guidance\nproviders: {}\nmodels: {}\nrouting: {}\n")
+	if err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if loaded.SourcePath != path {
+		t.Fatalf("source path = %q, want %q", loaded.SourcePath, path)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "test guidance") {
+		t.Fatalf("written config missing guidance: %s", string(data))
 	}
 }

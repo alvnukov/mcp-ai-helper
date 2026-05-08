@@ -38,6 +38,26 @@ func New(cfg *config.Config) *server.MCPServer {
 		projectStore, _ = project.NewStore(".mcp-ai-helper")
 	}
 	taskStore := tasks.NewStore(projectStore)
+	reloadConfig := func(path string) (*config.Config, error) {
+		if strings.TrimSpace(path) == "" {
+			path = cfg.SourcePath
+		}
+		next, err := config.Load(path)
+		if err != nil {
+			return nil, err
+		}
+		*cfg = *next
+		chat = provider.NewOpenAICompatibleClient(cfg.Providers)
+		commands = command.NewRunner(cfg.CommandPolicy)
+		pipelines = pipeline.NewRunner(cfg, chat)
+		projectStore, err = project.NewStore(cfg.CommandPolicy.LogDir)
+		if err != nil {
+			projectStore, _ = project.NewStore(".mcp-ai-helper")
+		}
+		taskStore = tasks.NewStore(projectStore)
+		return cfg, nil
+	}
+	registerConfigTools(srv, cfg, reloadConfig)
 
 	if cfg.LayerEnabled("models") {
 		registerGuidance(srv, cfg)

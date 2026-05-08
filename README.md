@@ -21,6 +21,10 @@ On first run the server creates `~/.mcp-ai-helper/config.yaml` with safe local-c
 
 ## MCP tools
 
+- `config_schema`
+- `config_read`
+- `config_replace`
+- `config_reload`
 - `list_models`
 - `assistant_guidance`
 - `server_setup_guidance`
@@ -45,6 +49,8 @@ On first run the server creates `~/.mcp-ai-helper/config.yaml` with safe local-c
 The server is intentionally policy-first. Local tools require `repo_path` from the caller; command `cwd` and file `path` are interpreted as repo-relative where applicable. It refuses unsafe command working directories, hash-mismatched file edits, repo path escapes, and broad git staging.
 
 On discovery, clients should read `assistant_guidance`, the `mcp-ai-helper://guidance` resource, or the `mcp-ai-helper-guidance` prompt. They publish the workflow-first operating rules from `~/.mcp-ai-helper/config.yaml`. Use `server_setup_guidance` to learn how to configure the server.
+
+Models can configure the helper without a restart: call `config_schema` to understand every field, `config_read` to inspect the sanitized active config, `config_replace` to validate and atomically write a complete YAML config, and `config_reload` after external edits. `config_replace` reloads runtime clients by default. Tool visibility still changes on process restart because MCP clients discover tools at session startup.
 
 `run_workflow` is the preferred tool for code work. The caller sends the whole task in one request: guarded text edits, checks, and optional commit. The workflow stops before commit on edit conflicts or failed checks.
 
