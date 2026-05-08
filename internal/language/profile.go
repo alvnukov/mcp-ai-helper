@@ -40,7 +40,7 @@ func DefaultRegistry() Registry {
 		StaticChecks:        []string{"go vet ./...", "golangci-lint run ./... when installed"},
 		ImportCheck:         true,
 		Guardrails: []string{
-			"Run gofmt only on .go files, never on README or YAML files.",
+			"Run gofmt only on files whose extension is exactly .go.",
 			"Run targeted go test for affected packages before broad go test ./... .",
 			"Treat missing imports, undefined symbols, and package compile failures as compile blockers, not test failures.",
 			"Use guarded symbol/range edits for Go source; do not rely on blind string replacement when symbols can be resolved first.",

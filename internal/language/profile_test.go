@@ -10,7 +10,7 @@ func TestDefaultRegistryIncludesGo(t *testing.T) {
 	if !profile.ImportCheck {
 		t.Fatal("go profile should require import checks")
 	}
-	want := "Run gofmt only on .go files, never on README or YAML files."
+	want := "Run gofmt only on files whose extension is exactly .go."
 	found := false
 	for _, guardrail := range profile.Guardrails {
 		if guardrail == want {
