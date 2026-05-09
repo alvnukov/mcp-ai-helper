@@ -143,6 +143,63 @@ func TestRunWorkflowStepsTwoEditsSameFile(t *testing.T) {
 	}
 }
 
+func TestRunWorkflowStepsParallelNoDeps(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"a.txt", "b.txt"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("old\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runner := NewRunner(testConfig(dir), nil)
+	result, err := runner.RunWorkflow(t.Context(), WorkflowRequest{
+		RepoPath: dir,
+		Steps: []WorkflowStep{
+			{ID: "edit-a", Tool: "guarded_replace", Args: map[string]any{"path": "a.txt", "old": "old", "new": "new-a"}},
+			{ID: "edit-b", Tool: "guarded_replace", Args: map[string]any{"path": "b.txt", "old": "old", "new": "new-b"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "ok" {
+		t.Fatalf("status = %q, reason = %q", result.Status, result.Reason)
+	}
+	if len(result.StepResults) != 2 || result.StepResults[0].Status != "ok" || result.StepResults[1].Status != "ok" {
+		t.Fatalf("step results = %#v", result.StepResults)
+	}
+}
+
+func TestRunWorkflowStepsExplicitDependsOn(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("A B\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runner := NewRunner(testConfig(dir), nil)
+	result, err := runner.RunWorkflow(t.Context(), WorkflowRequest{
+		RepoPath: dir,
+		Steps: []WorkflowStep{
+			{ID: "step2", Tool: "guarded_replace", DependsOn: []string{"step1"}, Args: map[string]any{"path": "f.txt", "old": "B", "new": "C"}},
+			{ID: "step1", Tool: "guarded_replace", Args: map[string]any{"path": "f.txt", "old": "A", "new": "X"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "ok" {
+		t.Fatalf("status = %q, reason = %q", result.Status, result.Reason)
+	}
+	if len(result.StepResults) != 2 || result.StepResults[0].Status != "ok" || result.StepResults[1].Status != "ok" {
+		t.Fatalf("step results = %#v", result.StepResults)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "f.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "X C\n" {
+		t.Fatalf("file = %q, want X C", string(data))
+	}
+}
+
 func TestRunWorkflowStepsTaskBatchUpsert(t *testing.T) {
 	dir := t.TempDir()
 	runner := NewRunner(testConfig(dir), nil)

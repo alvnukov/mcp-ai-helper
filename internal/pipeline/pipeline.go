@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/zol/mcp-ai-helper/internal/command"
 	"github.com/zol/mcp-ai-helper/internal/config"
@@ -91,6 +92,7 @@ type WorkflowRequest struct {
 type WorkflowStep struct {
 	ID        string         `json:"id"`
 	Tool      string         `json:"tool"`
+	DependsOn []string       `json:"depends_on,omitempty"`
 	If        string         `json:"if"`
 	OnFailure string         `json:"on_failure"`
 	Args      map[string]any `json:"args"`
@@ -236,43 +238,247 @@ func (r *Runner) runWorkflowSteps(ctx context.Context, req WorkflowRequest) (Wor
 	stepResults := map[string]WorkflowStepResult{}
 	changedSet := map[string]struct{}{}
 	fileHashes := map[string]string{}
-	for _, step := range req.Steps {
-		if !evalStepCondition(step.If, result, stepResults) {
-			stepResult := WorkflowStepResult{ID: step.ID, Tool: step.Tool, Status: "skipped", Reason: "condition is false"}
-			result.StepResults = append(result.StepResults, stepResult)
-			if step.ID != "" {
-				stepResults[step.ID] = stepResult
+
+	waves := buildStepWaves(req.Steps)
+
+	var stateMu sync.Mutex
+	fileLocks := newFileLockSet()
+
+	for _, wave := range waves {
+		var wg sync.WaitGroup
+
+		for i := range wave {
+			s := &wave[i]
+			wg.Add(1)
+			go func(step *WorkflowStep) {
+				defer wg.Done()
+
+				stateMu.Lock()
+				if !evalStepCondition(step.If, result, stepResults) {
+					sr := WorkflowStepResult{ID: step.ID, Tool: step.Tool, Status: "skipped", Reason: "condition is false"}
+					result.StepResults = append(result.StepResults, sr)
+					if step.ID != "" {
+						stepResults[step.ID] = sr
+					}
+					stateMu.Unlock()
+					return
+				}
+				paths := stepFilePaths(step)
+				stateMu.Unlock()
+
+				fileLocks.lock(paths)
+				sr, execErr := r.executeWorkflowStep(ctx, req.RepoPath, *step, changedSet, fileHashes)
+				fileLocks.unlock(paths)
+
+				if execErr != nil {
+					sr = WorkflowStepResult{ID: step.ID, Tool: step.Tool, Status: "failed", Reason: execErr.Error()}
+				}
+
+				stateMu.Lock()
+				result.StepResults = append(result.StepResults, sr)
+				if step.ID != "" {
+					stepResults[step.ID] = sr
+				}
+				if editResult, ok := sr.Output.(fileops.ReplaceResult); ok {
+					result.EditResults = append(result.EditResults, editResult)
+				}
+				if checkResult, ok := sr.Output.(command.Result); ok {
+					result.CheckResults = append(result.CheckResults, checkResult)
+				}
+				if commitResult, ok := sr.Output.(gitops.CommitResult); ok {
+					result.CommitResult = &commitResult
+				}
+				result.ChangedFiles = sortedKeys(changedSet)
+				if sr.Status != "ok" && sr.Status != "skipped" && step.OnFailure != "continue" && result.Status == "ok" {
+					result.Status = sr.Status
+					result.Reason = sr.Reason
+				}
+				stateMu.Unlock()
+			}(s)
+		}
+		wg.Wait()
+
+		if result.Status != "ok" {
+			break
+		}
+	}
+
+	result.ChangedFiles = sortedKeys(changedSet)
+	return result, nil
+}
+
+// buildStepWaves topologically sorts steps into parallel-execution waves.
+func buildStepWaves(steps []WorkflowStep) [][]WorkflowStep {
+	if len(steps) == 0 {
+		return nil
+	}
+	idx := map[string]int{}
+	for i, s := range steps {
+		if s.ID != "" {
+			idx[s.ID] = i
+		}
+	}
+	deps := make([][]int, len(steps))
+	reverse := make([][]int, len(steps))
+	// Gather all guarded_replace step indices for implicit changedSet dependencies.
+	var editIndices []int
+	for i, s := range steps {
+		if s.Tool == "guarded_replace" {
+			editIndices = append(editIndices, i)
+		}
+	}
+	for i, s := range steps {
+		for _, depID := range s.DependsOn {
+			if j, ok := idx[depID]; ok {
+				deps[i] = append(deps[i], j)
+				reverse[j] = append(reverse[j], i)
 			}
-			continue
 		}
-		stepResult, err := r.executeWorkflowStep(ctx, req.RepoPath, step, changedSet, fileHashes)
-		if err != nil {
-			return WorkflowResult{}, err
+		if depID := parseStepsCondition(s.If); depID != "" {
+			if j, ok := idx[depID]; ok {
+				deps[i] = append(deps[i], j)
+				reverse[j] = append(reverse[j], i)
+			}
 		}
-		result.StepResults = append(result.StepResults, stepResult)
-		if step.ID != "" {
-			stepResults[step.ID] = stepResult
+		if s.Tool == "guarded_replace" {
+			p := stepFilePath(&s)
+			for j := i - 1; j >= 0 && p != ""; j-- {
+				if steps[j].Tool == "guarded_replace" && stepFilePath(&steps[j]) == p {
+					deps[i] = append(deps[i], j)
+					reverse[j] = append(reverse[j], i)
+					break
+				}
+			}
 		}
-		if editResult, ok := stepResult.Output.(fileops.ReplaceResult); ok {
-			result.EditResults = append(result.EditResults, editResult)
-		}
-		if checkResult, ok := stepResult.Output.(command.Result); ok {
-			result.CheckResults = append(result.CheckResults, checkResult)
-		}
-		if commitResult, ok := stepResult.Output.(gitops.CommitResult); ok {
-			result.CommitResult = &commitResult
-		}
-		result.ChangedFiles = sortedKeys(changedSet)
-		if stepResult.Status != "ok" && stepResult.Status != "skipped" {
-			result.Status = stepResult.Status
-			result.Reason = stepResult.Reason
-			if step.OnFailure != "continue" {
-				break
+		// Steps that read changedSet implicitly depend on all guarded_replace steps.
+		if readsChangedSet(&s) {
+			for _, j := range editIndices {
+				if j != i {
+					deps[i] = append(deps[i], j)
+					reverse[j] = append(reverse[j], i)
+				}
 			}
 		}
 	}
-	result.ChangedFiles = sortedKeys(changedSet)
-	return result, nil
+	inDegree := make([]int, len(steps))
+	for i := range steps {
+		inDegree[i] = len(deps[i])
+	}
+	var waves [][]WorkflowStep
+	processed := 0
+	for processed < len(steps) {
+		var wave []WorkflowStep
+		for i := range steps {
+			if inDegree[i] == 0 {
+				wave = append(wave, steps[i])
+				inDegree[i] = -1
+				processed++
+			}
+		}
+		if len(wave) == 0 {
+			return [][]WorkflowStep{steps}
+		}
+		for _, s := range wave {
+			if j, ok := idx[s.ID]; ok {
+				for _, k := range reverse[j] {
+					if inDegree[k] > 0 {
+						inDegree[k]--
+					}
+				}
+			}
+		}
+		waves = append(waves, wave)
+	}
+	return waves
+}
+
+func parseStepsCondition(cond string) string {
+	if !strings.HasPrefix(cond, "steps.") {
+		return ""
+	}
+	parts := strings.SplitN(cond, " ", 3)
+	if len(parts) != 3 || parts[1] != "==" {
+		return ""
+	}
+	path := strings.SplitN(parts[0], ".", 3)
+	if len(path) != 3 || path[0] != "steps" || path[2] != "status" {
+		return ""
+	}
+	return path[1]
+}
+
+func stepFilePath(s *WorkflowStep) string {
+	if s.Tool == "guarded_replace" {
+		if p, ok := s.Args["path"].(string); ok {
+			return p
+		}
+	}
+	return ""
+}
+
+func stepFilePaths(s *WorkflowStep) []string {
+	if p := stepFilePath(s); p != "" {
+		return []string{p}
+	}
+	if s.Tool == "git_commit_owned" {
+		if files, ok := s.Args["files"].([]any); ok {
+			paths := make([]string, 0, len(files))
+			for _, f := range files {
+				if fs, ok := f.(string); ok {
+					paths = append(paths, fs)
+				}
+			}
+			return paths
+		}
+	}
+	return nil
+}
+
+func readsChangedSet(s *WorkflowStep) bool {
+	if s.Tool == "git_commit_owned" {
+		return true
+	}
+	return strings.Contains(s.If, "changed_files_count")
+}
+
+type fileLockSet struct {
+	mu    sync.Mutex
+	locks map[string]*sync.Mutex
+}
+
+func newFileLockSet() *fileLockSet {
+	return &fileLockSet{locks: map[string]*sync.Mutex{}}
+}
+
+func (s *fileLockSet) lock(paths []string) {
+	if len(paths) == 0 {
+		return
+	}
+	sorted := make([]string, len(paths))
+	copy(sorted, paths)
+	sort.Strings(sorted)
+	s.mu.Lock()
+	for _, p := range sorted {
+		l, ok := s.locks[p]
+		if !ok {
+			l = &sync.Mutex{}
+			s.locks[p] = l
+		}
+		s.mu.Unlock()
+		l.Lock()
+		s.mu.Lock()
+	}
+	s.mu.Unlock()
+}
+
+func (s *fileLockSet) unlock(paths []string) {
+	s.mu.Lock()
+	for i := len(paths) - 1; i >= 0; i-- {
+		if l, ok := s.locks[paths[i]]; ok {
+			l.Unlock()
+		}
+	}
+	s.mu.Unlock()
 }
 
 func (r *Runner) executeWorkflowStep(ctx context.Context, repoPath string, step WorkflowStep, changedSet map[string]struct{}, fileHashes map[string]string) (WorkflowStepResult, error) {
