@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -73,9 +74,32 @@ func CommitOwned(ctx context.Context, req CommitRequest) (CommitResult, error) {
 		}
 	}
 
-	args := append([]string{"add", "--"}, owned...)
-	if _, err := runGit(ctx, repo, args...); err != nil {
+	trackedFiles, err := trackedOwnedFiles(ctx, repo, owned)
+	if err != nil {
 		return CommitResult{}, err
+	}
+	if len(trackedFiles) > 0 {
+		updateArgs := append([]string{"add", "-u", "--"}, trackedFiles...)
+		if _, err := runGit(ctx, repo, updateArgs...); err != nil {
+			return CommitResult{}, err
+		}
+	}
+	existingFiles := make([]string, 0, len(owned))
+	for _, file := range owned {
+		_, statErr := os.Stat(filepath.Join(repo, file))
+		if statErr == nil {
+			existingFiles = append(existingFiles, file)
+			continue
+		}
+		if !errors.Is(statErr, os.ErrNotExist) {
+			return CommitResult{}, statErr
+		}
+	}
+	if len(existingFiles) > 0 {
+		addArgs := append([]string{"add", "--"}, existingFiles...)
+		if _, err := runGit(ctx, repo, addArgs...); err != nil {
+			return CommitResult{}, err
+		}
 	}
 	staged, err := stagedFiles(ctx, repo)
 	if err != nil {
@@ -125,6 +149,15 @@ func stagedFiles(ctx context.Context, repo string) ([]string, error) {
 		return nil, err
 	}
 	return splitLines(diff), nil
+}
+
+func trackedOwnedFiles(ctx context.Context, repo string, owned []string) ([]string, error) {
+	args := append([]string{"ls-files", "--"}, owned...)
+	out, err := runGit(ctx, repo, args...)
+	if err != nil {
+		return nil, err
+	}
+	return splitLines(out), nil
 }
 
 func runGit(ctx context.Context, repo string, args ...string) (string, error) {
