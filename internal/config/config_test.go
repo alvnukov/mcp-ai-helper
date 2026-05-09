@@ -165,12 +165,24 @@ func TestSchemaDocumentsModelDrivenConfig(t *testing.T) {
 
 func TestGuidanceDocumentsLeanTaskRegistry(t *testing.T) {
 	guidance := DefaultAssistantGuidance()
-	if !strings.Contains(guidance, "Lean registry/exporter") || !strings.Contains(guidance, "not fallback storage") {
-		t.Fatalf("guidance does not document Lean task registry mode: %q", guidance)
+	for _, want := range []string{
+		"Lean registry/exporter",
+		"not fallback storage",
+		"Do not implement production task state by parsing or regex-mutating Lean registry source in Go",
+	} {
+		if !strings.Contains(guidance, want) {
+			t.Fatalf("guidance does not document Lean task registry mode %q: %q", want, guidance)
+		}
 	}
 	setup := SetupGuidance("")
-	if !strings.Contains(setup["tasks"], "Lean registry/exporter") || !strings.Contains(setup["tasks"], "not fallback storage") {
-		t.Fatalf("setup guidance does not document task storage mode: %#v", setup)
+	for _, want := range []string{
+		"Lean registry/exporter",
+		"not fallback storage",
+		"Do not implement production task state by parsing or regex-mutating Lean registry source in Go",
+	} {
+		if !strings.Contains(setup["tasks"], want) {
+			t.Fatalf("setup guidance does not document task storage mode %q: %#v", want, setup)
+		}
 	}
 }
 

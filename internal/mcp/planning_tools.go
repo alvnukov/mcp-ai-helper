@@ -119,6 +119,14 @@ func buildTaskPacket(task tasks.Task, currentModelLevel string) taskPacketResult
 		currentModelLevel = "unknown"
 	}
 	action := actionForLevel(level, currentModelLevel)
+	forbiddenShortcuts := []string{
+		"do not change unrelated roadmap or parent planning policy",
+		"do not mark design/research tasks done without strong-level review",
+		"do not weaken tests or checks to get a green result",
+	}
+	if hasAnyTag(task.Tags, "tasks", "lean-registry", "lake-server") {
+		forbiddenShortcuts = append(forbiddenShortcuts, leanRegistryGoSourceMutationBan())
+	}
 	packet := taskPacketResult{
 		TaskID:                 task.ID,
 		Action:                 action,
@@ -135,11 +143,7 @@ func buildTaskPacket(task tasks.Task, currentModelLevel string) taskPacketResult
 		ForbiddenFiles:         forbiddenFilesForTask(task),
 		KnownRisks:             risksForTask(task),
 		RequiredGates:          requiredGatesForTask(task),
-		ForbiddenShortcuts: []string{
-			"do not change unrelated roadmap or parent planning policy",
-			"do not mark design/research tasks done without strong-level review",
-			"do not weaken tests or checks to get a green result",
-		},
+		ForbiddenShortcuts:     forbiddenShortcuts,
 		ExpectedOutput: []string{
 			"changed files or explicit no-code result",
 			"minimal verification evidence",
@@ -256,12 +260,16 @@ func minimalContextForTask(task tasks.Task) []string {
 	return uniqueStrings(context)
 }
 
-func forbiddenFilesForTask(_ tasks.Task) []string {
-	return []string{
+func forbiddenFilesForTask(task tasks.Task) []string {
+	files := []string{
 		"legacy task projection files",
 		"unrelated roadmap or guidance files",
 		"MCPAIHelperProject/ActiveTasks.lean direct edits; use task_transition/task tools only",
 	}
+	if hasAnyTag(task.Tags, "tasks", "lean-registry", "lake-server") {
+		files = append(files, "Go production code that parses or regex-mutates MCPAIHelperProject/ActiveTasks.lean")
+	}
+	return files
 }
 
 func risksForTask(task tasks.Task) []string {
@@ -270,7 +278,7 @@ func risksForTask(task tasks.Task) []string {
 		risks = append(risks, "shared workflow semantics can affect unrelated repo tasks")
 	}
 	if hasAnyTag(task.Tags, "lean-registry", "tasks") {
-		risks = append(risks, "Lean registry mutation must validate with lake build")
+		risks = append(risks, "Lean registry mutation must validate with lake build", "Go-side Lean registry source parsing/mutation is not an allowed production fallback")
 	}
 	if hasAnyTag(task.Tags, "logs", "output", "filtering") {
 		risks = append(risks, "large command output must stay compact and evidence-linked")
@@ -286,6 +294,8 @@ func requiredGatesForTask(task tasks.Task) []string {
 	switch {
 	case hasAnyTag(task.Tags, "planning"):
 		gates = append(gates, "go test ./internal/mcp")
+	case hasAnyTag(task.Tags, "lean-registry", "lake-server", "tasks"):
+		gates = append(gates, "go test ./internal/mcp", "lake build")
 	case hasAnyTag(task.Tags, "workflow"):
 		gates = append(gates, "go test ./internal/pipeline ./internal/mcp")
 	case hasAnyTag(task.Tags, "fileops"):
@@ -302,6 +312,10 @@ func requiredGatesForTask(task tasks.Task) []string {
 		gates = append(gates, "targeted go test for affected packages")
 	}
 	return uniqueStrings(gates)
+}
+
+func leanRegistryGoSourceMutationBan() string {
+	return "do not parse or regex-mutate Lean registry source in Go production paths; use Lean-owned lake serve/exporter/task tools"
 }
 
 func ownedFilesForTask(task tasks.Task) []string {
