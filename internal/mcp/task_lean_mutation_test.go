@@ -19,8 +19,11 @@ func TestLeanSetStatusUpdatesRegistryAndValidates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("setTaskStatus returned error: %v", err)
 	}
-	if result.Source != "lean_registry" || result.Validation != "lake build" || result.Task.Status != "blocked" {
+	if result.Source != "lean_registry" || !strings.Contains(result.Validation, "transition validation") || result.Task.Status != "blocked" {
 		t.Fatalf("unexpected result: %+v", result)
+	}
+	if len(result.ChangedFiles) != 1 || result.ChangedFiles[0] != activeTasksLeanPath {
+		t.Fatalf("unexpected changed files: %#v", result.ChangedFiles)
 	}
 	task, _, err := readTask(context.Background(), repo, "task-040", commandRunnerForRepo(repo), legacyStoreForTest(t))
 	if err != nil {
@@ -28,6 +31,14 @@ func TestLeanSetStatusUpdatesRegistryAndValidates(t *testing.T) {
 	}
 	if task.Status != "blocked" {
 		t.Fatalf("status = %q, want blocked", task.Status)
+	}
+}
+
+func TestLeanTransitionServerRejectsInvalidStatusWithTypedDiagnostic(t *testing.T) {
+	repo := copyLeanRepoFixture(t)
+	_, _, err := validateLeanTaskTransitionWithServer(context.Background(), repo, tasks.StatusRequest{RepoPath: repo, ID: "task-040", Status: "not-a-status"}, tasks.Task{})
+	if err == nil || !strings.Contains(err.Error(), "invalid_status") {
+		t.Fatalf("expected typed invalid_status rejection, got %v", err)
 	}
 }
 

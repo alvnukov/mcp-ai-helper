@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -19,9 +20,10 @@ import (
 const activeTasksLeanPath = "MCPAIHelperProject/ActiveTasks.lean"
 
 type leanMutationResult struct {
-	Task       tasks.Task `json:"task"`
-	Source     string     `json:"source"`
-	Validation string     `json:"validation"`
+	Task         tasks.Task `json:"task"`
+	Source       string     `json:"source"`
+	Validation   string     `json:"validation"`
+	ChangedFiles []string   `json:"changed_files,omitempty"`
 }
 
 type leanBatchMutationResult struct {
@@ -35,19 +37,34 @@ func setTaskStatus(ctx context.Context, req tasks.StatusRequest, commands *comma
 	if strings.TrimSpace(req.Status) == "" {
 		return leanMutationResult{}, errors.New("status is required")
 	}
+	var changedFiles []string
+	validationSummary := "lake serve task.transition"
 	task, err := mutateLeanActiveTasks(ctx, req.RepoPath, commands, func(state *leanActiveTasksState) (tasks.Task, error) {
 		return state.setStatus(req.ID, req.Status)
+	}, func(projected tasks.Task) error {
+		files, summary, err := validateLeanTaskTransitionWithServer(ctx, req.RepoPath, req, projected)
+		if err != nil {
+			return err
+		}
+		changedFiles = files
+		if strings.TrimSpace(summary) != "" {
+			validationSummary = summary
+		}
+		return nil
 	})
 	if err != nil {
 		return leanMutationResult{}, err
 	}
-	return leanMutationResult{Task: task, Source: "lean_registry", Validation: "lake build"}, nil
+	if len(changedFiles) == 0 {
+		changedFiles = []string{activeTasksLeanPath}
+	}
+	return leanMutationResult{Task: task, Source: "lean_registry", Validation: validationSummary + " + lake build", ChangedFiles: changedFiles}, nil
 }
 
 func upsertTask(ctx context.Context, req tasks.AddRequest, commands *command.Runner, _ *tasks.Store) (leanMutationResult, error) {
 	task, err := mutateLeanActiveTasks(ctx, req.RepoPath, commands, func(state *leanActiveTasksState) (tasks.Task, error) {
 		return state.upsert(req)
-	})
+	}, nil)
 	if err != nil {
 		return leanMutationResult{}, err
 	}
@@ -95,7 +112,7 @@ func batchUpsertTasks(ctx context.Context, req tasks.BatchUpsertRequest, command
 			}
 		}
 		return tasks.Task{}, nil
-	})
+	}, nil)
 	if err != nil {
 		return leanBatchMutationResult{}, err
 	}
@@ -107,14 +124,14 @@ func batchUpsertTasks(ctx context.Context, req tasks.BatchUpsertRequest, command
 func deleteTask(ctx context.Context, req tasks.DeleteRequest, commands *command.Runner, _ *tasks.Store) (leanMutationResult, error) {
 	task, err := mutateLeanActiveTasks(ctx, req.RepoPath, commands, func(state *leanActiveTasksState) (tasks.Task, error) {
 		return state.delete(req.ID)
-	})
+	}, nil)
 	if err != nil {
 		return leanMutationResult{}, err
 	}
 	return leanMutationResult{Task: task, Source: "lean_registry", Validation: "lake build"}, nil
 }
 
-func mutateLeanActiveTasks(ctx context.Context, repoPath string, commands *command.Runner, mutate func(*leanActiveTasksState) (tasks.Task, error)) (tasks.Task, error) {
+func mutateLeanActiveTasks(ctx context.Context, repoPath string, commands *command.Runner, mutate func(*leanActiveTasksState) (tasks.Task, error), validate func(tasks.Task) error) (tasks.Task, error) {
 	workspace, err := lake.ResolveWorkspace(repoPath)
 	if err != nil {
 		return tasks.Task{}, err
@@ -132,6 +149,11 @@ func mutateLeanActiveTasks(ctx context.Context, repoPath string, commands *comma
 	task, err := mutate(state)
 	if err != nil {
 		return tasks.Task{}, err
+	}
+	if validate != nil {
+		if err := validate(task); err != nil {
+			return tasks.Task{}, err
+		}
 	}
 	updated := []byte(state.text)
 	afterHash := sha256.Sum256(updated)
@@ -154,6 +176,115 @@ func mutateLeanActiveTasks(ctx context.Context, repoPath string, commands *comma
 		return tasks.Task{}, fmt.Errorf("validate Lean task registry: %s", diagnostic)
 	}
 	return withProjectionSource(task, "lean_registry"), nil
+}
+
+type leanRegistryDiagnostic struct {
+	Code     string `json:"code"`
+	Message  string `json:"message"`
+	Severity string `json:"severity"`
+	Field    string `json:"field,omitempty"`
+	TaskID   string `json:"task_id,omitempty"`
+}
+
+type leanRegistryValidation struct {
+	Checked bool   `json:"checked"`
+	Summary string `json:"summary"`
+}
+
+type leanRegistryEnvelope struct {
+	SchemaVersion int                      `json:"schema_version"`
+	OK            bool                     `json:"ok"`
+	Operation     string                   `json:"operation"`
+	Data          json.RawMessage          `json:"data"`
+	Diagnostics   []leanRegistryDiagnostic `json:"diagnostics"`
+	ChangedFiles  []string                 `json:"changed_files"`
+	Validation    leanRegistryValidation   `json:"validation"`
+}
+
+type leanTaskTransitionPayload struct {
+	Task leanTaskProjection `json:"task"`
+}
+
+func validateLeanTaskTransitionWithServer(ctx context.Context, repoPath string, req tasks.StatusRequest, projected tasks.Task) ([]string, string, error) {
+	result, err := lake.CallServerRPC(ctx, repoPath, lake.RPCRequest{
+		SourceFile:     "MCPAIHelperProject/TaskRegistryExport.lean",
+		Method:         "MCPAIHelperProject.TaskRegistryExport.taskTransition",
+		Params:         map[string]string{"id": req.ID, "to": req.Status},
+		TimeoutSeconds: 20,
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	if result.Blocker != "" {
+		return nil, "", fmt.Errorf("Lean task transition server blocker: %s", result.Blocker)
+	}
+	if len(result.Result) == 0 {
+		return nil, "", errors.New("Lean task transition server returned no result")
+	}
+	var envelope leanRegistryEnvelope
+	if err := json.Unmarshal(result.Result, &envelope); err != nil {
+		return nil, "", fmt.Errorf("decode Lean task transition envelope: %w", err)
+	}
+	if envelope.SchemaVersion != 1 {
+		return nil, "", fmt.Errorf("unsupported Lean task transition schema_version: %d", envelope.SchemaVersion)
+	}
+	if envelope.Operation != "task.transition" {
+		return nil, "", fmt.Errorf("unexpected Lean task transition operation: %q", envelope.Operation)
+	}
+	if !envelope.OK {
+		return nil, "", fmt.Errorf("Lean task transition rejected: %s", leanRegistryDiagnosticsMessage(envelope.Diagnostics))
+	}
+	if !envelope.Validation.Checked {
+		return nil, "", errors.New("Lean task transition envelope did not report checked validation")
+	}
+	if !changedFilesContainLeanPath(envelope.ChangedFiles, activeTasksLeanPath) {
+		return nil, "", fmt.Errorf("Lean task transition did not authorize changed file %s", activeTasksLeanPath)
+	}
+	var payload leanTaskTransitionPayload
+	if err := json.Unmarshal(envelope.Data, &payload); err != nil {
+		return nil, "", fmt.Errorf("decode Lean task transition payload: %w", err)
+	}
+	serverTask, err := payload.Task.toTask()
+	if err != nil {
+		return nil, "", err
+	}
+	if serverTask.ID != projected.ID || serverTask.Status != projected.Status {
+		return nil, "", fmt.Errorf("Lean task transition mismatch: server=%s/%s projected=%s/%s", serverTask.ID, serverTask.Status, projected.ID, projected.Status)
+	}
+	return append([]string(nil), envelope.ChangedFiles...), envelope.Validation.Summary, nil
+}
+
+func leanRegistryDiagnosticsMessage(diagnostics []leanRegistryDiagnostic) string {
+	if len(diagnostics) == 0 {
+		return "no diagnostics"
+	}
+	parts := make([]string, 0, len(diagnostics))
+	for _, diagnostic := range diagnostics {
+		code := strings.TrimSpace(diagnostic.Code)
+		message := strings.TrimSpace(diagnostic.Message)
+		switch {
+		case code != "" && message != "":
+			parts = append(parts, code+": "+message)
+		case message != "":
+			parts = append(parts, message)
+		case code != "":
+			parts = append(parts, code)
+		}
+	}
+	if len(parts) == 0 {
+		return "empty diagnostics"
+	}
+	return strings.Join(parts, "; ")
+}
+
+func changedFilesContainLeanPath(files []string, path string) bool {
+	want := filepath.ToSlash(filepath.Clean(path))
+	for _, file := range files {
+		if filepath.ToSlash(filepath.Clean(file)) == want {
+			return true
+		}
+	}
+	return false
 }
 
 type leanActiveTasksState struct {
