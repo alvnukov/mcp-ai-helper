@@ -60,15 +60,144 @@ Language profiles give callers deterministic guardrails before code edits. The b
 
 `run_pipeline` collapses successful command output by default: callers get only `status`, `command_id`, `exit_code`, and a short handoff. Set `compact_output=false` or use `filter_command_history` with `command_id` when details are needed. Failed commands keep relevant error details.
 
-`run_workflow` is the preferred tool for code work. The caller sends the whole task in one request: guarded text edits, checks, and optional commit. The workflow stops before commit on edit conflicts or failed checks.
+`run_workflow` is the preferred tool for code work. The caller sends the whole task in one request: guarded text edits, checks, task transitions, and optional commit. The workflow stops before commit on edit conflicts or failed checks.
 
-`run_workflow` also accepts a stable `steps` DSL so future workflow improvements do not require changing the MCP schema. Supported step tools today: `guarded_replace`, `command`, `task_batch_upsert`, `git_commit_owned`. Supported deterministic conditions today: `always`, `changed_files_count > 0`, and `steps.<id>.status == <status>`.
+`run_workflow` also accepts a stable `steps` DSL so future workflow improvements do not require changing the MCP schema. Supported step tools today include `guarded_replace`, `command`, `task_transition`, `task_batch_upsert`, and `git_commit_owned`. Supported deterministic conditions include `always`, command status or exit code checks such as `steps.check.status == ok`, output checks such as `steps.probe.output_contains text`, file state checks such as `file_exists path`, task status checks such as `tasks.task-024.status == todo`, and changed-file checks.
 
-Callers should use one long workflow when intermediate results are not needed by the calling model. A single workflow should include command execution, output filters, conditional branches, file edits, checks, and commit. Low-level tools are for bootstrapping and cases where a result must change the caller's next decision.
+Callers should use one long workflow when intermediate results are not needed by the calling model. A single workflow should include command execution, output filters, conditional branches, file edits, focused checks, task status transitions, and commit. Low-level tools are for bootstrapping and cases where a result must change the caller's next decision.
+
+### Canonical workflow examples
+
+Before an implementation workflow, gather only the context that can change the decision: `task_current`, targeted `read_file` ranges, `snapshot_file` for owned files, and narrow probes such as `rg` or a focused test. Then state the decision in the calling turn: selected task, owned files, forbidden files, acceptance criteria, and the gate that proves closure. Do not build an editing workflow while the contract or owned files are still unclear.
+
+Successful edit-check-task-done flow:
+
+```json
+{
+  "repo_path": "/repo",
+  "owned_files": ["internal/example.go"],
+  "steps": [
+    {
+      "id": "edit",
+      "tool": "guarded_replace",
+      "args": {
+        "path": "internal/example.go",
+        "expected_hash": "<snapshot_file hash>",
+        "old": "old unique span",
+        "new": "new unique span"
+      }
+    },
+    {
+      "id": "check",
+      "tool": "command",
+      "args": {
+        "command": "go test ./internal/example",
+        "cwd": "."
+      }
+    },
+    {
+      "id": "done",
+      "tool": "task_transition",
+      "if": "steps.check.status == ok",
+      "args": {
+        "task_ids": ["task-123"],
+        "from": "in_progress",
+        "to": "done"
+      }
+    },
+    {
+      "id": "commit",
+      "tool": "git_commit_owned",
+      "if": "steps.done.status == ok",
+      "args": {
+        "files": ["internal/example.go"],
+        "message": "Fix example task"
+      }
+    }
+  ]
+}
+```
+
+Failed-check path:
+
+```json
+{
+  "repo_path": "/repo",
+  "owned_files": ["internal/example.go"],
+  "steps": [
+    { "id": "edit", "tool": "guarded_replace", "args": { "path": "internal/example.go", "expected_hash": "<hash>", "old": "old", "new": "new" } },
+    { "id": "check", "tool": "command", "args": { "command": "go test ./internal/example", "cwd": "." } },
+    {
+      "id": "block",
+      "tool": "task_transition",
+      "if": "steps.check.status != ok",
+      "args": {
+        "task_ids": ["task-123"],
+        "from": "in_progress",
+        "to": "blocked"
+      }
+    }
+  ]
+}
+```
+
+The failed path intentionally has no commit step. A repo task is not `done` until the acceptance criteria, the relevant gate, and the required owned-files commit have all passed.
+
+Conditional probe with expected failure:
+
+```json
+{
+  "repo_path": "/repo",
+  "steps": [
+    {
+      "id": "probe",
+      "tool": "command",
+      "on_failure": "continue",
+      "args": {
+        "command": "rg -n \"featureFlag\" internal config | sed -n '1,40p'",
+        "cwd": "."
+      }
+    },
+    {
+      "id": "fallback-check",
+      "tool": "command",
+      "if": "steps.probe.exit_code != 0",
+      "args": {
+        "command": "go test ./internal/config",
+        "cwd": "."
+      }
+    }
+  ]
+}
+```
+
+Use `on_failure=continue` only for probes where a non-zero exit is part of the decision tree. Required gates should fail the workflow normally.
+
+Do not use `close_missing` in task batches unless the caller already has the complete authoritative task set for that repository. Do not set a task to `done` from a documentation-only review, partial green test, skipped check, missing commit, failed commit, or fallback read from stale task storage. For repo tasks with file changes, no owned-files commit means the task is not done. Keep command output compact: prefer focused tests and filtered probes over whole-project tests or raw logs unless the changed surface creates a concrete regression risk.
 
 Command output is retained under `~/.mcp-ai-helper/repos/<project>/logs` by default. Each execution gets a `command_id`, an index entry, and a bounded record file so callers can later use `filter_command_history` with a more precise filter instead of rerunning the command or flooding context. Retention is controlled by `command_policy.log_retention_days`, `log_max_records`, and `log_compress`.
 
-Project tasks are retained under `~/.mcp-ai-helper/repos/<project>/tasks` as Lean files with structured metadata in a Lean comment. Agents can add, list, read, delete, and request current tasks without scanning repo files or replaying previous logs.
+For this repository, project task state is canonical in the Lean/Lake registry under `MCPAIHelperProject/`. The task read and mutation tools require the Lean exporter and expose `source`/`projection_source` diagnostics. Legacy `tasks/*.lean` JSON-comment files are not fallback storage and must not be treated as active state.
+
+For local development in this repository, point MCP clients at the stable wrapper instead of the raw server:
+
+```sh
+bin/mcp-ai-helper-dev --repo /path/to/mcp-ai-helper --config ~/.mcp-ai-helper/config.yaml
+```
+
+The wrapper keeps stdio alive while it rebuilds or restarts the child server through `dev_rebuild_server` and `dev_restart_server`.
+
+## Lean-backed task workflow
+
+For this repository, the canonical task state is the Lean/Lake registry in `MCPAIHelperProject/`. A new contributor should verify the task layer before changing backlog state:
+
+```sh
+lake build
+lake exe task_registry_export --list-active
+lake exe task_registry_export --get task-042
+```
+
+MCP callers should inspect work with `task_current`/`task_get`, update work with `task_set_status`, `task_upsert`, `task_batch_upsert`, or `task_delete`, then rerun `lake build`. These tools use the Lean registry and expose `source`/`projection_source` diagnostics. Exporter or validation failures are blockers, not permission to read stale legacy task files.
 
 ## Production usage
 

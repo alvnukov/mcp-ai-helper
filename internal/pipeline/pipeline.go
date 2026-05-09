@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -22,10 +25,39 @@ import (
 
 // Runner executes analysis and edit workflows against a repository.
 type Runner struct {
-	cfg        *config.Config
-	commands   *command.Runner
-	chatClient provider.ChatClient
-	tasks      *tasks.Store
+	cfg         *config.Config
+	commands    *command.Runner
+	chatClient  provider.ChatClient
+	tasks       *tasks.Store
+	taskBackend TaskBackend
+}
+
+// TaskBackend is the task persistence surface used by workflow steps.
+type TaskBackend interface {
+	Get(ctx context.Context, repoPath string, id string) (tasks.Task, error)
+	List(ctx context.Context, repoPath string) ([]tasks.Task, error)
+	SetStatus(ctx context.Context, req tasks.StatusRequest) (tasks.Task, error)
+	BatchUpsert(ctx context.Context, req tasks.BatchUpsertRequest) (tasks.BatchUpsertResult, error)
+}
+
+type legacyTaskBackend struct {
+	store *tasks.Store
+}
+
+func (b legacyTaskBackend) Get(_ context.Context, repoPath string, id string) (tasks.Task, error) {
+	return b.store.Get(tasks.GetRequest{RepoPath: repoPath, ID: id})
+}
+
+func (b legacyTaskBackend) List(_ context.Context, repoPath string) ([]tasks.Task, error) {
+	return b.store.List(tasks.ListRequest{RepoPath: repoPath})
+}
+
+func (b legacyTaskBackend) SetStatus(_ context.Context, req tasks.StatusRequest) (tasks.Task, error) {
+	return b.store.SetStatus(req)
+}
+
+func (b legacyTaskBackend) BatchUpsert(_ context.Context, req tasks.BatchUpsertRequest) (tasks.BatchUpsertResult, error) {
+	return b.store.BatchUpsert(req)
 }
 
 // Request describes the legacy command-analysis pipeline input.
@@ -130,6 +162,13 @@ type WorkflowCommit struct {
 	Files   []string `json:"files"`
 }
 
+// WorkflowTaskTransition describes one guarded task status transition step.
+type WorkflowTaskTransition struct {
+	TaskIDs []string `json:"task_ids"`
+	From    string   `json:"from"`
+	To      string   `json:"to"`
+}
+
 // WorkflowResult is the complete workflow execution record.
 type WorkflowResult struct {
 	Status       string                  `json:"status"`
@@ -144,16 +183,25 @@ type WorkflowResult struct {
 
 // NewRunner creates a workflow runner.
 func NewRunner(cfg *config.Config, chatClient provider.ChatClient) *Runner {
+	return NewRunnerWithTaskBackend(cfg, chatClient, nil)
+}
+
+// NewRunnerWithTaskBackend creates a workflow runner with an explicit task backend.
+func NewRunnerWithTaskBackend(cfg *config.Config, chatClient provider.ChatClient, taskBackend TaskBackend) *Runner {
 	projectStore, err := project.NewStore(cfg.CommandPolicy.LogDir)
 	if err != nil {
 		projectStore, _ = project.NewStore(".mcp-ai-helper")
 	}
-	return &Runner{cfg: cfg, commands: command.NewRunner(cfg.CommandPolicy), chatClient: chatClient, tasks: tasks.NewStore(projectStore)}
+	store := tasks.NewStore(projectStore)
+	if taskBackend == nil {
+		taskBackend = legacyTaskBackend{store: store}
+	}
+	return &Runner{cfg: cfg, commands: command.NewRunner(cfg.CommandPolicy), chatClient: chatClient, tasks: store, taskBackend: taskBackend}
 }
 
 // RunWorkflow executes either the stable steps DSL or the legacy edit/check/commit workflow.
 func (r *Runner) RunWorkflow(ctx context.Context, req WorkflowRequest) (result WorkflowResult, err error) {
-	if err := r.updateTaskStatus(req.CurrentTaskID, taskStatusOrDefault(req.TaskOnStart, "in_progress"), req.RepoPath); err != nil {
+	if err := r.updateTaskStatus(ctx, req.CurrentTaskID, taskStatusOrDefault(req.TaskOnStart, "in_progress"), req.RepoPath); err != nil {
 		return WorkflowResult{}, err
 	}
 	defer func() {
@@ -161,7 +209,7 @@ func (r *Runner) RunWorkflow(ctx context.Context, req WorkflowRequest) (result W
 		if err != nil || result.Status != "ok" {
 			finalStatus = taskStatusOrDefault(req.TaskOnFailure, "blocked")
 		}
-		if updateErr := r.updateTaskStatus(req.CurrentTaskID, finalStatus, req.RepoPath); updateErr != nil && err == nil {
+		if updateErr := r.updateTaskStatus(ctx, req.CurrentTaskID, finalStatus, req.RepoPath); updateErr != nil && err == nil {
 			err = updateErr
 		}
 	}()
@@ -255,7 +303,7 @@ func (r *Runner) runWorkflowSteps(ctx context.Context, req WorkflowRequest) (Wor
 				defer wg.Done()
 
 				stateMu.Lock()
-				if !evalStepCondition(step.If, result, stepResults) {
+				if !r.evalStepCondition(req.RepoPath, step.If, result, stepResults) {
 					sr := WorkflowStepResult{ID: step.ID, Tool: step.Tool, Status: "skipped", Reason: "condition is false"}
 					result.StepResults = append(result.StepResults, sr)
 					if step.ID != "" {
@@ -395,18 +443,20 @@ func buildStepWaves(steps []WorkflowStep) [][]WorkflowStep {
 }
 
 func parseStepsCondition(cond string) string {
-	if !strings.HasPrefix(cond, "steps.") {
+	fields := strings.Fields(strings.TrimSpace(cond))
+	if len(fields) == 0 || !strings.HasPrefix(fields[0], "steps.") {
 		return ""
 	}
-	parts := strings.SplitN(cond, " ", 3)
-	if len(parts) != 3 || parts[1] != "==" {
+	path := strings.SplitN(strings.TrimPrefix(fields[0], "steps."), ".", 2)
+	if len(path) != 2 {
 		return ""
 	}
-	path := strings.SplitN(parts[0], ".", 3)
-	if len(path) != 3 || path[0] != "steps" || path[2] != "status" {
+	switch path[1] {
+	case "status", "exit_code", "output_contains":
+		return path[0]
+	default:
 		return ""
 	}
-	return path[1]
 }
 
 func stepFilePath(s *WorkflowStep) string {
@@ -562,16 +612,112 @@ func (r *Runner) executeWorkflowStep(ctx context.Context, repoPath string, step 
 			return WorkflowStepResult{}, err
 		}
 		args.RepoPath = repoPath
-		taskResult, err := r.tasks.BatchUpsert(args)
+		taskResult, err := r.taskBackend.BatchUpsert(ctx, args)
 		if err != nil {
 			return WorkflowStepResult{}, err
 		}
 		base.Output = taskResult
 		return base, nil
+	case "task_transition":
+		if !r.cfg.LayerEnabled("tasks") {
+			base.Status = "failed"
+			base.Reason = "task layer is disabled"
+			return base, nil
+		}
+		var args WorkflowTaskTransition
+		if err := bindStepArgs(step.Args, &args); err != nil {
+			return WorkflowStepResult{}, err
+		}
+		updated, err := r.transitionTasks(ctx, repoPath, args)
+		if err != nil {
+			base.Status = "failed"
+			base.Reason = err.Error()
+			return base, nil
+		}
+		base.Output = updated
+		return base, nil
 	default:
 		base.Status = "failed"
 		base.Reason = "unknown workflow tool: " + step.Tool
 		return base, nil
+	}
+}
+
+func (r *Runner) transitionTasks(ctx context.Context, repoPath string, req WorkflowTaskTransition) ([]tasks.Task, error) {
+	to := strings.TrimSpace(req.To)
+	if to == "" {
+		return nil, errors.New("to status is required")
+	}
+	if len(req.TaskIDs) == 0 {
+		return nil, errors.New("task_ids is required")
+	}
+	if err := r.validateTaskGraph(ctx, repoPath); err != nil {
+		return nil, err
+	}
+
+	current := make([]tasks.Task, 0, len(req.TaskIDs))
+	for _, id := range req.TaskIDs {
+		taskID := strings.TrimSpace(id)
+		if taskID == "" {
+			return nil, errors.New("task id is empty")
+		}
+		task, err := r.taskBackend.Get(ctx, repoPath, taskID)
+		if err != nil {
+			return nil, err
+		}
+		if req.From != "" && task.Status != req.From {
+			return nil, fmt.Errorf("task %s status is %q, want %q", task.ID, task.Status, req.From)
+		}
+		if strings.HasPrefix(task.ID, "goal-") && isClosingTaskStatus(to) {
+			return nil, fmt.Errorf("goal task %s cannot transition to %s", task.ID, to)
+		}
+		current = append(current, task)
+	}
+
+	updated := make([]tasks.Task, 0, len(current))
+	for _, task := range current {
+		item, err := r.taskBackend.SetStatus(ctx, tasks.StatusRequest{RepoPath: repoPath, ID: task.ID, Status: to})
+		if err != nil {
+			return nil, err
+		}
+		updated = append(updated, item)
+	}
+	return updated, nil
+}
+
+func (r *Runner) validateTaskGraph(ctx context.Context, repoPath string) error {
+	items, err := r.taskBackend.List(ctx, repoPath)
+	if err != nil {
+		return err
+	}
+	byID := make(map[string]tasks.Task, len(items))
+	for _, item := range items {
+		byID[item.ID] = item
+	}
+	for _, item := range items {
+		seen := map[string]struct{}{item.ID: {}}
+		parentID := strings.TrimSpace(item.ParentID)
+		for parentID != "" {
+			parent, ok := byID[parentID]
+			if !ok {
+				return fmt.Errorf("task %s parent %s does not exist", item.ID, parentID)
+			}
+			if _, ok := seen[parent.ID]; ok {
+				return fmt.Errorf("task parent cycle detected at %s", parent.ID)
+			}
+			seen[parent.ID] = struct{}{}
+			parentID = strings.TrimSpace(parent.ParentID)
+		}
+	}
+	return nil
+}
+
+func isClosingTaskStatus(status string) bool {
+	switch status {
+	case "done", "verified", "rejected", "superseded":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -583,26 +729,140 @@ func bindStepArgs(args map[string]any, target any) error {
 	return json.Unmarshal(data, target)
 }
 
-func evalStepCondition(condition string, result WorkflowResult, steps map[string]WorkflowStepResult) bool {
+func (r *Runner) evalStepCondition(repoPath string, condition string, result WorkflowResult, steps map[string]WorkflowStepResult) bool {
 	condition = strings.TrimSpace(condition)
 	if condition == "" || condition == "always" {
 		return true
 	}
-	if condition == "changed_files_count > 0" {
-		return len(result.ChangedFiles) > 0
+	fields := strings.Fields(condition)
+	if len(fields) == 0 {
+		return false
 	}
-	if strings.HasPrefix(condition, "steps.") {
-		parts := strings.Split(condition, " ")
-		if len(parts) != 3 || parts[1] != "==" {
-			return false
+	switch {
+	case fields[0] == "changed_files_count" && len(fields) == 3:
+		return compareInt(len(result.ChangedFiles), fields[1], fields[2])
+	case fields[0] == "file_exists" && len(fields) == 2:
+		return workflowFileExists(repoPath, fields[1])
+	case fields[0] == "file_missing" && len(fields) == 2:
+		return !workflowFileExists(repoPath, fields[1])
+	case strings.HasPrefix(fields[0], "steps."):
+		return evalStepResultCondition(fields, steps)
+	case strings.HasPrefix(fields[0], "tasks."):
+		return r.evalTaskCondition(repoPath, fields)
+	default:
+		return false
+	}
+}
+
+func evalStepResultCondition(fields []string, steps map[string]WorkflowStepResult) bool {
+	path := strings.SplitN(strings.TrimPrefix(fields[0], "steps."), ".", 2)
+	if len(path) != 2 {
+		return false
+	}
+	step, ok := steps[path[0]]
+	if !ok {
+		return false
+	}
+	switch path[1] {
+	case "status":
+		return len(fields) == 3 && fields[1] == "==" && step.Status == fields[2]
+	case "exit_code":
+		cmd, ok := step.Output.(command.Result)
+		return ok && len(fields) == 3 && compareInt(cmd.ExitCode, fields[1], fields[2])
+	case "output_contains":
+		cmd, ok := step.Output.(command.Result)
+		return ok && len(fields) >= 2 && commandOutputContains(cmd, strings.Join(fields[1:], " "))
+	default:
+		return false
+	}
+}
+
+func (r *Runner) evalTaskCondition(repoPath string, fields []string) bool {
+	if len(fields) != 3 || fields[1] != "==" || !r.cfg.LayerEnabled("tasks") {
+		return false
+	}
+	path := strings.SplitN(strings.TrimPrefix(fields[0], "tasks."), ".", 2)
+	if len(path) != 2 || path[1] != "status" {
+		return false
+	}
+	task, err := r.tasks.Get(tasks.GetRequest{RepoPath: repoPath, ID: path[0]})
+	return err == nil && task.Status == fields[2]
+}
+
+func workflowFileExists(repoPath string, relPath string) bool {
+	path, ok := workflowConditionPath(repoPath, relPath)
+	if !ok {
+		return false
+	}
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func workflowConditionPath(repoPath string, relPath string) (string, bool) {
+	if strings.TrimSpace(repoPath) == "" || strings.TrimSpace(relPath) == "" || filepath.IsAbs(relPath) {
+		return "", false
+	}
+	repoAbs, err := filepath.Abs(repoPath)
+	if err != nil {
+		return "", false
+	}
+	pathAbs, err := filepath.Abs(filepath.Join(repoAbs, filepath.Clean(relPath)))
+	if err != nil {
+		return "", false
+	}
+	rel, err := filepath.Rel(repoAbs, pathAbs)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return "", false
+	}
+	return pathAbs, true
+}
+
+func compareInt(left int, op string, rightText string) bool {
+	right, err := strconv.Atoi(rightText)
+	if err != nil {
+		return false
+	}
+	switch op {
+	case "==":
+		return left == right
+	case "!=":
+		return left != right
+	case ">":
+		return left > right
+	case ">=":
+		return left >= right
+	case "<":
+		return left < right
+	case "<=":
+		return left <= right
+	default:
+		return false
+	}
+}
+
+func commandOutputContains(result command.Result, needle string) bool {
+	if needle == "" {
+		return false
+	}
+	for _, line := range result.StdoutTail {
+		if strings.Contains(line, needle) {
+			return true
 		}
-		left := strings.TrimPrefix(parts[0], "steps.")
-		path := strings.Split(left, ".")
-		if len(path) != 2 || path[1] != "status" {
-			return false
+	}
+	for _, line := range result.StderrTail {
+		if strings.Contains(line, needle) {
+			return true
 		}
-		step, ok := steps[path[0]]
-		return ok && step.Status == parts[2]
+	}
+	for _, line := range result.FilteredLines {
+		if strings.Contains(line, needle) {
+			return true
+		}
+	}
+	for _, line := range result.EvidenceLines {
+		if strings.Contains(line.Text, needle) {
+			return true
+		}
 	}
 	return false
 }
@@ -618,14 +878,14 @@ func sortedKeys(values map[string]struct{}) []string {
 
 // Run executes the command-analysis pipeline.
 
-func (r *Runner) updateTaskStatus(taskID string, status string, repoPath string) error {
+func (r *Runner) updateTaskStatus(ctx context.Context, taskID string, status string, repoPath string) error {
 	if taskID == "" || status == "" {
 		return nil
 	}
 	if !r.cfg.LayerEnabled("tasks") {
 		return fmt.Errorf("task layer is disabled")
 	}
-	_, err := r.tasks.SetStatus(tasks.StatusRequest{
+	_, err := r.taskBackend.SetStatus(ctx, tasks.StatusRequest{
 		RepoPath: repoPath,
 		ID:       taskID,
 		Status:   status,
@@ -641,17 +901,15 @@ func taskStatusOrDefault(configured string, fallback string) string {
 }
 
 func (r *Runner) Run(ctx context.Context, req Request) (result Result, err error) {
-	if err := r.updateTaskStatus(req.CurrentTaskID, taskStatusOrDefault(req.TaskOnStart, "in_progress"), req.RepoPath); err != nil {
+	if err := r.updateTaskStatus(ctx, req.CurrentTaskID, taskStatusOrDefault(req.TaskOnStart, "in_progress"), req.RepoPath); err != nil {
 		return Result{}, err
 	}
 	defer func() {
-		if err != nil {
-			if updateErr := r.updateTaskStatus(req.CurrentTaskID, taskStatusOrDefault(req.TaskOnFailure, "blocked"), req.RepoPath); updateErr != nil {
-				err = updateErr
-			}
-			return
+		finalStatus := taskStatusOrDefault(req.TaskOnSuccess, "done")
+		if err != nil || result.Status != "ok" || result.Command.ExitCode != 0 {
+			finalStatus = taskStatusOrDefault(req.TaskOnFailure, "blocked")
 		}
-		if updateErr := r.updateTaskStatus(req.CurrentTaskID, taskStatusOrDefault(req.TaskOnSuccess, "done"), req.RepoPath); updateErr != nil {
+		if updateErr := r.updateTaskStatus(ctx, req.CurrentTaskID, finalStatus, req.RepoPath); updateErr != nil && err == nil {
 			err = updateErr
 		}
 	}()

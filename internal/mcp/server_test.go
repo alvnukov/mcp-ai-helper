@@ -1,9 +1,9 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
-	"github.com/zol/mcp-ai-helper/internal/project"
 	"os"
 	"path/filepath"
 	"strings"
@@ -49,6 +49,12 @@ func TestNewExposesAssistantGuidance(t *testing.T) {
 	if _, ok := srv.ListTools()["task_set_status"]; !ok {
 		t.Fatal("task_set_status tool is not registered")
 	}
+	if _, ok := srv.ListTools()["plan_task_execution"]; !ok {
+		t.Fatal("plan_task_execution tool is not registered")
+	}
+	if _, ok := srv.ListTools()["task_packet"]; !ok {
+		t.Fatal("task_packet tool is not registered")
+	}
 	resource, ok := srv.ListResources()[guidanceURI]
 	if !ok {
 		t.Fatal("guidance resource is not registered")
@@ -65,6 +71,9 @@ func TestNewExposesAssistantGuidance(t *testing.T) {
 	}
 	if !strings.Contains(cfg.AssistantGuidance, "Prefer one long run_workflow or run_pipeline call") {
 		t.Fatal("guidance text does not describe workflow-first policy")
+	}
+	if !strings.Contains(cfg.AssistantGuidance, "no commit means the task is not done") {
+		t.Fatal("guidance text does not describe commit closeout policy")
 	}
 }
 
@@ -104,9 +113,32 @@ func TestRunWorkflowSchemaIncludesWorkflowFields(t *testing.T) {
 		t.Fatalf("marshal schema: %v", err)
 	}
 	schema := string(schemaBytes)
-	for _, field := range []string{"steps", "owned_files", "commit_message", "current_task_id", "task_on_success", "task_on_failure"} {
+	for _, field := range []string{"steps", "owned_files", "commit_message", "current_task_id", "task_on_start", "task_on_success", "task_on_failure"} {
 		if !strings.Contains(schema, field) {
 			t.Fatalf("run_workflow schema does not contain %q: %s", field, schema)
+		}
+	}
+}
+
+func TestRunPipelineSchemaIncludesTaskStatusFields(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{AssistantGuidance: config.DefaultAssistantGuidance()}
+	srv := New(cfg)
+	tools := srv.ListTools()
+	tool, ok := tools["run_pipeline"]
+	if !ok {
+		t.Fatal("run_pipeline tool is not registered")
+	}
+
+	schemaBytes, err := json.Marshal(tool.Tool.InputSchema)
+	if err != nil {
+		t.Fatalf("marshal schema: %v", err)
+	}
+	schema := string(schemaBytes)
+	for _, field := range []string{"timeout_seconds", "current_task_id", "task_on_start", "task_on_success", "task_on_failure"} {
+		if !strings.Contains(schema, field) {
+			t.Fatalf("run_pipeline schema does not contain %q: %s", field, schema)
 		}
 	}
 }
@@ -124,36 +156,31 @@ func TestIssueToolsRegistered(t *testing.T) {
 	}
 }
 
-func TestIssueLifecycleUsesTaskStore(t *testing.T) {
-	t.Parallel()
+func TestIssueLifecycleUsesLeanRegistry(t *testing.T) {
+	repoPath := copyLeanRepoFixture(t)
+	commands := commandRunnerForRepo(repoPath)
+	store := legacyStoreForTest(t)
 
-	projectStore, err := project.NewStore(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	store := tasks.NewStore(projectStore)
-	repoPath := t.TempDir()
-
-	created, err := addIssue(store, issueAddRequest{
+	created, err := addIssue(context.Background(), issueAddRequest{
 		RepoPath:       repoPath,
 		SourceRepoPath: "/tmp/source-repo",
-		ID:             "issue-feedback-routing",
+		ID:             "task-998",
 		Title:          "feedback routing",
 		Body:           "record this for later",
 		Priority:       "high",
 		Tags:           []string{"routing"},
-	})
+	}, commands, store)
 	if err != nil {
 		t.Fatalf("add issue: %v", err)
 	}
-	if created.Status != "todo" {
-		t.Fatalf("status = %q, want todo", created.Status)
+	if created.Status != "todo" || created.ProjectionSource != "lean_registry" {
+		t.Fatalf("created issue = %+v", created)
 	}
 	if !strings.Contains(created.Body, "source_repo_path: /tmp/source-repo") {
 		t.Fatalf("body does not preserve source repo: %q", created.Body)
 	}
 
-	listed, err := listIssues(store, issueListRequest{RepoPath: repoPath})
+	listed, err := listIssues(context.Background(), issueListRequest{RepoPath: repoPath, Query: "feedback routing"}, commands, store)
 	if err != nil {
 		t.Fatalf("list issues: %v", err)
 	}
@@ -161,12 +188,12 @@ func TestIssueLifecycleUsesTaskStore(t *testing.T) {
 		t.Fatalf("listed issues = %#v", listed)
 	}
 
-	accepted, err := acceptIssue(store, issueAcceptRequest{RepoPath: repoPath, ID: created.ID})
+	accepted, err := acceptIssue(context.Background(), issueAcceptRequest{RepoPath: repoPath, ID: created.ID}, commands, store)
 	if err != nil {
 		t.Fatalf("accept issue: %v", err)
 	}
-	if accepted.Status != "in_progress" {
-		t.Fatalf("status = %q, want in_progress", accepted.Status)
+	if accepted.Status != "in_progress" || accepted.ProjectionSource != "lean_registry" {
+		t.Fatalf("accepted issue = %+v", accepted)
 	}
 }
 
@@ -253,4 +280,48 @@ func TestCurrentGuidanceUsesUpdatedConfig(t *testing.T) {
 	if got := currentGuidance(cfg); got != "second guidance" {
 		t.Fatalf("guidance after update = %q", got)
 	}
+}
+
+func TestHealthToolRegistered(t *testing.T) {
+	t.Parallel()
+	cfg := &config.Config{AssistantGuidance: config.DefaultAssistantGuidance()}
+	srv := New(cfg)
+	tool, ok := srv.ListTools()["health"]
+	if !ok {
+		t.Fatal("health tool is not registered")
+	}
+	if !stringsContains(tool.Tool.Description, "health") {
+		t.Fatalf("health tool description = %q", tool.Tool.Description)
+	}
+}
+
+func TestLoadDepsReturnsConsistentSnapshot(t *testing.T) {
+	cfg := &config.Config{AssistantGuidance: config.DefaultAssistantGuidance()}
+	deps := &Server{cfg: cfg}
+	c1, ch1, cm1, p1, ts1 := deps.loadDeps()
+	c2, ch2, cm2, p2, ts2 := deps.loadDeps()
+	if c1 != c2 {
+		t.Fatal("config pointers should be same")
+	}
+	if ch1 != ch2 {
+		t.Fatal("chat pointers should be same")
+	}
+	if cm1 != cm2 {
+		t.Fatal("command pointers should be same")
+	}
+	if p1 != p2 {
+		t.Fatal("pipeline pointers should be same")
+	}
+	if ts1 != ts2 {
+		t.Fatal("taskStore pointers should be same")
+	}
+}
+
+func stringsContains(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }

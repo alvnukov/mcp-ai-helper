@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -99,7 +100,7 @@ func (r *Runner) runFiltered(
 	stdout := newLimitBuffer(r.policy.MaxOutputBytes)
 	stderr := newLimitBuffer(r.policy.MaxOutputBytes)
 	// #nosec G204 -- command execution is this package's explicit MCP capability and is constrained by cwd, timeout, and output policy.
-	command := exec.CommandContext(runCtx, "/bin/sh", "-lc", cmd)
+	command := exec.CommandContext(runCtx, shellBin(), shellArgs(cmd)...)
 	command.Dir = runCWD
 	command.Stdout = stdout
 	command.Stderr = stderr
@@ -275,8 +276,15 @@ func (b *limitBuffer) Truncated() bool {
 
 var secretPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)(authorization:\s*bearer\s+)[^\s]+`),
+	regexp.MustCompile(`(?i)(x-api-key:\s*)[^\s]+`),
+	regexp.MustCompile(`(?i)(private-token:\s*)[^\s]+`),
 	regexp.MustCompile(`(?i)(api[_-]?key["']?\s*[:=]\s*["']?)[A-Za-z0-9._\-]+`),
 	regexp.MustCompile(`(?i)(token["']?\s*[:=]\s*["']?)[A-Za-z0-9._\-]+`),
+	regexp.MustCompile(`(?i)(secret["']?\s*[:=]\s*["']?)[A-Za-z0-9._\-]+`),
+	regexp.MustCompile(`(?i)(password["']?\s*[:=]\s*["']?)[^\s"']+`),
+	regexp.MustCompile(`(?:AKIA|ASIA)[A-Z0-9]{14,}`),
+	regexp.MustCompile(`gh[pousr]_[A-Za-z0-9_]{36,}`),
+	regexp.MustCompile(`eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9._-]{10,}`),
 }
 
 func redact(text string) string {
@@ -395,4 +403,18 @@ func tail80(values []string) []string {
 		return values
 	}
 	return values[len(values)-limit:]
+}
+
+func shellBin() string {
+	if runtime.GOOS == "windows" {
+		return "cmd"
+	}
+	return "/bin/sh"
+}
+
+func shellArgs(cmd string) []string {
+	if runtime.GOOS == "windows" {
+		return []string{"/c", cmd}
+	}
+	return []string{"-lc", cmd}
 }

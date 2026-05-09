@@ -1,6 +1,9 @@
 package tasks
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/zol/mcp-ai-helper/internal/project"
@@ -14,7 +17,13 @@ func TestStoreAddListGetDelete(t *testing.T) {
 	store := NewStore(projectStore)
 	repoPath := t.TempDir()
 
-	task, err := store.Add(AddRequest{RepoPath: repoPath, Title: "Improve filters", Body: "Add go_test preset"})
+	task, err := store.Add(AddRequest{
+		RepoPath:           repoPath,
+		Title:              "Improve filters",
+		Body:               "Add go_test preset",
+		AcceptanceCriteria: []string{"preset is available", "  "},
+		VerificationPlan:   []string{"run targeted tests"},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,6 +45,12 @@ func TestStoreAddListGetDelete(t *testing.T) {
 	}
 	if got.Title != task.Title {
 		t.Fatalf("title = %q, want %q", got.Title, task.Title)
+	}
+	if len(got.AcceptanceCriteria) != 1 || got.AcceptanceCriteria[0] != "preset is available" {
+		t.Fatalf("acceptance_criteria = %#v", got.AcceptanceCriteria)
+	}
+	if len(got.VerificationPlan) != 1 || got.VerificationPlan[0] != "run targeted tests" {
+		t.Fatalf("verification_plan = %#v", got.VerificationPlan)
 	}
 
 	if err := store.Delete(DeleteRequest{RepoPath: repoPath, ID: task.ID}); err != nil {
@@ -72,7 +87,14 @@ func TestStoreUpdateSearchAndBatchUpsert(t *testing.T) {
 	if len(first.Tags) != 2 {
 		t.Fatalf("tags = %#v, want deduplicated tags", first.Tags)
 	}
-	updated, err := store.Update(UpdateRequest{RepoPath: repoPath, ID: first.ID, Status: "in_progress", Body: "Expose task_batch_upsert"})
+	updated, err := store.Update(UpdateRequest{
+		RepoPath:           repoPath,
+		ID:                 first.ID,
+		Status:             "in_progress",
+		Body:               "Expose task_batch_upsert",
+		AcceptanceCriteria: []string{"batch criteria preserved"},
+		VerificationPlan:   []string{"targeted store tests"},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +104,13 @@ func TestStoreUpdateSearchAndBatchUpsert(t *testing.T) {
 	if updated.Status != "in_progress" {
 		t.Fatalf("status = %q, want in_progress", updated.Status)
 	}
-	matches, err := store.List(ListRequest{RepoPath: repoPath, Query: "batch"})
+	if len(updated.AcceptanceCriteria) != 1 || updated.AcceptanceCriteria[0] != "batch criteria preserved" {
+		t.Fatalf("acceptance_criteria = %#v", updated.AcceptanceCriteria)
+	}
+	if len(updated.VerificationPlan) != 1 || updated.VerificationPlan[0] != "targeted store tests" {
+		t.Fatalf("verification_plan = %#v", updated.VerificationPlan)
+	}
+	matches, err := store.List(ListRequest{RepoPath: repoPath, Query: "targeted store"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,5 +135,44 @@ func TestStoreUpdateSearchAndBatchUpsert(t *testing.T) {
 	}
 	if len(result.Closed) != 1 || result.Closed[0].ID != first.ID || result.Closed[0].Status != "done" {
 		t.Fatalf("closed = %#v", result.Closed)
+	}
+}
+
+func TestStoreWritesRepoLocalLeanTasks(t *testing.T) {
+	projectStore, err := project.NewStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := NewStore(projectStore)
+	repoPath := t.TempDir()
+
+	task, err := store.Add(AddRequest{
+		RepoPath: repoPath,
+		ID:       "lean-task",
+		Title:    "Lean task",
+		Body:     "Tracked in repo",
+		Status:   "todo",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, err := store.taskPath(repoPath, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPath := filepath.Join(repoPath, "tasks", "lean-task.lean")
+	if path != wantPath {
+		t.Fatalf("task path = %q, want %q", path, wantPath)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if !strings.Contains(text, leanTaskPrefix) {
+		t.Fatalf("task file missing Lean metadata: %s", text)
+	}
+	if strings.HasSuffix(path, ".json") {
+		t.Fatalf("task path must not use JSON extension: %q", path)
 	}
 }

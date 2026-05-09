@@ -24,10 +24,20 @@ const defaultAssistantGuidance = `mcp-ai-helper operating guidance:
 4. Always pass repo_path. Treat cwd and file paths as repo-relative unless a tool explicitly says otherwise.
 5. Never use broad staging or destructive git operations. Commit only explicit owned files after relevant checks pass.
 6. Keep output compact and evidence-linked. Re-filter retained command history instead of rerunning commands or returning raw logs.
-7. For project memory, read task_current or task_list before work, then synchronize the backlog with one task_batch_upsert call whenever you already know the full task set.
-8. Use task statuses consistently: todo for planned work, in_progress for the current owner, blocked when external input is needed, and done for completed or intentionally closed work.
-9. Prefer task_update or task_set_status for one targeted change; avoid long sequences of task_add calls when batch_upsert can express the desired state.
-10. If a workflow cannot express the needed operation, improve the workflow DSL instead of normalizing repeated manual tool calls.`
+7. For any repo task, first gather complete minimal sufficient context with task_current, relevant read_file/snapshot_file calls, and narrow run_pipeline/collect_command_output probes; do not build an execution pipeline before understanding the contract, architecture, integration points, test patterns, and existing changes.
+8. After context gathering, stop and state the decision: selected tasks, why they fit the current model, exact edits, owned_files, forbidden files, acceptance criteria to close, the minimal gate proving closure, and the end-to-end closeout path.
+9. Only after that, build one self-contained run_pipeline or run_workflow for the remaining implementation path: minimal edits, formatting, relevant checks, explicit owned-files commit, and final task status transition only if everything succeeds.
+10. Never set a task to done until its acceptance criteria, relevant gate, and required owned-files commit are actually closed; for a repo task with file changes, no commit means the task is not done. A partial green test, timeout, evidence-only analysis success, skipped check, failed commit, or unverified MCP/tool-facing path is not enough.
+11. If a workflow fails or times out, do not close the task. First inspect actual state, separate confirmed facts from assumptions, and choose the next minimal step with a new hypothesis.
+12. For migrated Lean/Lake repos, task_current, task_list, task_get, and task mutations require the Lean registry/exporter; legacy tasks/*.lean JSON-comment files are not fallback storage.
+13. For project memory, read task_current or task_list before work, then synchronize the backlog with one task_batch_upsert call whenever you already know the complete authoritative task set; use close_missing only intentionally.
+14. Never edit tasks by modifying task registry/source/projection files directly. Do not change MCPAIHelperProject/ActiveTasks.lean, tasks/*.lean, task JSON comments, or legacy task files to update task title/body/status/priority/tags/criteria/verification; use task_upsert, task_batch_upsert, task_set_status, task_delete, or another explicit task-facing helper tool only.
+15. If task tools cannot express the needed task mutation, stop with a surface mismatch/blocker; do not bypass the helper with file edits, scripts, guarded_replace, shell, or direct git operations.
+16. Use task statuses consistently: todo for planned work, in_progress for the current owner, blocked when external input is needed, and done for completed or intentionally closed work.
+17. Prefer task_update or task_set_status for one targeted change; avoid long sequences of task_add calls when batch_upsert can express the desired state.
+18. If a workflow cannot express the needed operation, improve the workflow DSL instead of normalizing repeated manual tool calls.
+
+This guidance is configurable in the server config through assistant_guidance; generated default config and configs/config.example.yaml show the same field.`
 
 // Config is the complete server configuration loaded from YAML.
 type Config struct {
@@ -172,11 +182,12 @@ func SetupGuidance(configPath string) map[string]string {
 	}
 	return map[string]string{
 		"config_path": configPath,
-		"summary":     "Keep server guidance and base policy in ~/.mcp-ai-helper/config.yaml; edit assistant_guidance to tune caller behavior.",
+		"summary":     "Keep server guidance and base policy in ~/.mcp-ai-helper/config.yaml; edit assistant_guidance there to tune the MCP assistant_guidance/server_setup_guidance behavior without code changes.",
 		"first_run":   "When the config file is missing, mcp-ai-helper creates ~/.mcp-ai-helper/config.yaml with safe local-command defaults.",
 		"layers":      "Use layers.<name>.enabled to toggle logs, tasks, guidance, models, commands, and workflows without editing code.",
 		"models":      "Add providers/models only when remote model calls are needed; local pipelines and tasks work without provider credentials.",
-		"workflows":   "Prefer one long run_workflow or run_pipeline call when intermediate results are not needed by the calling model.",
+		"workflows":   "Prefer one long run_workflow or run_pipeline call when intermediate results are not needed by the calling model. Include deterministic conditions, guarded edits, relevant checks, and task status transitions in the workflow when they do not require caller-side decisions.",
+		"tasks":       "Read task_current before work, keep statuses current, batch task updates only from a complete authoritative task set, use close_missing only intentionally because it can close omitted active tasks, and let run_pipeline/run_workflow set final task status only after acceptance criteria, gates, and required owned-files commit pass. For repo tasks with file changes, no commit means the task is not done. Partial green tests, evidence-only analysis, skipped checks, missing commits, failed commits, and stale task reads are not enough for done. Migrated Lean/Lake repos use the Lean registry/exporter as canonical task state; legacy tasks/*.lean JSON-comment files are not fallback storage.",
 	}
 }
 
@@ -331,10 +342,12 @@ func (c *Config) Validate() error {
 		if provider.Type == "" {
 			provider.Type = "generic"
 		}
-		if provider.Type != "generic" {
+		switch provider.Type {
+		case "generic", "anthropic":
+		default:
 			return fmt.Errorf("provider %q: unsupported type %q", id, provider.Type)
 		}
-		if provider.BaseURL == "" && provider.CompletionsURL == "" {
+		if provider.Type != "anthropic" && provider.BaseURL == "" && provider.CompletionsURL == "" {
 			return fmt.Errorf("provider %q: base_url or completions_url is required", id)
 		}
 	}

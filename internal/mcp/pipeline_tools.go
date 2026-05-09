@@ -17,7 +17,7 @@ func registerPipelineTools(srv *server.MCPServer, deps *Server) {
 		return structured(map[string]any{
 			"common_step_fields": map[string]string{
 				"depends_on": "Optional array of step IDs this step depends on. Engine auto-detects same-file dependencies; use this for cross-file or cross-tool ordering.",
-				"if":         "Condition: 'always' (default), 'changed_files_count > 0', or 'steps.<id>.status == <status>'.",
+				"if":         "Condition: 'always' (default), changed_files_count comparisons, steps.<id>.status/exit_code comparisons, steps.<id>.output_contains text, file_exists/file_missing path, or tasks.<id>.status comparisons.",
 				"on_failure": "Optional: 'stop' (default) or 'continue'.",
 			},
 			"step_types": []map[string]any{
@@ -51,6 +51,15 @@ func registerPipelineTools(srv *server.MCPServer, deps *Server) {
 					},
 				},
 				{
+					"type":        "task_transition",
+					"description": "Guardedly transition task statuses inside a workflow.",
+					"fields": map[string]string{
+						"task_ids": "Task IDs to transition (array of strings, required).",
+						"from":     "Optional required current status for every task.",
+						"to":       "Target status (string, required).",
+					},
+				},
+				{
 					"type":        "git_commit_owned",
 					"description": "Commit only explicit owned files. Never stages all files.",
 					"fields": map[string]string{
@@ -67,6 +76,11 @@ func registerPipelineTools(srv *server.MCPServer, deps *Server) {
 		basemcp.WithString("command", basemcp.Required()),
 		basemcp.WithString("repo_path", basemcp.Required()),
 		basemcp.WithString("cwd", basemcp.Description("Optional repo-relative working directory.")),
+		basemcp.WithNumber("timeout_seconds", basemcp.Description("Optional command timeout in seconds.")),
+		basemcp.WithString("current_task_id", basemcp.Description("Optional task id to update during pipeline execution.")),
+		basemcp.WithString("task_on_start", basemcp.Description("Optional status for current_task_id before executing command; defaults to in_progress.")),
+		basemcp.WithString("task_on_success", basemcp.Description("Optional status for current_task_id after command exit 0 and valid evidence; defaults to done.")),
+		basemcp.WithString("task_on_failure", basemcp.Description("Optional status for current_task_id after command failure, invalid evidence, or pipeline error; defaults to blocked.")),
 		basemcp.WithString("task"),
 		basemcp.WithBoolean("compact_output", basemcp.Description("Collapse successful command output. Defaults to true.")),
 	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
@@ -89,7 +103,7 @@ func registerPipelineTools(srv *server.MCPServer, deps *Server) {
 		basemcp.WithString("task_on_start", basemcp.Description("Optional status for current_task_id before executing steps; defaults to in_progress.")),
 		basemcp.WithString("task_on_success", basemcp.Description("Optional status for current_task_id after successful workflow; defaults to done.")),
 		basemcp.WithString("task_on_failure", basemcp.Description("Optional status for current_task_id after failed workflow; defaults to blocked.")),
-		basemcp.WithArray("steps", basemcp.Description("Workflow steps: command, guarded_replace, task_batch_upsert, git_commit_owned.")),
+		basemcp.WithArray("steps", basemcp.Description("Workflow steps: command, guarded_replace, task_batch_upsert, task_transition, git_commit_owned.")),
 		basemcp.WithArray("owned_files", basemcp.Description("Repo-relative files the workflow is allowed to modify or commit.")),
 		basemcp.WithString("commit_message", basemcp.Description("Optional commit message used by git workflow steps.")),
 		basemcp.WithBoolean("preview", basemcp.Description("Set to true for dry-run: returns steps that would execute without running them.")),

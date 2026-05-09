@@ -228,6 +228,170 @@ func TestRunWorkflowStepsTaskBatchUpsert(t *testing.T) {
 	}
 }
 
+func TestRunWorkflowStepsTaskTransition(t *testing.T) {
+	dir := t.TempDir()
+	runner := NewRunner(testConfig(dir), nil)
+	store := runner.tasks
+	created, err := store.Add(tasks.AddRequest{RepoPath: dir, ID: "transition-api", Title: "Transition API", Status: "todo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := runner.RunWorkflow(t.Context(), WorkflowRequest{
+		RepoPath: dir,
+		Steps: []WorkflowStep{{
+			ID:   "transition",
+			Tool: "task_transition",
+			Args: map[string]any{"task_ids": []string{created.ID}, "from": "todo", "to": "in_progress"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "ok" {
+		t.Fatalf("status = %q, reason = %q", result.Status, result.Reason)
+	}
+	got, err := store.Get(tasks.GetRequest{RepoPath: dir, ID: created.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "in_progress" {
+		t.Fatalf("status = %q, want in_progress", got.Status)
+	}
+}
+
+func TestRunWorkflowStepsTaskTransitionRejectsFromMismatch(t *testing.T) {
+	dir := t.TempDir()
+	runner := NewRunner(testConfig(dir), nil)
+	created, err := runner.tasks.Add(tasks.AddRequest{RepoPath: dir, ID: "transition-api", Title: "Transition API", Status: "todo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := runner.RunWorkflow(t.Context(), WorkflowRequest{
+		RepoPath: dir,
+		Steps: []WorkflowStep{{
+			ID:   "transition",
+			Tool: "task_transition",
+			Args: map[string]any{"task_ids": []string{created.ID}, "from": "blocked", "to": "done"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "failed" {
+		t.Fatalf("status = %q, want failed", result.Status)
+	}
+	got, err := runner.tasks.Get(tasks.GetRequest{RepoPath: dir, ID: created.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "todo" {
+		t.Fatalf("status = %q, want todo", got.Status)
+	}
+}
+
+func TestRunWorkflowStepsTaskTransitionRejectsClosingGoal(t *testing.T) {
+	dir := t.TempDir()
+	runner := NewRunner(testConfig(dir), nil)
+	created, err := runner.tasks.Add(tasks.AddRequest{RepoPath: dir, ID: "goal-main", Title: "Goal", Status: "in_progress"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := runner.RunWorkflow(t.Context(), WorkflowRequest{
+		RepoPath: dir,
+		Steps: []WorkflowStep{{
+			ID:   "transition",
+			Tool: "task_transition",
+			Args: map[string]any{"task_ids": []string{created.ID}, "from": "in_progress", "to": "done"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "failed" {
+		t.Fatalf("status = %q, want failed", result.Status)
+	}
+}
+
+func TestRunWorkflowStepsBranchOnCommandExitCodeAndOutput(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "x.txt")
+	if err := os.WriteFile(path, []byte("old\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runner := NewRunner(testConfig(dir), nil)
+
+	result, err := runner.RunWorkflow(t.Context(), WorkflowRequest{
+		RepoPath: dir,
+		Steps: []WorkflowStep{
+			{ID: "probe", Tool: "command", OnFailure: "continue", Args: map[string]any{"command": "printf needle; exit 7"}},
+			{ID: "exit-branch", Tool: "guarded_replace", If: "steps.probe.exit_code == 7", Args: map[string]any{"path": "x.txt", "old": "old", "new": "exit"}},
+			{ID: "output-branch", Tool: "guarded_replace", If: "steps.probe.output_contains needle", Args: map[string]any{"path": "x.txt", "old": "exit", "new": "matched"}},
+			{ID: "success-branch", Tool: "guarded_replace", If: "steps.probe.exit_code == 0", Args: map[string]any{"path": "x.txt", "old": "matched", "new": "wrong"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "ok" {
+		t.Fatalf("status = %q, reason = %q", result.Status, result.Reason)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "matched\n" {
+		t.Fatalf("file = %q, want matched", string(data))
+	}
+}
+
+func TestRunWorkflowStepsBranchOnFileAndTaskState(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "marker.txt"), []byte("marker\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(dir, "target.txt")
+	if err := os.WriteFile(target, []byte("old\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runner := NewRunner(testConfig(dir), nil)
+	created, err := runner.tasks.Add(tasks.AddRequest{RepoPath: dir, ID: "condition-task", Title: "Condition task", Status: "todo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := runner.RunWorkflow(t.Context(), WorkflowRequest{
+		RepoPath: dir,
+		Steps: []WorkflowStep{
+			{ID: "missing-file", Tool: "guarded_replace", If: "file_missing marker.txt", Args: map[string]any{"path": "target.txt", "old": "old", "new": "wrong"}},
+			{ID: "start-task", Tool: "task_transition", If: "file_exists marker.txt", Args: map[string]any{"task_ids": []string{created.ID}, "from": "todo", "to": "in_progress"}},
+			{ID: "edit", Tool: "guarded_replace", DependsOn: []string{"start-task"}, If: "tasks.condition-task.status == in_progress", Args: map[string]any{"path": "target.txt", "old": "old", "new": "new"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "ok" {
+		t.Fatalf("status = %q, reason = %q", result.Status, result.Reason)
+	}
+	got, err := runner.tasks.Get(tasks.GetRequest{RepoPath: dir, ID: created.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "in_progress" {
+		t.Fatalf("task status = %q, want in_progress", got.Status)
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "new\n" {
+		t.Fatalf("file = %q, want new", string(data))
+	}
+}
+
 func runTestGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	// #nosec G204 -- tests execute fixed git commands only.
@@ -312,6 +476,44 @@ func TestRunPipelineUpdatesCurrentTaskStatus(t *testing.T) {
 	}
 	if got.Status != "done" {
 		t.Fatalf("status = %q, want done", got.Status)
+	}
+}
+
+func TestRunPipelineBlocksTaskStatusWhenCommandFails(t *testing.T) {
+	t.Parallel()
+
+	repoPath := t.TempDir()
+	runner := NewRunner(testConfig(repoPath), nil)
+	created, err := runner.tasks.Add(tasks.AddRequest{
+		RepoPath: repoPath,
+		ID:       "task-pipeline-failed-status",
+		Title:    "pipeline failed status",
+		Status:   "todo",
+	})
+	if err != nil {
+		t.Fatalf("add task: %v", err)
+	}
+
+	result, err := runner.Run(t.Context(), Request{
+		RepoPath:      repoPath,
+		CurrentTaskID: created.ID,
+		TaskOnSuccess: "done",
+		TaskOnFailure: "blocked",
+		Command:       "printf fail; exit 7",
+	})
+	if err != nil {
+		t.Fatalf("run pipeline: %v", err)
+	}
+	if result.Command.ExitCode != 7 {
+		t.Fatalf("exit code = %d, want 7", result.Command.ExitCode)
+	}
+
+	got, err := runner.tasks.Get(tasks.GetRequest{RepoPath: repoPath, ID: created.ID})
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if got.Status != "blocked" {
+		t.Fatalf("status = %q, want blocked", got.Status)
 	}
 }
 

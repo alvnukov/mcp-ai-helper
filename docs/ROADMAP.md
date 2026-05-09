@@ -2,6 +2,24 @@
 
 This file tracks concrete improvements needed to make `mcp-ai-helper` a reliable workflow executor for senior LLMs.
 
+## Workflow Control Order
+
+Next executable task: `task-045` hardens final task status semantics first, because every later workflow feature depends on `run_pipeline` and `run_workflow` failing closed instead of marking work done after a failed gate, skipped check, evidence-only analysis, workflow conflict, or failed commit.
+
+| Order | Task | Owner Level | Owned Files | Acceptance Focus | Minimum Gate | Depends On |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | `task-045` finalization semantics | strong | `internal/pipeline`, `internal/mcp`, focused tests | failed commands, invalid evidence, workflow conflicts, and failed commits never mark done | `go test ./internal/pipeline ./internal/mcp` plus one failing MCP fixture | `task-043` cleanup done |
+| 2 | `task-012` conditional workflow execution | strong | workflow engine, MCP schema, workflow tests | deterministic branching on exit code, output, file state, task state, validation, and changed files | targeted workflow/MCP tests plus MCP preview fixture | `task-045` |
+| 3 | `task-044` execution packet contract | strong | task/planning tools, MCP schema, tests | packet includes context, acceptance criteria, owned/forbidden files, risks, gates, and readiness level | targeted planning/task tests plus MCP packet fixture | `task-045`, `task-012` if packet emits conditional workflow plans |
+| 4 | `task-014` idempotent edit tools | strong | fileops package, workflow edit steps, tests | structured patch/block/JSON/YAML edits are guarded and dry-runnable | targeted fileops/workflow tests for conflict and dry-run behavior | `task-045`, `task-044` |
+| 5 | `task-015` git ownership hardening | strong | git workflow step, dirty-tree preflight, tests | owned-file commits fail closed on unrelated staged/untracked/changed files and patch conflicts | targeted git/workflow tests with dirty fixture repos | `task-045`, `task-014` |
+| 6 | `task-023` audit trail | standard after semantics are stable | workflow result/history records and tests | audit records context ids, branch choices, guard outcomes, command/evidence ids, final status reason | targeted workflow tests for success, skipped branch, failure, and conflict | `task-045`, `task-012` |
+| 7 | `task-022` guidance defaults | standard | `internal/config`, `internal/mcp` schema tests | default and setup guidance require context-first, decision-second, one-pipeline-third, batching, close_missing caution, and final-status gating | `go test ./internal/config ./internal/mcp` | `task-045` semantics defined enough to document |
+| 8 | `task-024` workflow examples | standard | `README.md`, docs | examples show success, blocked failure, conditional probe, no premature done, compact logs | docs content check plus `lake build` | `task-012`, `task-022` |
+| 9 | `task-021` enterprise gates | strong | quality gate config, CI/test fixtures | first-class go test/vet/lint/race gates and workflow failure fixtures | targeted gate tests, then broader suite only with concrete regression risk | `task-045`, `task-012`, `task-015` |
+
+No implementation task in this order is ready while cleanup task `task-043` is unresolved. Since `task-043` is now done, the first ready implementation is `task-045`; tasks below it remain blocked by the dependencies shown here, even if their local code looks small.
+
 ## Priority 1: Output Selection
 
 - Add precise filter presets for common tools: `go_test`, `golangci`, `go_vet`, `pytest`, `ruff`, `mypy`, `git_status`, and `build`.
@@ -26,7 +44,8 @@ This file tracks concrete improvements needed to make `mcp-ai-helper` a reliable
 
 ## Priority 4: Project Tasks
 
-- Keep project tasks in `~/.mcp-ai-helper/repos/<project>/tasks` as Lean files.
+- Treat the repo-local Lean/Lake registry as canonical task state for migrated repositories.
+- Remove legacy JSON-comment `tasks/*.lean` fallback paths after migration; stale projections must not be read as task state.
 - Add task lifecycle tools: add, list, current, get, update, and delete.
 - Link task entries to command ids, commits, and workflow ids.
 - Add compaction rules so old completed tasks can be archived without losing auditability.

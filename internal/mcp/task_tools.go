@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"strings"
 
 	basemcp "github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -19,52 +20,54 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 		basemcp.WithString("id"),
 		basemcp.WithString("priority"),
 		basemcp.WithArray("tags"),
+		basemcp.WithArray("acceptance_criteria"),
+		basemcp.WithArray("verification_plan"),
 		basemcp.WithString("parent_id"),
-	), func(_ context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
 		var args tasks.AddRequest
 		if err := bind(req, &args); err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
-		_, _, _, _, store := deps.loadDeps()
-		task, err := store.Add(args)
+		_, _, commands, _, store := deps.loadDeps()
+		result, err := upsertTask(ctx, args, commands, store)
 		if err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
-		return structured(task)
+		return structured(result)
 	})
 	srv.AddTool(basemcp.NewTool("task_list",
 		basemcp.WithDescription("List per-repository tasks, optionally filtered by exact status and query."),
 		basemcp.WithString("repo_path", basemcp.Required()),
 		basemcp.WithString("status"),
 		basemcp.WithString("query"),
-	), func(_ context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
 		var args tasks.ListRequest
 		if err := bind(req, &args); err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
-		_, _, _, _, store := deps.loadDeps()
-		list, err := store.List(args)
+		_, _, commands, _, store := deps.loadDeps()
+		list, source, err := readAllTasks(ctx, args.RepoPath, commands, store)
 		if err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
-		return structured(map[string]any{"tasks": list})
+		return structured(map[string]any{"tasks": filterTasks(list, args), "source": source})
 	})
 	srv.AddTool(basemcp.NewTool("task_search",
 		basemcp.WithDescription("Search per-repository tasks by id, status, title, body, priority, or tag."),
 		basemcp.WithString("repo_path", basemcp.Required()),
 		basemcp.WithString("query", basemcp.Required()),
 		basemcp.WithString("status"),
-	), func(_ context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
 		var args tasks.ListRequest
 		if err := bind(req, &args); err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
-		_, _, _, _, store := deps.loadDeps()
-		list, err := store.List(args)
+		_, _, commands, _, store := deps.loadDeps()
+		list, source, err := readAllTasks(ctx, args.RepoPath, commands, store)
 		if err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
-		return structured(map[string]any{"tasks": list})
+		return structured(map[string]any{"tasks": filterTasks(list, args), "source": source})
 	})
 	srv.AddTool(basemcp.NewTool("task_update",
 		basemcp.WithDescription("Partially update one per-repository task without replacing unspecified fields."),
@@ -75,35 +78,41 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 		basemcp.WithString("status"),
 		basemcp.WithString("priority"),
 		basemcp.WithArray("tags"),
+		basemcp.WithArray("acceptance_criteria"),
+		basemcp.WithArray("verification_plan"),
 		basemcp.WithString("parent_id"),
-	), func(_ context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
 		var args tasks.UpdateRequest
 		if err := bind(req, &args); err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
-		_, _, _, _, store := deps.loadDeps()
-		task, err := store.Update(args)
+		_, _, commands, _, store := deps.loadDeps()
+		existing, _, err := readTask(ctx, args.RepoPath, args.ID, commands, store)
 		if err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
-		return structured(task)
+		result, err := upsertTask(ctx, mergeTaskUpdate(existing, args), commands, store)
+		if err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
+		return structured(result)
 	})
 	srv.AddTool(basemcp.NewTool("task_set_status",
 		basemcp.WithDescription("Set one per-repository task status."),
 		basemcp.WithString("repo_path", basemcp.Required()),
 		basemcp.WithString("id", basemcp.Required()),
 		basemcp.WithString("status", basemcp.Required()),
-	), func(_ context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
 		var args tasks.StatusRequest
 		if err := bind(req, &args); err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
-		_, _, _, _, store := deps.loadDeps()
-		task, err := store.SetStatus(args)
+		_, _, commands, _, store := deps.loadDeps()
+		result, err := setTaskStatus(ctx, args, commands, store)
 		if err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
-		return structured(task)
+		return structured(result)
 	})
 	srv.AddTool(basemcp.NewTool("task_batch_upsert",
 		basemcp.WithDescription("Synchronize many per-repository tasks in one call and optionally close active tasks omitted from the batch."),
@@ -112,13 +121,13 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 		basemcp.WithBoolean("close_missing"),
 		basemcp.WithString("missing_status"),
 		basemcp.WithArray("active_statuses"),
-	), func(_ context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
 		var args tasks.BatchUpsertRequest
 		if err := bind(req, &args); err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
-		_, _, _, _, store := deps.loadDeps()
-		result, err := store.BatchUpsert(args)
+		_, _, commands, _, store := deps.loadDeps()
+		result, err := batchUpsertTasks(ctx, args, commands, store)
 		if err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
@@ -133,44 +142,46 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 		basemcp.WithString("priority", basemcp.Description("Task priority: low, normal, high, critical.")),
 		basemcp.WithString("body", basemcp.Description("Task description.")),
 		basemcp.WithArray("tags", basemcp.Description("Optional tags.")),
+		basemcp.WithArray("acceptance_criteria", basemcp.Description("Structured completion criteria.")),
+		basemcp.WithArray("verification_plan", basemcp.Description("Structured verification steps.")),
 		basemcp.WithString("parent_id", basemcp.Description("Optional parent task id for hierarchy.")),
-	), func(_ context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
 		var args tasks.AddRequest
 		if err := bind(req, &args); err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
-		_, _, _, _, store := deps.loadDeps()
-		task, err := store.Add(args)
+		_, _, commands, _, store := deps.loadDeps()
+		result, err := upsertTask(ctx, args, commands, store)
 		if err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
-		return structured(task)
+		return structured(result)
 	})
 	srv.AddTool(basemcp.NewTool("task_current",
 		basemcp.WithDescription("Return active per-repository tasks with todo or in_progress status."),
 		basemcp.WithString("repo_path", basemcp.Required()),
-	), func(_ context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
 		var args tasks.ListRequest
 		if err := bind(req, &args); err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
-		_, _, _, _, store := deps.loadDeps()
-		list, err := store.List(tasks.ListRequest{RepoPath: args.RepoPath})
+		_, _, commands, _, store := deps.loadDeps()
+		list, source, err := readCurrentTasks(ctx, args.RepoPath, commands, store)
 		if err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
-		return structured(map[string]any{"tasks": currentTasks(list)})
+		return structured(map[string]any{"tasks": list, "source": source})
 	})
 	srv.AddTool(basemcp.NewTool("task_tree",
 		basemcp.WithDescription("Return task tree from the goal root. Goal = task with tag 'goal' and no parent_id."),
 		basemcp.WithString("repo_path", basemcp.Required()),
-	), func(_ context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
 		var args tasks.ListRequest
 		if err := bind(req, &args); err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
-		_, _, _, _, store := deps.loadDeps()
-		list, err := store.List(tasks.ListRequest{RepoPath: args.RepoPath})
+		_, _, commands, _, store := deps.loadDeps()
+		list, _, err := readAllTasks(ctx, args.RepoPath, commands, store)
 		if err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
@@ -180,13 +191,13 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 		basemcp.WithDescription("Read one per-repository task by id."),
 		basemcp.WithString("repo_path", basemcp.Required()),
 		basemcp.WithString("id", basemcp.Required()),
-	), func(_ context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
 		var args tasks.GetRequest
 		if err := bind(req, &args); err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
-		_, _, _, _, store := deps.loadDeps()
-		task, err := store.Get(args)
+		_, _, commands, _, store := deps.loadDeps()
+		task, _, err := readTask(ctx, args.RepoPath, args.ID, commands, store)
 		if err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
@@ -196,15 +207,78 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 		basemcp.WithDescription("Delete one per-repository task by id."),
 		basemcp.WithString("repo_path", basemcp.Required()),
 		basemcp.WithString("id", basemcp.Required()),
-	), func(_ context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
 		var args tasks.DeleteRequest
 		if err := bind(req, &args); err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
-		_, _, _, _, store := deps.loadDeps()
-		if err := store.Delete(args); err != nil {
+		_, _, commands, _, store := deps.loadDeps()
+		result, err := deleteTask(ctx, args, commands, store)
+		if err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
-		return structured(map[string]bool{"deleted": true})
+		return structured(result)
 	})
+}
+
+func mergeTaskUpdate(existing tasks.Task, update tasks.UpdateRequest) tasks.AddRequest {
+	merged := tasks.AddRequest{RepoPath: update.RepoPath, ID: existing.ID, ParentID: existing.ParentID, Status: existing.Status, Title: existing.Title, Body: existing.Body, Priority: existing.Priority, Tags: existing.Tags, AcceptanceCriteria: existing.AcceptanceCriteria, VerificationPlan: existing.VerificationPlan}
+	if strings.TrimSpace(update.Status) != "" {
+		merged.Status = strings.TrimSpace(update.Status)
+	}
+	if update.ParentID != "" {
+		merged.ParentID = update.ParentID
+	}
+	if strings.TrimSpace(update.Title) != "" {
+		merged.Title = update.Title
+	}
+	if update.Body != "" {
+		merged.Body = update.Body
+	}
+	if strings.TrimSpace(update.Priority) != "" {
+		merged.Priority = strings.TrimSpace(update.Priority)
+	}
+	if update.Tags != nil {
+		merged.Tags = update.Tags
+	}
+	if update.AcceptanceCriteria != nil {
+		merged.AcceptanceCriteria = update.AcceptanceCriteria
+	}
+	if update.VerificationPlan != nil {
+		merged.VerificationPlan = update.VerificationPlan
+	}
+	return merged
+}
+
+func filterTasks(list []tasks.Task, req tasks.ListRequest) []tasks.Task {
+	out := make([]tasks.Task, 0, len(list))
+	for _, task := range list {
+		if req.Status != "" && task.Status != req.Status {
+			continue
+		}
+		if req.Query != "" && !taskMatchesMCP(task, req.Query) {
+			continue
+		}
+		out = append(out, task)
+	}
+	return out
+}
+
+func taskMatchesMCP(task tasks.Task, query string) bool {
+	q := strings.ToLower(strings.TrimSpace(query))
+	if q == "" {
+		return true
+	}
+	fields := []string{task.ID, task.Status, task.Title, task.Body, task.Priority, task.ParentID}
+	for _, field := range fields {
+		if strings.Contains(strings.ToLower(field), q) {
+			return true
+		}
+	}
+	for _, tag := range task.Tags {
+		if strings.Contains(strings.ToLower(tag), q) {
+			return true
+		}
+	}
+	return false
 }

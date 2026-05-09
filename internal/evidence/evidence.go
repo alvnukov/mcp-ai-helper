@@ -3,6 +3,7 @@ package evidence
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -72,7 +73,7 @@ func Select(lines []string, limit int) []Line {
 	}
 	out := make([]Line, 0, len(selected))
 	for i, line := range selected {
-		out = append(out, Line{ID: "E" + itoa(i+1), Source: "command_output", Text: line})
+		out = append(out, Line{ID: "E" + strconv.Itoa(i+1), Source: "command_output", Text: line})
 	}
 	return out
 }
@@ -117,18 +118,4 @@ func tail(values []string, limit int) []string {
 		return values
 	}
 	return values[len(values)-limit:]
-}
-
-func itoa(value int) string {
-	if value == 0 {
-		return "0"
-	}
-	digits := [20]byte{}
-	i := len(digits)
-	for value > 0 {
-		i--
-		digits[i] = byte('0' + value%10)
-		value /= 10
-	}
-	return string(digits[i:])
 }

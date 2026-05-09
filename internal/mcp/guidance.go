@@ -17,8 +17,11 @@ func currentGuidance(cfg *config.Config) string {
 	return cfg.AssistantGuidance
 }
 
-func registerGuidance(srv *server.MCPServer, cfg *config.Config) {
-	guidanceText := func() string { return currentGuidance(cfg) }
+func registerGuidance(srv *server.MCPServer, deps *Server) {
+	guidanceText := func() string {
+		cfg, _, _, _, _ := deps.loadDeps()
+		return currentGuidance(cfg)
+	}
 	srv.AddTool(basemcp.NewTool("assistant_guidance",
 		basemcp.WithDescription("Return mandatory operating guidance for using mcp-ai-helper efficiently and safely."),
 	), func(_ context.Context, _ basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
@@ -27,6 +30,7 @@ func registerGuidance(srv *server.MCPServer, cfg *config.Config) {
 	srv.AddTool(basemcp.NewTool("server_setup_guidance",
 		basemcp.WithDescription("Return recommendations for configuring mcp-ai-helper and its repo-local config file."),
 	), func(_ context.Context, _ basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+		cfg, _, _, _, _ := deps.loadDeps()
 		return structured(config.SetupGuidance(cfg.SourcePath))
 	})
 	srv.AddResource(basemcp.Resource{

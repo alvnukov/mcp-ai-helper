@@ -32,7 +32,7 @@ func Schema() map[string]any {
 			{Path: "layers.commands.enabled", Type: "bool", Default: "true", Description: "Enables local command execution, output filtering, and command history."},
 			{Path: "layers.workflows.enabled", Type: "bool", Default: "true", Description: "Enables multi-step repo workflows with guarded edits, checks, task updates, and owned-file commits."},
 			{Path: "language_profiles", Type: "built-in registry", Default: "go", Description: "Language-aware guardrails used by callers before code edits: file matching, formatter, targeted tests, broad tests, static checks, and common safety rules."},
-			{Path: "providers.<id>.type", Type: "string", Default: "generic", Description: "Provider adapter type. Currently only generic OpenAI-compatible providers are supported.", Examples: []string{"generic"}},
+			{Path: "providers.<id>.type", Type: "string", Default: "generic", Description: "Provider adapter type: generic for OpenAI-compatible providers, anthropic for Anthropic Messages API.", Examples: []string{"generic", "anthropic"}},
 			{Path: "providers.<id>.base_url", Type: "string", Description: "OpenAI-compatible base URL used to derive /chat/completions when completions_url is not set."},
 			{Path: "providers.<id>.completions_url", Type: "string", Description: "Explicit chat completions endpoint. Use when the provider does not follow the standard base_url layout."},
 			{Path: "providers.<id>.api_key_env", Type: "string", Description: "Environment variable containing the provider API key. Prefer this over literal api_key."},

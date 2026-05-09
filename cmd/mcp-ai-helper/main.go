@@ -5,6 +5,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/mark3labs/mcp-go/server"
 
@@ -23,6 +25,15 @@ func main() {
 	}
 
 	srv := mcpserver.New(cfg)
+
+	go func() {
+		sig := make(chan os.Signal, 1)
+		signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+		<-sig
+		signal.Stop(sig)
+		os.Exit(0)
+	}()
+
 	if err := server.ServeStdio(srv); err != nil {
 		fmt.Fprintf(os.Stderr, "serve stdio: %v\n", err)
 		os.Exit(1)

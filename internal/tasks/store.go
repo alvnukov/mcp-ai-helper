@@ -23,26 +23,31 @@ type Store struct {
 }
 
 type Task struct {
-	ID        string    `json:"id"`
-	ParentID  string    `json:"parent_id,omitempty"`
-	Status    string    `json:"status"`
-	Title     string    `json:"title"`
-	Body      string    `json:"body"`
-	Priority  string    `json:"priority,omitempty"`
-	Tags      []string  `json:"tags,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID                 string    `json:"id"`
+	ParentID           string    `json:"parent_id,omitempty"`
+	Status             string    `json:"status"`
+	Title              string    `json:"title"`
+	Body               string    `json:"body"`
+	Priority           string    `json:"priority,omitempty"`
+	Tags               []string  `json:"tags,omitempty"`
+	AcceptanceCriteria []string  `json:"acceptance_criteria,omitempty"`
+	VerificationPlan   []string  `json:"verification_plan,omitempty"`
+	ProjectionSource   string    `json:"projection_source,omitempty"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
 }
 
 type AddRequest struct {
-	RepoPath string   `json:"repo_path"`
-	ID       string   `json:"id"`
-	ParentID string   `json:"parent_id,omitempty"`
-	Status   string   `json:"status"`
-	Title    string   `json:"title"`
-	Body     string   `json:"body"`
-	Priority string   `json:"priority"`
-	Tags     []string `json:"tags"`
+	RepoPath           string   `json:"repo_path"`
+	ID                 string   `json:"id"`
+	ParentID           string   `json:"parent_id,omitempty"`
+	Status             string   `json:"status"`
+	Title              string   `json:"title"`
+	Body               string   `json:"body"`
+	Priority           string   `json:"priority"`
+	Tags               []string `json:"tags"`
+	AcceptanceCriteria []string `json:"acceptance_criteria"`
+	VerificationPlan   []string `json:"verification_plan"`
 }
 
 type ListRequest struct {
@@ -62,14 +67,16 @@ type DeleteRequest struct {
 }
 
 type UpdateRequest struct {
-	RepoPath string   `json:"repo_path"`
-	ID       string   `json:"id"`
-	ParentID string   `json:"parent_id,omitempty"`
-	Status   string   `json:"status"`
-	Title    string   `json:"title"`
-	Body     string   `json:"body"`
-	Priority string   `json:"priority"`
-	Tags     []string `json:"tags"`
+	RepoPath           string   `json:"repo_path"`
+	ID                 string   `json:"id"`
+	ParentID           string   `json:"parent_id,omitempty"`
+	Status             string   `json:"status"`
+	Title              string   `json:"title"`
+	Body               string   `json:"body"`
+	Priority           string   `json:"priority"`
+	Tags               []string `json:"tags"`
+	AcceptanceCriteria []string `json:"acceptance_criteria"`
+	VerificationPlan   []string `json:"verification_plan"`
 }
 
 type StatusRequest struct {
@@ -112,15 +119,17 @@ func (s *Store) Add(req AddRequest) (Task, error) {
 		status = "todo"
 	}
 	task := Task{
-		ID:        id,
-		ParentID:  req.ParentID,
-		Status:    status,
-		Title:     req.Title,
-		Body:      req.Body,
-		Priority:  strings.TrimSpace(req.Priority),
-		Tags:      cleanTags(req.Tags),
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:                 id,
+		ParentID:           req.ParentID,
+		Status:             status,
+		Title:              req.Title,
+		Body:               req.Body,
+		Priority:           strings.TrimSpace(req.Priority),
+		Tags:               cleanTags(req.Tags),
+		AcceptanceCriteria: cleanLines(req.AcceptanceCriteria),
+		VerificationPlan:   cleanLines(req.VerificationPlan),
+		CreatedAt:          now,
+		UpdatedAt:          now,
 	}
 	path, err := s.taskPath(req.RepoPath, id)
 	if err != nil {
@@ -157,6 +166,12 @@ func (s *Store) Update(req UpdateRequest) (Task, error) {
 	}
 	if req.Tags != nil {
 		task.Tags = cleanTags(req.Tags)
+	}
+	if req.AcceptanceCriteria != nil {
+		task.AcceptanceCriteria = cleanLines(req.AcceptanceCriteria)
+	}
+	if req.VerificationPlan != nil {
+		task.VerificationPlan = cleanLines(req.VerificationPlan)
 	}
 	task.UpdatedAt = time.Now().UTC()
 	if err := s.writeTask(req.RepoPath, task); err != nil {
@@ -232,10 +247,10 @@ func (s *Store) List(req ListRequest) ([]Task, error) {
 			continue
 		}
 		name := entry.Name()
-		if !strings.HasSuffix(name, ".json") && !strings.HasSuffix(name, ".lean") {
+		if !strings.HasSuffix(name, ".lean") {
 			continue
 		}
-		id := strings.TrimSuffix(strings.TrimSuffix(name, ".json"), ".lean")
+		id := strings.TrimSuffix(name, ".lean")
 		id = cleanTaskID(id)
 		if id == "" {
 			continue
@@ -267,15 +282,7 @@ func (s *Store) Get(req GetRequest) (Task, error) {
 	if err != nil {
 		return Task{}, err
 	}
-	task, err := s.readTask(path)
-	if err == nil {
-		return task, nil
-	}
-	legacyPath, legacyErr := s.taskPathLegacy(req.RepoPath, req.ID)
-	if legacyErr != nil {
-		return Task{}, err
-	}
-	return s.readTask(legacyPath)
+	return s.readTask(path)
 }
 
 func (s *Store) Delete(req DeleteRequest) error {
@@ -285,10 +292,6 @@ func (s *Store) Delete(req DeleteRequest) error {
 	}
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("delete task file: %w", err)
-	}
-	legacyPath, _ := s.taskPathLegacy(req.RepoPath, req.ID)
-	if legacyPath != "" {
-		_ = os.Remove(legacyPath)
 	}
 	return nil
 }
@@ -305,9 +308,9 @@ func (s *Store) writeTaskPath(path string, task Task) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create task directory: %w", err)
 	}
-	data, err := json.MarshalIndent(task, "", "  ")
+	data, err := encodeLeanTask(task)
 	if err != nil {
-		return fmt.Errorf("marshal task: %w", err)
+		return err
 	}
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("write task file: %w", err)
@@ -324,18 +327,6 @@ func (s *Store) taskPath(repoPath string, id string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, id+".json"), nil
-}
-
-func (s *Store) taskPathLegacy(repoPath string, id string) (string, error) {
-	id = cleanTaskID(id)
-	if id == "" {
-		return "", errors.New("task id is required")
-	}
-	dir, err := s.projects.TasksDir(repoPath)
-	if err != nil {
-		return "", err
-	}
 	return filepath.Join(dir, id+".lean"), nil
 }
 
@@ -343,13 +334,6 @@ func (s *Store) readTask(path string) (Task, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return Task{}, fmt.Errorf("read task file: %w", err)
-	}
-	if strings.HasSuffix(path, ".json") {
-		var task Task
-		if err := json.Unmarshal(data, &task); err != nil {
-			return Task{}, fmt.Errorf("decode task json: %w", err)
-		}
-		return task, nil
 	}
 	return readLeanContent(data)
 }
@@ -370,6 +354,55 @@ func readLeanContent(data []byte) (Task, error) {
 		return Task{}, fmt.Errorf("decode task metadata: %w", err)
 	}
 	return task, nil
+}
+
+func encodeLeanTask(task Task) ([]byte, error) {
+	metadata, err := json.Marshal(task)
+	if err != nil {
+		return nil, fmt.Errorf("marshal task metadata: %w", err)
+	}
+	ident := leanTaskIdent(task.ID)
+	body, err := json.Marshal(task.Body)
+	if err != nil {
+		return nil, fmt.Errorf("marshal task body: %w", err)
+	}
+	title, err := json.Marshal(task.Title)
+	if err != nil {
+		return nil, fmt.Errorf("marshal task title: %w", err)
+	}
+	status, err := json.Marshal(task.Status)
+	if err != nil {
+		return nil, fmt.Errorf("marshal task status: %w", err)
+	}
+	priority, err := json.Marshal(task.Priority)
+	if err != nil {
+		return nil, fmt.Errorf("marshal task priority: %w", err)
+	}
+	content := fmt.Sprintf("/- mcp-ai-helper-task %s -/\nnamespace MCPAIHelper.Tasks\n\ndef %s_id : String := %q\ndef %s_status : String := %s\ndef %s_title : String := %s\ndef %s_body : String := %s\ndef %s_priority : String := %s\n\nend MCPAIHelper.Tasks\n", metadata, ident, task.ID, ident, status, ident, title, ident, body, ident, priority)
+	return []byte(content), nil
+}
+
+func leanTaskIdent(id string) string {
+	id = cleanTaskID(id)
+	if id == "" {
+		return "task"
+	}
+	var b strings.Builder
+	for _, r := range id {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('_')
+		}
+	}
+	out := strings.Trim(b.String(), "_")
+	if out == "" {
+		return "task"
+	}
+	if out[0] >= '0' && out[0] <= '9' {
+		out = "task_" + out
+	}
+	return out
 }
 
 func cleanTaskID(value string) string {
@@ -400,6 +433,20 @@ func cleanTags(values []string) []string {
 	return out
 }
 
+func cleanLines(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
+}
+
 func statusSet(values []string) map[string]bool {
 	out := make(map[string]bool, len(values))
 	for _, value := range values {
@@ -423,6 +470,8 @@ func taskMatches(task Task, query string) bool {
 		task.Body,
 		task.Priority,
 		strings.Join(task.Tags, "\n"),
+		strings.Join(task.AcceptanceCriteria, "\n"),
+		strings.Join(task.VerificationPlan, "\n"),
 	}, "\n"))
 	return strings.Contains(haystack, query)
 }

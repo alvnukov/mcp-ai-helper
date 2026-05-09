@@ -8,6 +8,7 @@ import (
 	basemcp "github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
+	"github.com/zol/mcp-ai-helper/internal/command"
 	"github.com/zol/mcp-ai-helper/internal/tasks"
 )
 
@@ -34,10 +35,10 @@ type issueAcceptRequest struct {
 
 func registerIssueTools(srv *server.MCPServer, deps *Server) {
 	srv.AddTool(basemcp.NewTool("issue_add",
-		basemcp.WithDescription("Record cross-repository feedback as an actionable issue in the target repository task store."),
+		basemcp.WithDescription("Record cross-repository feedback as an actionable Lean-backed task issue."),
 		basemcp.WithString("repo_path", basemcp.Required(), basemcp.Description("Target repository root that should receive the issue.")),
 		basemcp.WithString("source_repo_path", basemcp.Description("Repository root where the feedback originated.")),
-		basemcp.WithString("id", basemcp.Description("Optional stable issue id.")),
+		basemcp.WithString("id", basemcp.Description("Canonical task-NNN id for the issue.")),
 		basemcp.WithString("title", basemcp.Required(), basemcp.Description("Short issue title.")),
 		basemcp.WithString("body", basemcp.Description("Feedback details and expected behavior.")),
 		basemcp.WithString("priority", basemcp.Description("Issue priority: low, normal, high, critical.")),
@@ -47,8 +48,8 @@ func registerIssueTools(srv *server.MCPServer, deps *Server) {
 		if err := bind(request, &args); err != nil {
 			return nil, err
 		}
-		_, _, _, _, store := deps.loadDeps()
-		result, err := addIssue(store, args)
+		_, _, commands, _, store := deps.loadDeps()
+		result, err := addIssue(ctx, args, commands, store)
 		if err != nil {
 			return nil, err
 		}
@@ -56,7 +57,7 @@ func registerIssueTools(srv *server.MCPServer, deps *Server) {
 	})
 
 	srv.AddTool(basemcp.NewTool("issue_list",
-		basemcp.WithDescription("List open feedback issues recorded for a repository."),
+		basemcp.WithDescription("List open feedback issues recorded in the Lean task registry."),
 		basemcp.WithString("repo_path", basemcp.Required(), basemcp.Description("Repository root used for issue lookup.")),
 		basemcp.WithString("status", basemcp.Description("Optional task status filter; defaults to todo.")),
 		basemcp.WithString("query", basemcp.Description("Optional text query.")),
@@ -65,8 +66,8 @@ func registerIssueTools(srv *server.MCPServer, deps *Server) {
 		if err := bind(request, &args); err != nil {
 			return nil, err
 		}
-		_, _, _, _, store := deps.loadDeps()
-		result, err := listIssues(store, args)
+		_, _, commands, _, store := deps.loadDeps()
+		result, err := listIssues(ctx, args, commands, store)
 		if err != nil {
 			return nil, err
 		}
@@ -76,14 +77,14 @@ func registerIssueTools(srv *server.MCPServer, deps *Server) {
 	srv.AddTool(basemcp.NewTool("issue_accept",
 		basemcp.WithDescription("Accept one feedback issue as current work by moving it to in_progress."),
 		basemcp.WithString("repo_path", basemcp.Required(), basemcp.Description("Repository root used for issue lookup.")),
-		basemcp.WithString("id", basemcp.Required(), basemcp.Description("Issue id to accept.")),
+		basemcp.WithString("id", basemcp.Required(), basemcp.Description("Canonical task-NNN issue id to accept.")),
 	), func(ctx context.Context, request basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
 		var args issueAcceptRequest
 		if err := bind(request, &args); err != nil {
 			return nil, err
 		}
-		_, _, _, _, store := deps.loadDeps()
-		result, err := acceptIssue(store, args)
+		_, _, commands, _, store := deps.loadDeps()
+		result, err := acceptIssue(ctx, args, commands, store)
 		if err != nil {
 			return nil, err
 		}
@@ -91,13 +92,13 @@ func registerIssueTools(srv *server.MCPServer, deps *Server) {
 	})
 }
 
-func addIssue(store *tasks.Store, req issueAddRequest) (tasks.Task, error) {
+func addIssue(ctx context.Context, req issueAddRequest, commands *command.Runner, store *tasks.Store) (tasks.Task, error) {
 	body := strings.TrimSpace(req.Body)
 	if strings.TrimSpace(req.SourceRepoPath) != "" {
 		body = strings.TrimSpace(body + "\n\nsource_repo_path: " + req.SourceRepoPath)
 	}
 	tags := append([]string{"issue", "feedback"}, req.Tags...)
-	return store.Add(tasks.AddRequest{
+	result, err := upsertTask(ctx, tasks.AddRequest{
 		RepoPath: req.RepoPath,
 		ID:       req.ID,
 		Status:   "todo",
@@ -105,20 +106,27 @@ func addIssue(store *tasks.Store, req issueAddRequest) (tasks.Task, error) {
 		Body:     body,
 		Priority: req.Priority,
 		Tags:     uniqueStrings(tags),
-	})
+	}, commands, store)
+	return result.Task, err
 }
 
-func listIssues(store *tasks.Store, req issueListRequest) ([]tasks.Task, error) {
+func listIssues(ctx context.Context, req issueListRequest, commands *command.Runner, store *tasks.Store) ([]tasks.Task, error) {
 	status := req.Status
 	if status == "" {
 		status = "todo"
 	}
-	listed, err := store.List(tasks.ListRequest{RepoPath: req.RepoPath, Status: status, Query: req.Query})
+	var listed []tasks.Task
+	var err error
+	if status == "done" {
+		listed, _, err = readAllTasks(ctx, req.RepoPath, commands, store)
+	} else {
+		listed, _, err = readCurrentTasks(ctx, req.RepoPath, commands, store)
+	}
 	if err != nil {
 		return nil, err
 	}
 	issues := make([]tasks.Task, 0, len(listed))
-	for _, task := range listed {
+	for _, task := range filterTasks(listed, tasks.ListRequest{RepoPath: req.RepoPath, Status: status, Query: req.Query}) {
 		if slices.Contains(task.Tags, "issue") || slices.Contains(task.Tags, "feedback") {
 			issues = append(issues, task)
 		}
@@ -126,6 +134,7 @@ func listIssues(store *tasks.Store, req issueListRequest) ([]tasks.Task, error) 
 	return issues, nil
 }
 
-func acceptIssue(store *tasks.Store, req issueAcceptRequest) (tasks.Task, error) {
-	return store.SetStatus(tasks.StatusRequest{RepoPath: req.RepoPath, ID: req.ID, Status: "in_progress"})
+func acceptIssue(ctx context.Context, req issueAcceptRequest, commands *command.Runner, store *tasks.Store) (tasks.Task, error) {
+	result, err := setTaskStatus(ctx, tasks.StatusRequest{RepoPath: req.RepoPath, ID: req.ID, Status: "in_progress"}, commands, store)
+	return result.Task, err
 }
