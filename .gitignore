@@ -6,3 +6,4 @@ coverage.out
 *.log
 config.yaml
 *.local.yaml
+.mcp.json
