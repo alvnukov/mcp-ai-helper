@@ -51,6 +51,33 @@ func TestCommitOwnedCommitsOnlyOwnedFile(t *testing.T) {
 	}
 }
 
+func TestCommitOwnedCommitsIgnoredOwnedFile(t *testing.T) {
+	repo := initRepo(t)
+	writeFile(t, filepath.Join(repo, ".gitignore"), "*.log\n")
+	run(t, repo, "add", ".gitignore")
+	run(t, repo, "commit", "-m", "ignore logs")
+	writeFile(t, filepath.Join(repo, "owned.log"), "owned\n")
+	writeFile(t, filepath.Join(repo, "external.log"), "external\n")
+
+	result, err := CommitOwned(t.Context(), CommitRequest{
+		RepoPath: repo,
+		Files:    []string{"owned.log"},
+		Message:  "owned ignored change",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "ok" {
+		t.Fatalf("status = %q, want ok", result.Status)
+	}
+	if got := run(t, repo, "show", "--name-status", "--format=", "HEAD"); got != "A\towned.log\n" {
+		t.Fatalf("unexpected commit diff: %q", got)
+	}
+	if got := run(t, repo, "status", "--short", "--ignored"); got != "!! external.log\n" {
+		t.Fatalf("unexpected status: %q", got)
+	}
+}
+
 func TestCommitOwnedCommitsDeletedOwnedFile(t *testing.T) {
 	repo := initRepo(t)
 	writeFile(t, filepath.Join(repo, "tracked.txt"), "tracked\n")
