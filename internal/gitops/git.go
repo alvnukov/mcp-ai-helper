@@ -96,9 +96,25 @@ func CommitOwned(ctx context.Context, req CommitRequest) (CommitResult, error) {
 		}
 	}
 	if len(existingFiles) > 0 {
-		addArgs := append([]string{"add", "--"}, existingFiles...)
-		if _, err := runGit(ctx, repo, addArgs...); err != nil {
-			return CommitResult{}, err
+		ignored, _ := ignoredOwnedFiles(ctx, repo, existingFiles)
+		normal := make([]string, 0, len(existingFiles))
+		force := make([]string, 0, len(ignored))
+		for _, f := range existingFiles {
+			if ignored[f] {
+				force = append(force, f)
+			} else {
+				normal = append(normal, f)
+			}
+		}
+		if len(normal) > 0 {
+			if _, err := runGit(ctx, repo, append([]string{"add", "--"}, normal...)...); err != nil {
+				return CommitResult{}, err
+			}
+		}
+		if len(force) > 0 {
+			if _, err := runGit(ctx, repo, append([]string{"add", "-f", "--"}, force...)...); err != nil {
+				return CommitResult{}, err
+			}
 		}
 	}
 	staged, err := stagedFiles(ctx, repo)
@@ -174,6 +190,22 @@ func runGit(ctx context.Context, repo string, args ...string) (string, error) {
 		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
 	}
 	return stdout.String(), nil
+}
+
+func ignoredOwnedFiles(ctx context.Context, repo string, files []string) (map[string]bool, error) {
+	if len(files) == 0 {
+		return nil, nil
+	}
+	args := append([]string{"check-ignore", "--"}, files...)
+	out, err := runGit(ctx, repo, args...)
+	if err != nil {
+		return nil, nil
+	}
+	ignored := map[string]bool{}
+	for _, line := range splitLines(out) {
+		ignored[line] = true
+	}
+	return ignored, nil
 }
 
 func splitLines(text string) []string {

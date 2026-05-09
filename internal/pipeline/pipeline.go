@@ -57,7 +57,9 @@ func (b legacyTaskBackend) SetStatus(_ context.Context, req tasks.StatusRequest)
 }
 
 func (b legacyTaskBackend) BatchUpsert(_ context.Context, req tasks.BatchUpsertRequest) (tasks.BatchUpsertResult, error) {
-	return b.store.BatchUpsert(req)
+	result, err := b.store.BatchUpsert(req)
+	result.Source = "legacy_registry"
+	return result, err
 }
 
 // Request describes the legacy command-analysis pipeline input.
