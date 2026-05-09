@@ -347,6 +347,46 @@ func TestRunWorkflowStepsBranchOnCommandExitCodeAndOutput(t *testing.T) {
 	}
 }
 
+func TestRunWorkflowStepsCompoundConditionsValidationAndChangedFiles(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "x.txt"), []byte("old\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runner := NewRunner(testConfig(dir), nil)
+
+	result, err := runner.RunWorkflow(t.Context(), WorkflowRequest{
+		RepoPath: dir,
+		Steps: []WorkflowStep{
+			{ID: "edit", Tool: "guarded_replace", Args: map[string]any{"path": "x.txt", "old": "old", "new": "new"}},
+			{ID: "probe", Tool: "command", Args: map[string]any{"command": "printf 'error: needle\\n'"}},
+			{ID: "branch", Tool: "command", If: "steps.probe.output_contains needle && steps.probe.validation == ok && changed_files contains x.txt", Args: map[string]any{"command": "printf branch > branch.txt"}},
+			{ID: "else", Tool: "command", If: "! steps.probe.output_contains needle || file_missing x.txt", Args: map[string]any{"command": "printf wrong > branch.txt"}},
+			{ID: "empty", Tool: "command", Args: map[string]any{"command": "true"}},
+			{ID: "missing-evidence", Tool: "command", If: "steps.empty.validation == INSUFFICIENT_DATA", Args: map[string]any{"command": "printf missing-evidence > evidence.txt"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "ok" {
+		t.Fatalf("status = %q, reason = %q", result.Status, result.Reason)
+	}
+	branch, err := os.ReadFile(filepath.Join(dir, "branch.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(branch) != "branch" {
+		t.Fatalf("branch.txt = %q, want branch", string(branch))
+	}
+	evidence, err := os.ReadFile(filepath.Join(dir, "evidence.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(evidence) != "missing-evidence" {
+		t.Fatalf("evidence.txt = %q, want missing-evidence", string(evidence))
+	}
+}
+
 func TestRunWorkflowStepsBranchOnFileAndTaskState(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "marker.txt"), []byte("marker\n"), 0o600); err != nil {

@@ -386,7 +386,7 @@ func buildStepWaves(steps []WorkflowStep) [][]WorkflowStep {
 				reverse[j] = append(reverse[j], i)
 			}
 		}
-		if depID := parseStepsCondition(s.If); depID != "" {
+		for _, depID := range parseStepConditionDeps(s.If) {
 			if j, ok := idx[depID]; ok {
 				deps[i] = append(deps[i], j)
 				reverse[j] = append(reverse[j], i)
@@ -444,17 +444,35 @@ func buildStepWaves(steps []WorkflowStep) [][]WorkflowStep {
 	return waves
 }
 
-func parseStepsCondition(cond string) string {
+func parseStepConditionDeps(cond string) []string {
 	fields := strings.Fields(strings.TrimSpace(cond))
-	if len(fields) == 0 || !strings.HasPrefix(fields[0], "steps.") {
+	deps := make([]string, 0, len(fields))
+	seen := map[string]struct{}{}
+	for _, field := range fields {
+		dep := stepConditionDependency(field)
+		if dep == "" {
+			continue
+		}
+		if _, ok := seen[dep]; ok {
+			continue
+		}
+		seen[dep] = struct{}{}
+		deps = append(deps, dep)
+	}
+	return deps
+}
+
+func stepConditionDependency(field string) string {
+	field = strings.TrimLeft(strings.TrimSpace(field), "!")
+	if !strings.HasPrefix(field, "steps.") {
 		return ""
 	}
-	path := strings.SplitN(strings.TrimPrefix(fields[0], "steps."), ".", 2)
+	path := strings.SplitN(strings.TrimPrefix(field, "steps."), ".", 2)
 	if len(path) != 2 {
 		return ""
 	}
 	switch path[1] {
-	case "status", "exit_code", "output_contains":
+	case "status", "exit_code", "output_contains", "validation":
 		return path[0]
 	default:
 		return ""
@@ -492,7 +510,7 @@ func readsChangedSet(s *WorkflowStep) bool {
 	if s.Tool == "git_commit_owned" {
 		return true
 	}
-	return strings.Contains(s.If, "changed_files_count")
+	return strings.Contains(s.If, "changed_files")
 }
 
 type fileLockSet struct {
@@ -736,6 +754,71 @@ func (r *Runner) evalStepCondition(repoPath string, condition string, result Wor
 	if condition == "" || condition == "always" {
 		return true
 	}
+	return r.evalConditionOr(repoPath, condition, result, steps)
+}
+
+func (r *Runner) evalConditionOr(repoPath string, condition string, result WorkflowResult, steps map[string]WorkflowStepResult) bool {
+	for _, part := range splitConditionExpression(condition, "||") {
+		if r.evalConditionAnd(repoPath, part, result, steps) {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *Runner) evalConditionAnd(repoPath string, condition string, result WorkflowResult, steps map[string]WorkflowStepResult) bool {
+	parts := splitConditionExpression(condition, "&&")
+	if len(parts) == 0 {
+		return false
+	}
+	for _, part := range parts {
+		if !r.evalConditionNot(repoPath, part, result, steps) {
+			return false
+		}
+	}
+	return true
+}
+
+func (r *Runner) evalConditionNot(repoPath string, condition string, result WorkflowResult, steps map[string]WorkflowStepResult) bool {
+	condition = strings.TrimSpace(condition)
+	negated := false
+	for strings.HasPrefix(condition, "!") {
+		negated = !negated
+		condition = strings.TrimSpace(strings.TrimPrefix(condition, "!"))
+	}
+	if condition == "" {
+		return false
+	}
+	value := r.evalConditionAtom(repoPath, condition, result, steps)
+	if negated {
+		return !value
+	}
+	return value
+}
+
+func splitConditionExpression(condition string, op string) []string {
+	fields := strings.Fields(condition)
+	parts := []string{}
+	current := []string{}
+	for _, field := range fields {
+		if field == op {
+			part := strings.TrimSpace(strings.Join(current, " "))
+			if part != "" {
+				parts = append(parts, part)
+			}
+			current = nil
+			continue
+		}
+		current = append(current, field)
+	}
+	part := strings.TrimSpace(strings.Join(current, " "))
+	if part != "" {
+		parts = append(parts, part)
+	}
+	return parts
+}
+
+func (r *Runner) evalConditionAtom(repoPath string, condition string, result WorkflowResult, steps map[string]WorkflowStepResult) bool {
 	fields := strings.Fields(condition)
 	if len(fields) == 0 {
 		return false
@@ -743,6 +826,8 @@ func (r *Runner) evalStepCondition(repoPath string, condition string, result Wor
 	switch {
 	case fields[0] == "changed_files_count" && len(fields) == 3:
 		return compareInt(len(result.ChangedFiles), fields[1], fields[2])
+	case fields[0] == "changed_files" && len(fields) == 3 && fields[1] == "contains":
+		return changedFilesContain(result.ChangedFiles, fields[2])
 	case fields[0] == "file_exists" && len(fields) == 2:
 		return workflowFileExists(repoPath, fields[1])
 	case fields[0] == "file_missing" && len(fields) == 2:
@@ -756,6 +841,19 @@ func (r *Runner) evalStepCondition(repoPath string, condition string, result Wor
 	}
 }
 
+func changedFilesContain(files []string, path string) bool {
+	clean := filepath.ToSlash(filepath.Clean(strings.TrimSpace(path)))
+	if clean == "" || clean == "." {
+		return false
+	}
+	for _, file := range files {
+		if filepath.ToSlash(filepath.Clean(file)) == clean {
+			return true
+		}
+	}
+	return false
+}
+
 func evalStepResultCondition(fields []string, steps map[string]WorkflowStepResult) bool {
 	path := strings.SplitN(strings.TrimPrefix(fields[0], "steps."), ".", 2)
 	if len(path) != 2 {
@@ -767,20 +865,33 @@ func evalStepResultCondition(fields []string, steps map[string]WorkflowStepResul
 	}
 	switch path[1] {
 	case "status":
-		return len(fields) == 3 && fields[1] == "==" && step.Status == fields[2]
+		return len(fields) == 3 && compareString(step.Status, fields[1], fields[2])
 	case "exit_code":
 		cmd, ok := step.Output.(command.Result)
 		return ok && len(fields) == 3 && compareInt(cmd.ExitCode, fields[1], fields[2])
 	case "output_contains":
 		cmd, ok := step.Output.(command.Result)
 		return ok && len(fields) >= 2 && commandOutputContains(cmd, strings.Join(fields[1:], " "))
+	case "validation":
+		return len(fields) == 3 && compareString(stepValidationStatus(step), fields[1], fields[2])
 	default:
 		return false
 	}
 }
 
+func stepValidationStatus(step WorkflowStepResult) string {
+	cmd, ok := step.Output.(command.Result)
+	if !ok {
+		return "unavailable"
+	}
+	if len(cmd.EvidenceLines) == 0 {
+		return "INSUFFICIENT_DATA"
+	}
+	return "ok"
+}
+
 func (r *Runner) evalTaskCondition(repoPath string, fields []string) bool {
-	if len(fields) != 3 || fields[1] != "==" || !r.cfg.LayerEnabled("tasks") {
+	if len(fields) != 3 || !r.cfg.LayerEnabled("tasks") {
 		return false
 	}
 	path := strings.SplitN(strings.TrimPrefix(fields[0], "tasks."), ".", 2)
@@ -788,7 +899,18 @@ func (r *Runner) evalTaskCondition(repoPath string, fields []string) bool {
 		return false
 	}
 	task, err := r.tasks.Get(tasks.GetRequest{RepoPath: repoPath, ID: path[0]})
-	return err == nil && task.Status == fields[2]
+	return err == nil && compareString(task.Status, fields[1], fields[2])
+}
+
+func compareString(left string, op string, right string) bool {
+	switch op {
+	case "==":
+		return left == right
+	case "!=":
+		return left != right
+	default:
+		return false
+	}
 }
 
 func workflowFileExists(repoPath string, relPath string) bool {
