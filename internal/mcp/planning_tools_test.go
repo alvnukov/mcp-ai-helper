@@ -50,19 +50,41 @@ func TestBuildTaskPacketIncludesStructuredExecutionScope(t *testing.T) {
 		ID:                 "impl",
 		Title:              "[type-implementation-standard] Implement thing",
 		Body:               "local implementation only",
-		Tags:               []string{"type-implementation-standard", "llm-standard"},
+		Tags:               []string{"type-implementation-standard", "llm-standard", "planning"},
 		AcceptanceCriteria: []string{"criterion"},
 		VerificationPlan:   []string{"go test ./internal/mcp"},
 	}, "standard")
 
-	if packet.Action != "proceed" || packet.RequiredLLMLevel != "standard" {
+	if packet.Action != "proceed" || packet.Readiness != "ready" || packet.RequiredLLMLevel != "standard" || !packet.ReadyForStandardModel {
 		t.Fatalf("packet = %#v", packet)
 	}
 	if len(packet.AcceptanceCriteria) != 1 || len(packet.VerificationPlan) != 1 {
 		t.Fatalf("packet missing structured fields: %#v", packet)
 	}
+	if len(packet.MinimalRequiredContext) == 0 || len(packet.OwnedFiles) == 0 || len(packet.ForbiddenFiles) == 0 || len(packet.KnownRisks) == 0 || len(packet.RequiredGates) == 0 {
+		t.Fatalf("packet missing execution contract: %#v", packet)
+	}
 	if len(packet.ForbiddenShortcuts) == 0 || len(packet.ExpectedOutput) == 0 {
 		t.Fatalf("packet missing delegation guardrails: %#v", packet)
+	}
+}
+
+func TestBuildTaskPacketInfersCriticalTaskNeedsStrongModel(t *testing.T) {
+	packet := buildTaskPacket(tasks.Task{
+		ID:       "task-044",
+		Title:    "Добавить task execution packet и readiness contract",
+		Body:     "Packet must contain context, owned files, forbidden files, risks, gates, and readiness.",
+		Priority: "critical",
+		Tags:     []string{"tasks", "workflow", "planning", "llm-ergonomics"},
+	}, "standard")
+
+	if packet.Action != "switch_model_required" || packet.Readiness != "requires_strong_model" || !packet.NeedsStrongModel || packet.ReadyForStandardModel {
+		t.Fatalf("packet routing = %#v", packet)
+	}
+	for _, field := range [][]string{packet.MinimalRequiredContext, packet.OwnedFiles, packet.ForbiddenFiles, packet.KnownRisks, packet.RequiredGates} {
+		if len(field) == 0 {
+			t.Fatalf("packet missing readiness field: %#v", packet)
+		}
 	}
 }
 
