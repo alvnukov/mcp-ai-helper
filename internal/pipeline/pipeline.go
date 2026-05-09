@@ -235,6 +235,7 @@ func (r *Runner) runWorkflowSteps(ctx context.Context, req WorkflowRequest) (Wor
 	result := WorkflowResult{Status: "ok"}
 	stepResults := map[string]WorkflowStepResult{}
 	changedSet := map[string]struct{}{}
+	fileHashes := map[string]string{}
 	for _, step := range req.Steps {
 		if !evalStepCondition(step.If, result, stepResults) {
 			stepResult := WorkflowStepResult{ID: step.ID, Tool: step.Tool, Status: "skipped", Reason: "condition is false"}
@@ -244,7 +245,7 @@ func (r *Runner) runWorkflowSteps(ctx context.Context, req WorkflowRequest) (Wor
 			}
 			continue
 		}
-		stepResult, err := r.executeWorkflowStep(ctx, req.RepoPath, step, changedSet)
+		stepResult, err := r.executeWorkflowStep(ctx, req.RepoPath, step, changedSet, fileHashes)
 		if err != nil {
 			return WorkflowResult{}, err
 		}
@@ -274,7 +275,7 @@ func (r *Runner) runWorkflowSteps(ctx context.Context, req WorkflowRequest) (Wor
 	return result, nil
 }
 
-func (r *Runner) executeWorkflowStep(ctx context.Context, repoPath string, step WorkflowStep, changedSet map[string]struct{}) (WorkflowStepResult, error) {
+func (r *Runner) executeWorkflowStep(ctx context.Context, repoPath string, step WorkflowStep, changedSet map[string]struct{}, fileHashes map[string]string) (WorkflowStepResult, error) {
 	base := WorkflowStepResult{ID: step.ID, Tool: step.Tool, Status: "ok"}
 	switch step.Tool {
 	case "guarded_replace":
@@ -283,6 +284,9 @@ func (r *Runner) executeWorkflowStep(ctx context.Context, repoPath string, step 
 			return WorkflowStepResult{}, err
 		}
 		replaceReq := fileops.ReplaceRequest{RepoPath: repoPath, Path: args.Path, ExpectedHash: args.ExpectedHash, Old: args.Old, New: args.New}
+		if currentHash, ok := fileHashes[args.Path]; ok {
+			replaceReq.ExpectedHash = currentHash
+		}
 		if replaceReq.ExpectedHash == "" {
 			snapshot, err := fileops.ReadSnapshotInRepo(repoPath, args.Path)
 			if err != nil {
@@ -304,6 +308,7 @@ func (r *Runner) executeWorkflowStep(ctx context.Context, repoPath string, step 
 		base.Output = editResult
 		if editResult.Changed {
 			changedSet[args.Path] = struct{}{}
+			fileHashes[args.Path] = editResult.NewHash
 		}
 		return base, nil
 	case "command":

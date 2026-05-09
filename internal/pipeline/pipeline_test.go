@@ -111,6 +111,38 @@ func TestRunWorkflowStepsEditCheckCommit(t *testing.T) {
 	}
 }
 
+func TestRunWorkflowStepsTwoEditsSameFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.txt")
+	if err := os.WriteFile(path, []byte("line1\nline2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runner := NewRunner(testConfig(dir), nil)
+	result, err := runner.RunWorkflow(t.Context(), WorkflowRequest{
+		RepoPath: dir,
+		Steps: []WorkflowStep{
+			{ID: "edit1", Tool: "guarded_replace", Args: map[string]any{"path": "f.txt", "old": "line1", "new": "replaced1"}},
+			{ID: "edit2", Tool: "guarded_replace", Args: map[string]any{"path": "f.txt", "old": "line2", "new": "replaced2"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "ok" {
+		t.Fatalf("status = %q, reason = %q", result.Status, result.Reason)
+	}
+	if len(result.StepResults) != 2 || result.StepResults[0].Status != "ok" || result.StepResults[1].Status != "ok" {
+		t.Fatalf("step results = %#v", result.StepResults)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "replaced1\nreplaced2\n" {
+		t.Fatalf("file = %q", string(data))
+	}
+}
+
 func TestRunWorkflowStepsTaskBatchUpsert(t *testing.T) {
 	dir := t.TempDir()
 	runner := NewRunner(testConfig(dir), nil)
