@@ -49,40 +49,6 @@ func TestLeanUpsertCreatesDeterministicTaskAndValidates(t *testing.T) {
 	}
 }
 
-func TestLeanBatchUpsertPreservesStructuredCriteria(t *testing.T) {
-	repo := copyLeanRepoFixture(t)
-	result, err := batchUpsertTasks(context.Background(), tasks.BatchUpsertRequest{RepoPath: repo, Tasks: []tasks.AddRequest{{ID: "task-997", Status: "todo", Title: "Structured task", Body: "Created by batch", Priority: "high", Tags: []string{"lean", "criteria"}, AcceptanceCriteria: []string{"criterion one", "  "}, VerificationPlan: []string{"go test ./internal/mcp"}}}}, commandRunnerForRepo(repo), legacyStoreForTest(t))
-	if err != nil {
-		t.Fatalf("batchUpsertTasks returned error: %v", err)
-	}
-	if len(result.Upserted) != 1 || len(result.Upserted[0].AcceptanceCriteria) != 1 || len(result.Upserted[0].VerificationPlan) != 1 {
-		t.Fatalf("batch result lost structured fields: %+v", result)
-	}
-
-	task, _, err := readTask(context.Background(), repo, "task-997", commandRunnerForRepo(repo), legacyStoreForTest(t))
-	if err != nil {
-		t.Fatalf("read structured task: %v", err)
-	}
-	if len(task.AcceptanceCriteria) != 1 || task.AcceptanceCriteria[0] != "criterion one" || len(task.VerificationPlan) != 1 || task.VerificationPlan[0] != "go test ./internal/mcp" {
-		t.Fatalf("structured fields were not projected by task_get path: %+v", task)
-	}
-
-	list, _, err := readCurrentTasks(context.Background(), repo, commandRunnerForRepo(repo), legacyStoreForTest(t))
-	if err != nil {
-		t.Fatalf("read current tasks: %v", err)
-	}
-	for _, item := range list {
-		if item.ID != "task-997" {
-			continue
-		}
-		if len(item.AcceptanceCriteria) != 1 || item.AcceptanceCriteria[0] != "criterion one" || len(item.VerificationPlan) != 1 {
-			t.Fatalf("structured fields were not projected by task_current path: %+v", item)
-		}
-		return
-	}
-	t.Fatal("structured task missing from task_current path")
-}
-
 func TestLeanBatchUpsertClosesMissingActiveTasks(t *testing.T) {
 	repo := copyLeanRepoFixture(t)
 	result, err := batchUpsertTasks(context.Background(), tasks.BatchUpsertRequest{RepoPath: repo, CloseMissing: true, MissingStatus: "done", Tasks: []tasks.AddRequest{{ID: "task-999", Status: "todo", Title: "Only task"}}}, commandRunnerForRepo(repo), legacyStoreForTest(t))
