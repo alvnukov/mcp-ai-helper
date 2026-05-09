@@ -34,19 +34,27 @@ type taskPacketRequest struct {
 }
 
 type taskPacketResult struct {
-	TaskID             string   `json:"task_id"`
-	Action             string   `json:"action"`
-	RequiredTaskType   string   `json:"required_task_type,omitempty"`
-	RequiredLLMLevel   string   `json:"required_llm_level,omitempty"`
-	AllowedModelLevels []string `json:"allowed_model_levels,omitempty"`
-	Objective          string   `json:"objective,omitempty"`
-	Body               string   `json:"body,omitempty"`
-	AcceptanceCriteria []string `json:"acceptance_criteria,omitempty"`
-	VerificationPlan   []string `json:"verification_plan,omitempty"`
-	ForbiddenShortcuts []string `json:"forbidden_shortcuts,omitempty"`
-	ExpectedOutput     []string `json:"expected_output,omitempty"`
-	StatusUpdate       string   `json:"status_update,omitempty"`
-	SwitchReason       string   `json:"switch_reason,omitempty"`
+	TaskID                 string   `json:"task_id"`
+	Action                 string   `json:"action"`
+	Readiness              string   `json:"readiness"`
+	ReadyForStandardModel  bool     `json:"ready_for_standard_model"`
+	NeedsStrongModel       bool     `json:"needs_strong_model"`
+	RequiredTaskType       string   `json:"required_task_type,omitempty"`
+	RequiredLLMLevel       string   `json:"required_llm_level,omitempty"`
+	AllowedModelLevels     []string `json:"allowed_model_levels,omitempty"`
+	Objective              string   `json:"objective,omitempty"`
+	Body                   string   `json:"body,omitempty"`
+	MinimalRequiredContext []string `json:"minimal_required_context,omitempty"`
+	OwnedFiles             []string `json:"owned_files,omitempty"`
+	ForbiddenFiles         []string `json:"forbidden_files,omitempty"`
+	KnownRisks             []string `json:"known_risks,omitempty"`
+	RequiredGates          []string `json:"required_gates,omitempty"`
+	AcceptanceCriteria     []string `json:"acceptance_criteria,omitempty"`
+	VerificationPlan       []string `json:"verification_plan,omitempty"`
+	ForbiddenShortcuts     []string `json:"forbidden_shortcuts,omitempty"`
+	ExpectedOutput         []string `json:"expected_output,omitempty"`
+	StatusUpdate           string   `json:"status_update,omitempty"`
+	SwitchReason           string   `json:"switch_reason,omitempty"`
 }
 
 type planTaskExecutionResult struct {
@@ -110,14 +118,23 @@ func buildTaskPacket(task tasks.Task, currentModelLevel string) taskPacketResult
 	if strings.TrimSpace(currentModelLevel) == "" {
 		currentModelLevel = "unknown"
 	}
+	action := actionForLevel(level, currentModelLevel)
 	packet := taskPacketResult{
-		TaskID:             task.ID,
-		Action:             actionForLevel(level, currentModelLevel),
-		RequiredTaskType:   taskType,
-		RequiredLLMLevel:   level,
-		AllowedModelLevels: allowedDelegateLevels(level),
-		Objective:          task.Title,
-		Body:               task.Body,
+		TaskID:                 task.ID,
+		Action:                 action,
+		Readiness:              readinessForAction(action),
+		ReadyForStandardModel:  actionForLevel(level, "standard") == "proceed",
+		NeedsStrongModel:       level == "strong",
+		RequiredTaskType:       taskType,
+		RequiredLLMLevel:       level,
+		AllowedModelLevels:     allowedDelegateLevels(level),
+		Objective:              task.Title,
+		Body:                   task.Body,
+		MinimalRequiredContext: minimalContextForTask(task),
+		OwnedFiles:             ownedFilesForTask(task),
+		ForbiddenFiles:         forbiddenFilesForTask(task),
+		KnownRisks:             risksForTask(task),
+		RequiredGates:          requiredGatesForTask(task),
 		ForbiddenShortcuts: []string{
 			"do not change unrelated roadmap or parent planning policy",
 			"do not mark design/research tasks done without strong-level review",
@@ -217,6 +234,116 @@ func summarizeTaskForPlan(task tasks.Task) taskPlanSummary {
 	}
 }
 
+func readinessForAction(action string) string {
+	switch action {
+	case "proceed":
+		return "ready"
+	case "switch_model_required":
+		return "requires_strong_model"
+	default:
+		return "blocked"
+	}
+}
+
+func minimalContextForTask(task tasks.Task) []string {
+	context := []string{"task_current", "task_get " + task.ID}
+	for _, file := range ownedFilesForTask(task) {
+		if file == "MCPAIHelperProject/ActiveTasks.lean" {
+			continue
+		}
+		context = append(context, "read_file "+file, "snapshot_file "+file)
+	}
+	return uniqueStrings(context)
+}
+
+func forbiddenFilesForTask(_ tasks.Task) []string {
+	return []string{
+		"legacy task projection files",
+		"unrelated roadmap or guidance files",
+		"MCPAIHelperProject/ActiveTasks.lean direct edits; use task_transition/task tools only",
+	}
+}
+
+func risksForTask(task tasks.Task) []string {
+	risks := []string{"premature done status without required gates and owned-files commit"}
+	if hasAnyTag(task.Tags, "workflow", "tasks", "git", "fileops") {
+		risks = append(risks, "shared workflow semantics can affect unrelated repo tasks")
+	}
+	if hasAnyTag(task.Tags, "lean-registry", "tasks") {
+		risks = append(risks, "Lean registry mutation must validate with lake build")
+	}
+	if hasAnyTag(task.Tags, "logs", "output", "filtering") {
+		risks = append(risks, "large command output must stay compact and evidence-linked")
+	}
+	return uniqueStrings(risks)
+}
+
+func requiredGatesForTask(task tasks.Task) []string {
+	if len(task.VerificationPlan) > 0 {
+		return task.VerificationPlan
+	}
+	gates := []string{"gofmt on changed Go files"}
+	switch {
+	case hasAnyTag(task.Tags, "planning"):
+		gates = append(gates, "go test ./internal/mcp")
+	case hasAnyTag(task.Tags, "workflow"):
+		gates = append(gates, "go test ./internal/pipeline ./internal/mcp")
+	case hasAnyTag(task.Tags, "fileops"):
+		gates = append(gates, "go test ./internal/fileops ./internal/pipeline")
+	case hasAnyTag(task.Tags, "git"):
+		gates = append(gates, "go test ./internal/gitops ./internal/pipeline")
+	case hasAnyTag(task.Tags, "logs", "output", "filtering"):
+		gates = append(gates, "go test ./internal/command")
+	case hasAnyTag(task.Tags, "models", "providers", "routing"):
+		gates = append(gates, "go test ./internal/provider ./internal/mcp")
+	case hasAnyTag(task.Tags, "security", "commands", "policy"):
+		gates = append(gates, "go test ./internal/command ./internal/config")
+	default:
+		gates = append(gates, "targeted go test for affected packages")
+	}
+	return uniqueStrings(gates)
+}
+
+func ownedFilesForTask(task tasks.Task) []string {
+	files := []string{"MCPAIHelperProject/ActiveTasks.lean"}
+	if hasAnyTag(task.Tags, "planning") {
+		files = append(files, "internal/mcp/planning_tools.go", "internal/mcp/planning_tools_test.go")
+	}
+	if hasAnyTag(task.Tags, "workflow") {
+		files = append(files, "internal/pipeline/pipeline.go", "internal/pipeline/pipeline_test.go", "internal/mcp/pipeline_tools.go")
+	}
+	if hasAnyTag(task.Tags, "fileops") {
+		files = append(files, "internal/fileops/safe_edit.go", "internal/fileops/safe_edit_test.go")
+	}
+	if hasAnyTag(task.Tags, "git") {
+		files = append(files, "internal/gitops/git.go", "internal/gitops/git_test.go")
+	}
+	if hasAnyTag(task.Tags, "tasks", "lean-registry") {
+		files = append(files, "internal/mcp/task_tools.go", "internal/mcp/task_lean_read.go", "internal/mcp/task_lean_mutation.go")
+	}
+	if hasAnyTag(task.Tags, "logs", "output", "filtering") {
+		files = append(files, "internal/command/runner.go", "internal/command/history.go", "internal/command/runner_test.go")
+	}
+	if hasAnyTag(task.Tags, "models", "providers", "routing") {
+		files = append(files, "internal/provider/openai.go", "internal/mcp/model_tools.go", "internal/config/config.go")
+	}
+	if hasAnyTag(task.Tags, "security", "commands", "policy") {
+		files = append(files, "internal/command/runner.go", "internal/config/config.go")
+	}
+	return uniqueStrings(files)
+}
+
+func hasAnyTag(tags []string, targets ...string) bool {
+	for _, tag := range tags {
+		for _, target := range targets {
+			if tag == target {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func taskTypeAndLevel(task tasks.Task) (string, string) {
 	for _, tag := range task.Tags {
 		if strings.HasPrefix(tag, "type-") {
@@ -231,7 +358,20 @@ func taskTypeAndLevel(task tasks.Task) (string, string) {
 			return candidate, llmLevelFromTaskType(candidate)
 		}
 	}
-	return "", "unknown"
+	return inferredTaskTypeAndLevel(task)
+}
+
+func inferredTaskTypeAndLevel(task tasks.Task) (string, string) {
+	switch {
+	case task.Priority == "critical" || hasAnyTag(task.Tags, "fileops", "git", "security", "routing", "models", "providers", "lean-registry", "evidence", "quality"):
+		return "type-implementation-strong", "strong"
+	case hasAnyTag(task.Tags, "workflow") && task.Priority != "medium":
+		return "type-implementation-strong", "strong"
+	case hasAnyTag(task.Tags, "logs", "output", "filtering", "observability", "audit", "testing", "planning"):
+		return "type-implementation-standard", "standard"
+	default:
+		return "", "unknown"
+	}
 }
 
 func llmLevelFromTags(tags []string) string {
