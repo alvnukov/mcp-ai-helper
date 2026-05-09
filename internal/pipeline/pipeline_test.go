@@ -517,6 +517,127 @@ func TestRunPipelineBlocksTaskStatusWhenCommandFails(t *testing.T) {
 	}
 }
 
+func TestRunPipelineBlocksTaskStatusWhenEvidenceInvalid(t *testing.T) {
+	t.Parallel()
+
+	repoPath := t.TempDir()
+	runner := NewRunner(testConfig(repoPath), nil)
+	created, err := runner.tasks.Add(tasks.AddRequest{
+		RepoPath: repoPath,
+		ID:       "task-pipeline-invalid-evidence",
+		Title:    "pipeline invalid evidence",
+		Status:   "todo",
+	})
+	if err != nil {
+		t.Fatalf("add task: %v", err)
+	}
+
+	result, err := runner.Run(t.Context(), Request{
+		RepoPath:      repoPath,
+		CurrentTaskID: created.ID,
+		TaskOnSuccess: "done",
+		TaskOnFailure: "blocked",
+		Command:       "true",
+	})
+	if err != nil {
+		t.Fatalf("run pipeline: %v", err)
+	}
+	if result.Status != "INSUFFICIENT_DATA" {
+		t.Fatalf("status = %q, want INSUFFICIENT_DATA", result.Status)
+	}
+
+	got, err := runner.tasks.Get(tasks.GetRequest{RepoPath: repoPath, ID: created.ID})
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if got.Status != "blocked" {
+		t.Fatalf("status = %q, want blocked", got.Status)
+	}
+}
+
+func TestRunWorkflowBlocksTaskStatusWhenStepSkipped(t *testing.T) {
+	t.Parallel()
+
+	repoPath := t.TempDir()
+	runner := NewRunner(testConfig(repoPath), nil)
+	created, err := runner.tasks.Add(tasks.AddRequest{
+		RepoPath: repoPath,
+		ID:       "task-workflow-skipped-step",
+		Title:    "workflow skipped step",
+		Status:   "todo",
+	})
+	if err != nil {
+		t.Fatalf("add task: %v", err)
+	}
+
+	result, err := runner.RunWorkflow(t.Context(), WorkflowRequest{
+		RepoPath:      repoPath,
+		CurrentTaskID: created.ID,
+		Steps: []WorkflowStep{{
+			ID:   "required-gate",
+			Tool: "command",
+			If:   "file_exists missing.txt",
+			Args: map[string]any{"command": "printf ok"},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("run workflow: %v", err)
+	}
+	if result.Status != "ok" {
+		t.Fatalf("workflow status = %q, want ok", result.Status)
+	}
+	if len(result.StepResults) != 1 || result.StepResults[0].Status != "skipped" {
+		t.Fatalf("step results = %#v", result.StepResults)
+	}
+
+	got, err := runner.tasks.Get(tasks.GetRequest{RepoPath: repoPath, ID: created.ID})
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if got.Status != "blocked" {
+		t.Fatalf("status = %q, want blocked", got.Status)
+	}
+}
+
+func TestRunWorkflowBlocksTaskStatusWhenCommitSkipped(t *testing.T) {
+	t.Parallel()
+
+	repoPath := t.TempDir()
+	runner := NewRunner(testConfig(repoPath), nil)
+	created, err := runner.tasks.Add(tasks.AddRequest{
+		RepoPath: repoPath,
+		ID:       "task-workflow-skipped-commit",
+		Title:    "workflow skipped commit",
+		Status:   "todo",
+	})
+	if err != nil {
+		t.Fatalf("add task: %v", err)
+	}
+
+	result, err := runner.RunWorkflow(t.Context(), WorkflowRequest{
+		RepoPath:      repoPath,
+		CurrentTaskID: created.ID,
+		Commit:        WorkflowCommit{Enabled: true, Message: "no changes"},
+	})
+	if err != nil {
+		t.Fatalf("run workflow: %v", err)
+	}
+	if result.Status != "ok" {
+		t.Fatalf("workflow status = %q, want ok", result.Status)
+	}
+	if result.CommitResult == nil || result.CommitResult.Status != "skipped" {
+		t.Fatalf("commit result = %#v, want skipped", result.CommitResult)
+	}
+
+	got, err := runner.tasks.Get(tasks.GetRequest{RepoPath: repoPath, ID: created.ID})
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if got.Status != "blocked" {
+		t.Fatalf("status = %q, want blocked", got.Status)
+	}
+}
+
 func TestRunMarshalJSONCompactsSuccessfulOutputByDefault(t *testing.T) {
 	repoPath := t.TempDir()
 	runner := NewRunner(testConfig(repoPath), nil)

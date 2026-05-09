@@ -198,3 +198,45 @@ func TestRunWorkflowTaskTransitionUsesLeanRegistry(t *testing.T) {
 		t.Fatalf("workflow did not use Lean registry: source=%q task=%#v", source, got)
 	}
 }
+
+func TestRunWorkflowCurrentTaskIDBlocksLeanTaskOnSkippedGate(t *testing.T) {
+	repo := copyLeanRepoFixture(t)
+	cfg := &config.Config{
+		Providers: map[string]config.ProviderConfig{},
+		Models:    map[string]config.ModelConfig{},
+		CommandPolicy: config.CommandPolicy{
+			AllowedCWDs:           []string{repo},
+			DefaultTimeoutSeconds: 20,
+			MaxOutputBytes:        20000,
+			MaxLines:              80,
+		},
+	}
+	_, commands, workflows, store := buildDeps(cfg)
+	if _, err := upsertTask(context.Background(), tasks.AddRequest{RepoPath: repo, ID: "task-999", Status: "todo", Title: "Skipped gate fixture"}, commands, store); err != nil {
+		t.Fatalf("create canonical task: %v", err)
+	}
+
+	result, err := workflows.RunWorkflow(context.Background(), pipeline.WorkflowRequest{
+		RepoPath:      repo,
+		CurrentTaskID: "task-999",
+		Steps: []pipeline.WorkflowStep{{
+			ID:   "skipped-gate",
+			Tool: "command",
+			If:   "file_exists missing-gate.txt",
+			Args: map[string]any{"command": "printf should-not-run"},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("run workflow: %v", err)
+	}
+	if result.Status != "ok" {
+		t.Fatalf("status = %q reason = %q", result.Status, result.Reason)
+	}
+	got, source, err := readTask(context.Background(), repo, "task-999", commands, store)
+	if err != nil {
+		t.Fatalf("read canonical task: %v", err)
+	}
+	if source != "lean_registry" || got.Status != "blocked" {
+		t.Fatalf("skipped gate should block task closeout: source=%q task=%#v", source, got)
+	}
+}
