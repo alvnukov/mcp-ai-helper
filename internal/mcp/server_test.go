@@ -118,6 +118,26 @@ func TestRunWorkflowSchemaIncludesWorkflowFields(t *testing.T) {
 			t.Fatalf("run_workflow schema does not contain %q: %s", field, schema)
 		}
 	}
+
+	var inputSchema map[string]any
+	if err := json.Unmarshal(schemaBytes, &inputSchema); err != nil {
+		t.Fatalf("unmarshal schema: %v", err)
+	}
+	properties, ok := inputSchema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("run_workflow schema properties missing: %s", schema)
+	}
+	steps, ok := properties["steps"].(map[string]any)
+	if !ok {
+		t.Fatalf("run_workflow steps schema missing: %s", schema)
+	}
+	items, ok := steps["items"].(map[string]any)
+	if !ok {
+		t.Fatalf("run_workflow steps item schema missing: %s", schema)
+	}
+	if got := items["type"]; got != "object" {
+		t.Fatalf("run_workflow steps must advertise object items, got %v: %s", got, schema)
+	}
 }
 
 func TestRunPipelineSchemaIncludesTaskStatusFields(t *testing.T) {
