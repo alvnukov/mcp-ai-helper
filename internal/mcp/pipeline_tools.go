@@ -17,7 +17,7 @@ func registerPipelineTools(srv *server.MCPServer, deps *Server) {
 		return structured(map[string]any{
 			"common_step_fields": map[string]string{
 				"depends_on": "Optional array of step IDs this step depends on. Engine auto-detects same-file dependencies; use this for cross-file or cross-tool ordering.",
-				"if":         "Condition: 'always' (default), changed_files_count comparisons, steps.<id>.status/exit_code comparisons, steps.<id>.output_contains text, file_exists/file_missing path, or tasks.<id>.status comparisons.",
+				"if":         "Condition: 'always' (default), &&, ||, !, changed_files_count comparisons, changed_files contains path, steps.<id>.status/exit_code/validation comparisons, steps.<id>.output_contains text, file_exists/file_missing path, or tasks.<id>.status comparisons.",
 				"on_failure": "Optional: 'stop' (default) or 'continue'.",
 			},
 			"step_types": []map[string]any{
