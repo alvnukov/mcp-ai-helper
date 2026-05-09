@@ -51,6 +51,34 @@ func TestCommitOwnedCommitsOnlyOwnedFile(t *testing.T) {
 	}
 }
 
+func TestCommitOwnedCommitsDeletedOwnedFile(t *testing.T) {
+	repo := initRepo(t)
+	writeFile(t, filepath.Join(repo, "tracked.txt"), "tracked\n")
+	run(t, repo, "add", "tracked.txt")
+	run(t, repo, "commit", "-m", "initial")
+	if err := os.Remove(filepath.Join(repo, "tracked.txt")); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := CommitOwned(t.Context(), CommitRequest{
+		RepoPath: repo,
+		Files:    []string{"tracked.txt"},
+		Message:  "delete tracked",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "ok" {
+		t.Fatalf("status = %q, want ok", result.Status)
+	}
+	if got := run(t, repo, "show", "--name-status", "--format=", "HEAD"); got != "D\ttracked.txt\n" {
+		t.Fatalf("unexpected commit diff: %q", got)
+	}
+	if got := run(t, repo, "status", "--short"); got != "" {
+		t.Fatalf("unexpected status: %q", got)
+	}
+}
+
 func initRepo(t *testing.T) string {
 	t.Helper()
 	repo := t.TempDir()
