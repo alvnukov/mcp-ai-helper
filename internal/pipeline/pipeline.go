@@ -306,7 +306,7 @@ func (r *Runner) executeWorkflowStep(ctx context.Context, repoPath string, step 
 			changedSet[args.Path] = struct{}{}
 		}
 		return base, nil
-	case "run_command":
+	case "command":
 		var args WorkflowCommand
 		if err := bindStepArgs(step.Args, &args); err != nil {
 			return WorkflowStepResult{}, err
@@ -514,7 +514,26 @@ func buildAnalysisPrompt(task string, result command.Result, summary evidence.Su
 }
 
 func compactHandoff(status string, result command.Result) string {
-	return fmt.Sprintf("status: %s\ncommand_id: %s\nexit_code: %d\noutput: collapsed; use filter_command_history with command_id for details", status, result.CommandID, result.ExitCode)
+	var b strings.Builder
+	b.WriteString("status: ")
+	b.WriteString(status)
+	fmt.Fprintf(&b, "\ncommand_id: %s", result.CommandID)
+	fmt.Fprintf(&b, "\nexit_code: %d", result.ExitCode)
+	// Include evidence lines even in compact mode — they are short by definition.
+	if len(result.EvidenceLines) > 0 {
+		b.WriteString("\nevidence:\n")
+		for _, line := range result.EvidenceLines {
+			b.WriteString("- [")
+			b.WriteString(line.ID)
+			b.WriteString("] ")
+			b.WriteString(line.Text)
+			b.WriteString("\n")
+		}
+	}
+	if len(result.StdoutTail) > 0 || len(result.StderrTail) > 0 {
+		b.WriteString("output: collapsed; use filter_command_history with command_id for details")
+	}
+	return b.String()
 }
 
 func composeHandoff(status string, result command.Result, summary evidence.Summary, analysis string, validation evidence.Validation, maxChars int) string {

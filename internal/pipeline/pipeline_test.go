@@ -93,7 +93,7 @@ func TestRunWorkflowStepsEditCheckCommit(t *testing.T) {
 		RepoPath: dir,
 		Steps: []WorkflowStep{
 			{ID: "edit", Tool: "guarded_replace", Args: map[string]any{"path": "x.txt", "old": "old", "new": "new"}},
-			{ID: "check", Tool: "run_command", If: "steps.edit.status == ok", Args: map[string]any{"command": "grep -q new x.txt"}},
+			{ID: "check", Tool: "command", If: "steps.edit.status == ok", Args: map[string]any{"command": "grep -q new x.txt"}},
 			{ID: "commit", Tool: "git_commit_owned", If: "changed_files_count > 0", Args: map[string]any{"message": "Update x"}},
 		},
 	})
@@ -241,7 +241,7 @@ func TestRunMarshalJSONCompactsSuccessfulOutputByDefault(t *testing.T) {
 	if !strings.Contains(text, "\"compact\":true") || !strings.Contains(text, "output: collapsed") {
 		t.Fatalf("compact json missing markers: %s", text)
 	}
-	for _, forbidden := range []string{"large output should not be returned", "stdout_tail", "stderr_tail", "evidence_lines", "command\":"} {
+	for _, forbidden := range []string{"stdout_tail", "stderr_tail", "command\":"} {
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("compact json leaked %q: %s", forbidden, text)
 		}

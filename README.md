@@ -62,7 +62,7 @@ Language profiles give callers deterministic guardrails before code edits. The b
 
 `run_workflow` is the preferred tool for code work. The caller sends the whole task in one request: guarded text edits, checks, and optional commit. The workflow stops before commit on edit conflicts or failed checks.
 
-`run_workflow` also accepts a stable `steps` DSL so future workflow improvements do not require changing the MCP schema. Supported step tools today: `guarded_replace`, `run_command`, `git_commit_owned`. Supported deterministic conditions today: `always`, `changed_files_count > 0`, and `steps.<id>.status == <status>`.
+`run_workflow` also accepts a stable `steps` DSL so future workflow improvements do not require changing the MCP schema. Supported step tools today: `guarded_replace`, `command`, `task_batch_upsert`, `git_commit_owned`. Supported deterministic conditions today: `always`, `changed_files_count > 0`, and `steps.<id>.status == <status>`.
 
 Callers should use one long workflow when intermediate results are not needed by the calling model. A single workflow should include command execution, output filters, conditional branches, file edits, checks, and commit. Low-level tools are for bootstrapping and cases where a result must change the caller's next decision.
 
