@@ -208,7 +208,7 @@ func (r *Runner) RunWorkflow(ctx context.Context, req WorkflowRequest) (result W
 	}
 	defer func() {
 		finalStatus := taskStatusOrDefault(req.TaskOnSuccess, "done")
-		if err != nil || result.Status != "ok" {
+		if !workflowTaskCloseoutSucceeded(req, result, err) {
 			finalStatus = taskStatusOrDefault(req.TaskOnFailure, "blocked")
 		}
 		if updateErr := r.updateTaskStatus(ctx, req.CurrentTaskID, finalStatus, req.RepoPath); updateErr != nil && err == nil {
@@ -902,13 +902,49 @@ func taskStatusOrDefault(configured string, fallback string) string {
 	return fallback
 }
 
+func pipelineTaskCloseoutSucceeded(result Result, err error) bool {
+	return err == nil && result.Status == "ok" && result.Command.ExitCode == 0 && result.Validation.Valid
+}
+
+func workflowTaskCloseoutSucceeded(req WorkflowRequest, result WorkflowResult, err error) bool {
+	if err != nil || result.Status != "ok" {
+		return false
+	}
+	for _, step := range result.StepResults {
+		if step.Status != "ok" {
+			return false
+		}
+		switch step.Tool {
+		case "command":
+			check, ok := step.Output.(command.Result)
+			if !ok || check.ExitCode != 0 {
+				return false
+			}
+		case "git_commit_owned":
+			commit, ok := step.Output.(gitops.CommitResult)
+			if !ok || commit.Status != "ok" {
+				return false
+			}
+		}
+	}
+	for _, check := range result.CheckResults {
+		if check.ExitCode != 0 {
+			return false
+		}
+	}
+	if req.Commit.Enabled {
+		return result.CommitResult != nil && result.CommitResult.Status == "ok"
+	}
+	return true
+}
+
 func (r *Runner) Run(ctx context.Context, req Request) (result Result, err error) {
 	if err := r.updateTaskStatus(ctx, req.CurrentTaskID, taskStatusOrDefault(req.TaskOnStart, "in_progress"), req.RepoPath); err != nil {
 		return Result{}, err
 	}
 	defer func() {
 		finalStatus := taskStatusOrDefault(req.TaskOnSuccess, "done")
-		if err != nil || result.Status != "ok" || result.Command.ExitCode != 0 {
+		if !pipelineTaskCloseoutSucceeded(result, err) {
 			finalStatus = taskStatusOrDefault(req.TaskOnFailure, "blocked")
 		}
 		if updateErr := r.updateTaskStatus(ctx, req.CurrentTaskID, finalStatus, req.RepoPath); updateErr != nil && err == nil {
