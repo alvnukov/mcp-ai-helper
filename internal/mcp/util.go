@@ -48,11 +48,58 @@ func uniqueStrings(values []string) []string {
 
 func currentTasks(list []tasks.Task) []tasks.Task {
 	current := make([]tasks.Task, 0, len(list))
+	goals := make([]tasks.Task, 0)
 	for _, task := range list {
 		switch task.Status {
 		case "todo", "in_progress", "blocked":
-			current = append(current, task)
+			if hasTag(task.Tags, "goal") {
+				goals = append(goals, task)
+			} else {
+				current = append(current, task)
+			}
 		}
 	}
-	return current
+	return append(goals, current...)
+}
+
+func hasTag(tags []string, target string) bool {
+	for _, t := range tags {
+		if t == target {
+			return true
+		}
+	}
+	return false
+}
+
+func buildTaskTree(list []tasks.Task) map[string]any {
+	var goal *tasks.Task
+	for i := range list {
+		if hasTag(list[i].Tags, "goal") && list[i].ParentID == "" {
+			g := list[i]
+			goal = &g
+			break
+		}
+	}
+	if goal == nil {
+		return map[string]any{"goal": nil, "children": nil}
+	}
+	children := map[string][]tasks.Task{}
+	for _, t := range list {
+		if t.ParentID != "" {
+			children[t.ParentID] = append(children[t.ParentID], t)
+		}
+	}
+	return map[string]any{"goal": goal, "children": buildSubTree(goal.ID, children)}
+}
+
+func buildSubTree(parentID string, children map[string][]tasks.Task) []map[string]any {
+	var result []map[string]any
+	for _, child := range children[parentID] {
+		node := map[string]any{"task": child}
+		if sub := buildSubTree(child.ID, children); sub != nil {
+			node["children"] = sub
+		}
+		result = append(result, node)
+	}
+	return result
 }

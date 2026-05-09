@@ -133,6 +133,7 @@ type WorkflowCommit struct {
 // WorkflowResult is the complete workflow execution record.
 type WorkflowResult struct {
 	Status       string                  `json:"status"`
+	FailedStepID string                  `json:"failed_step_id,omitempty"`
 	StepResults  []WorkflowStepResult    `json:"step_results,omitempty"`
 	EditResults  []fileops.ReplaceResult `json:"edit_results"`
 	CheckResults []command.Result        `json:"check_results"`
@@ -292,6 +293,7 @@ func (r *Runner) runWorkflowSteps(ctx context.Context, req WorkflowRequest) (Wor
 				if sr.Status != "ok" && sr.Status != "skipped" && step.OnFailure != "continue" && result.Status == "ok" {
 					result.Status = sr.Status
 					result.Reason = sr.Reason
+					result.FailedStepID = step.ID
 				}
 				stateMu.Unlock()
 			}(s)

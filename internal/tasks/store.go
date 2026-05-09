@@ -1,4 +1,3 @@
-// Package tasks manages per-repository Lean task files.
 package tasks
 
 import (
@@ -19,14 +18,13 @@ const leanTaskPrefix = "/- mcp-ai-helper-task "
 
 var taskIDPattern = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 
-// Store persists project tasks under ~/.mcp-ai-helper/repos/<project>/tasks.
 type Store struct {
 	projects *project.Store
 }
 
-// Task describes one project task.
 type Task struct {
 	ID        string    `json:"id"`
+	ParentID  string    `json:"parent_id,omitempty"`
 	Status    string    `json:"status"`
 	Title     string    `json:"title"`
 	Body      string    `json:"body"`
@@ -36,10 +34,10 @@ type Task struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// AddRequest describes a task creation request.
 type AddRequest struct {
 	RepoPath string   `json:"repo_path"`
 	ID       string   `json:"id"`
+	ParentID string   `json:"parent_id,omitempty"`
 	Status   string   `json:"status"`
 	Title    string   `json:"title"`
 	Body     string   `json:"body"`
@@ -47,29 +45,26 @@ type AddRequest struct {
 	Tags     []string `json:"tags"`
 }
 
-// ListRequest describes a task listing request.
 type ListRequest struct {
 	RepoPath string `json:"repo_path"`
 	Status   string `json:"status"`
 	Query    string `json:"query"`
 }
 
-// GetRequest describes a task lookup request.
 type GetRequest struct {
 	RepoPath string `json:"repo_path"`
 	ID       string `json:"id"`
 }
 
-// DeleteRequest describes a task delete request.
 type DeleteRequest struct {
 	RepoPath string `json:"repo_path"`
 	ID       string `json:"id"`
 }
 
-// UpdateRequest describes a partial task update.
 type UpdateRequest struct {
 	RepoPath string   `json:"repo_path"`
 	ID       string   `json:"id"`
+	ParentID string   `json:"parent_id,omitempty"`
 	Status   string   `json:"status"`
 	Title    string   `json:"title"`
 	Body     string   `json:"body"`
@@ -77,14 +72,12 @@ type UpdateRequest struct {
 	Tags     []string `json:"tags"`
 }
 
-// StatusRequest describes a task status transition.
 type StatusRequest struct {
 	RepoPath string `json:"repo_path"`
 	ID       string `json:"id"`
 	Status   string `json:"status"`
 }
 
-// BatchUpsertRequest describes a batch task synchronization request.
 type BatchUpsertRequest struct {
 	RepoPath       string       `json:"repo_path"`
 	Tasks          []AddRequest `json:"tasks"`
@@ -93,18 +86,15 @@ type BatchUpsertRequest struct {
 	ActiveStatuses []string     `json:"active_statuses"`
 }
 
-// BatchUpsertResult reports batch task synchronization effects.
 type BatchUpsertResult struct {
 	Upserted []Task `json:"upserted"`
 	Closed   []Task `json:"closed"`
 }
 
-// NewStore creates a task store.
 func NewStore(projects *project.Store) *Store {
 	return &Store{projects: projects}
 }
 
-// Add creates or replaces a task file in Lean format.
 func (s *Store) Add(req AddRequest) (Task, error) {
 	if strings.TrimSpace(req.Title) == "" {
 		return Task{}, errors.New("title is required")
@@ -123,6 +113,7 @@ func (s *Store) Add(req AddRequest) (Task, error) {
 	}
 	task := Task{
 		ID:        id,
+		ParentID:  req.ParentID,
 		Status:    status,
 		Title:     req.Title,
 		Body:      req.Body,
@@ -135,7 +126,7 @@ func (s *Store) Add(req AddRequest) (Task, error) {
 	if err != nil {
 		return Task{}, err
 	}
-	if existing, err := s.Get(GetRequest{RepoPath: req.RepoPath, ID: id}); err == nil {
+	if existing, err := s.readTask(path); err == nil {
 		task.CreatedAt = existing.CreatedAt
 	}
 	if err := s.writeTaskPath(path, task); err != nil {
@@ -144,7 +135,6 @@ func (s *Store) Add(req AddRequest) (Task, error) {
 	return task, nil
 }
 
-// Update partially updates a task without resetting unspecified fields.
 func (s *Store) Update(req UpdateRequest) (Task, error) {
 	task, err := s.Get(GetRequest{RepoPath: req.RepoPath, ID: req.ID})
 	if err != nil {
@@ -152,6 +142,9 @@ func (s *Store) Update(req UpdateRequest) (Task, error) {
 	}
 	if strings.TrimSpace(req.Status) != "" {
 		task.Status = strings.TrimSpace(req.Status)
+	}
+	if req.ParentID != "" {
+		task.ParentID = req.ParentID
 	}
 	if strings.TrimSpace(req.Title) != "" {
 		task.Title = req.Title
@@ -172,7 +165,6 @@ func (s *Store) Update(req UpdateRequest) (Task, error) {
 	return task, nil
 }
 
-// SetStatus changes one task status.
 func (s *Store) SetStatus(req StatusRequest) (Task, error) {
 	if strings.TrimSpace(req.Status) == "" {
 		return Task{}, errors.New("status is required")
@@ -180,7 +172,6 @@ func (s *Store) SetStatus(req StatusRequest) (Task, error) {
 	return s.Update(UpdateRequest{RepoPath: req.RepoPath, ID: req.ID, Status: req.Status})
 }
 
-// BatchUpsert creates or updates tasks and can close active tasks omitted from the batch.
 func (s *Store) BatchUpsert(req BatchUpsertRequest) (BatchUpsertResult, error) {
 	seen := map[string]struct{}{}
 	result := BatchUpsertResult{}
@@ -222,7 +213,6 @@ func (s *Store) BatchUpsert(req BatchUpsertRequest) (BatchUpsertResult, error) {
 	return result, nil
 }
 
-// List returns tasks for repo, optionally filtered by status and query.
 func (s *Store) List(req ListRequest) ([]Task, error) {
 	dir, err := s.projects.TasksDir(req.RepoPath)
 	if err != nil {
@@ -235,15 +225,29 @@ func (s *Store) List(req ListRequest) ([]Task, error) {
 		}
 		return nil, fmt.Errorf("read task directory: %w", err)
 	}
+	seenIDs := map[string]struct{}{}
 	var out []Task
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".lean") {
+		if entry.IsDir() {
 			continue
 		}
-		task, err := readLeanTask(filepath.Join(dir, entry.Name()))
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".json") && !strings.HasSuffix(name, ".lean") {
+			continue
+		}
+		id := strings.TrimSuffix(strings.TrimSuffix(name, ".json"), ".lean")
+		id = cleanTaskID(id)
+		if id == "" {
+			continue
+		}
+		if _, ok := seenIDs[id]; ok {
+			continue
+		}
+		task, err := s.readTask(filepath.Join(dir, name))
 		if err != nil {
 			continue
 		}
+		seenIDs[id] = struct{}{}
 		if req.Status != "" && task.Status != req.Status {
 			continue
 		}
@@ -258,16 +262,22 @@ func (s *Store) List(req ListRequest) ([]Task, error) {
 	return out, nil
 }
 
-// Get returns one task by id.
 func (s *Store) Get(req GetRequest) (Task, error) {
 	path, err := s.taskPath(req.RepoPath, req.ID)
 	if err != nil {
 		return Task{}, err
 	}
-	return readLeanTask(path)
+	task, err := s.readTask(path)
+	if err == nil {
+		return task, nil
+	}
+	legacyPath, legacyErr := s.taskPathLegacy(req.RepoPath, req.ID)
+	if legacyErr != nil {
+		return Task{}, err
+	}
+	return s.readTask(legacyPath)
 }
 
-// Delete removes one task file.
 func (s *Store) Delete(req DeleteRequest) error {
 	path, err := s.taskPath(req.RepoPath, req.ID)
 	if err != nil {
@@ -275,6 +285,10 @@ func (s *Store) Delete(req DeleteRequest) error {
 	}
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("delete task file: %w", err)
+	}
+	legacyPath, _ := s.taskPathLegacy(req.RepoPath, req.ID)
+	if legacyPath != "" {
+		_ = os.Remove(legacyPath)
 	}
 	return nil
 }
@@ -291,7 +305,11 @@ func (s *Store) writeTaskPath(path string, task Task) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create task directory: %w", err)
 	}
-	if err := os.WriteFile(path, []byte(renderLeanTask(task)), 0o600); err != nil {
+	data, err := json.MarshalIndent(task, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal task: %w", err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("write task file: %w", err)
 	}
 	return nil
@@ -306,7 +324,52 @@ func (s *Store) taskPath(repoPath string, id string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return filepath.Join(dir, id+".json"), nil
+}
+
+func (s *Store) taskPathLegacy(repoPath string, id string) (string, error) {
+	id = cleanTaskID(id)
+	if id == "" {
+		return "", errors.New("task id is required")
+	}
+	dir, err := s.projects.TasksDir(repoPath)
+	if err != nil {
+		return "", err
+	}
 	return filepath.Join(dir, id+".lean"), nil
+}
+
+func (s *Store) readTask(path string) (Task, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return Task{}, fmt.Errorf("read task file: %w", err)
+	}
+	if strings.HasSuffix(path, ".json") {
+		var task Task
+		if err := json.Unmarshal(data, &task); err != nil {
+			return Task{}, fmt.Errorf("decode task json: %w", err)
+		}
+		return task, nil
+	}
+	return readLeanContent(data)
+}
+
+func readLeanContent(data []byte) (Task, error) {
+	text := string(data)
+	start := strings.Index(text, leanTaskPrefix)
+	if start < 0 {
+		return Task{}, errors.New("task metadata is missing")
+	}
+	start += len(leanTaskPrefix)
+	end := strings.Index(text[start:], " -/")
+	if end < 0 {
+		return Task{}, errors.New("task metadata is unterminated")
+	}
+	var task Task
+	if err := json.Unmarshal([]byte(text[start:start+end]), &task); err != nil {
+		return Task{}, fmt.Errorf("decode task metadata: %w", err)
+	}
+	return task, nil
 }
 
 func cleanTaskID(value string) string {
@@ -362,43 +425,4 @@ func taskMatches(task Task, query string) bool {
 		strings.Join(task.Tags, "\n"),
 	}, "\n"))
 	return strings.Contains(haystack, query)
-}
-
-func renderLeanTask(task Task) string {
-	meta, _ := json.Marshal(task)
-	name := strings.ReplaceAll(task.ID, "-", "_")
-	return fmt.Sprintf(`/- mcp-ai-helper-task %s -/
-namespace MCPAIHelper.Tasks
-
-def %s_id : String := %q
-def %s_status : String := %q
-def %s_title : String := %q
-def %s_body : String := %q
-def %s_priority : String := %q
-
-end MCPAIHelper.Tasks
-`, string(meta), name, task.ID, name, task.Status, name, task.Title, name, task.Body, name, task.Priority)
-}
-
-func readLeanTask(path string) (Task, error) {
-	// #nosec G304 -- path is built from the configured per-repo task directory and normalized task id.
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return Task{}, fmt.Errorf("read task file: %w", err)
-	}
-	text := string(data)
-	start := strings.Index(text, leanTaskPrefix)
-	if start < 0 {
-		return Task{}, errors.New("task metadata is missing")
-	}
-	start += len(leanTaskPrefix)
-	end := strings.Index(text[start:], " -/")
-	if end < 0 {
-		return Task{}, errors.New("task metadata is unterminated")
-	}
-	var task Task
-	if err := json.Unmarshal([]byte(text[start:start+end]), &task); err != nil {
-		return Task{}, fmt.Errorf("decode task metadata: %w", err)
-	}
-	return task, nil
 }

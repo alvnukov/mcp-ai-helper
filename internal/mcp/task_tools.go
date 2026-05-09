@@ -19,6 +19,7 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 		basemcp.WithString("id"),
 		basemcp.WithString("priority"),
 		basemcp.WithArray("tags"),
+		basemcp.WithString("parent_id"),
 	), func(_ context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
 		var args tasks.AddRequest
 		if err := bind(req, &args); err != nil {
@@ -74,6 +75,7 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 		basemcp.WithString("status"),
 		basemcp.WithString("priority"),
 		basemcp.WithArray("tags"),
+		basemcp.WithString("parent_id"),
 	), func(_ context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
 		var args tasks.UpdateRequest
 		if err := bind(req, &args); err != nil {
@@ -131,6 +133,7 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 		basemcp.WithString("priority", basemcp.Description("Task priority: low, normal, high, critical.")),
 		basemcp.WithString("body", basemcp.Description("Task description.")),
 		basemcp.WithArray("tags", basemcp.Description("Optional tags.")),
+		basemcp.WithString("parent_id", basemcp.Description("Optional parent task id for hierarchy.")),
 	), func(_ context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
 		var args tasks.AddRequest
 		if err := bind(req, &args); err != nil {
@@ -157,6 +160,21 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
 		return structured(map[string]any{"tasks": currentTasks(list)})
+	})
+	srv.AddTool(basemcp.NewTool("task_tree",
+		basemcp.WithDescription("Return task tree from the goal root. Goal = task with tag 'goal' and no parent_id."),
+		basemcp.WithString("repo_path", basemcp.Required()),
+	), func(_ context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+		var args tasks.ListRequest
+		if err := bind(req, &args); err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
+		_, _, _, _, store := deps.loadDeps()
+		list, err := store.List(tasks.ListRequest{RepoPath: args.RepoPath})
+		if err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
+		return structured(buildTaskTree(list))
 	})
 	srv.AddTool(basemcp.NewTool("task_get",
 		basemcp.WithDescription("Read one per-repository task by id."),
