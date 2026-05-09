@@ -15,7 +15,7 @@ const defaultRootDirName = ".mcp-ai-helper"
 
 var unsafeNameChars = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 
-// Store resolves helper data directories under ~/.mcp-ai-helper/repos.
+// Store resolves helper data directories and repo-local task paths.
 type Store struct {
 	root string
 }
@@ -79,11 +79,14 @@ func (s *Store) LogsDir(repoPath string) (string, error) {
 	return filepath.Join(repoDir, "logs"), nil
 }
 
-// TasksDir returns the per-repo task directory.
+// TasksDir returns the repo-local task directory committed with the project.
 func (s *Store) TasksDir(repoPath string) (string, error) {
-	repoDir, err := s.RepoDir(repoPath)
+	if strings.TrimSpace(repoPath) == "" {
+		return "", errors.New("repo_path is required")
+	}
+	abs, err := filepath.Abs(repoPath)
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(repoDir, "tasks"), nil
+	return filepath.Join(abs, "tasks"), nil
 }

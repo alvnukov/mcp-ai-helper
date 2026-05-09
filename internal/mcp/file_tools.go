@@ -1,0 +1,114 @@
+package mcp
+
+import (
+	"context"
+
+	basemcp "github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/server"
+
+	"github.com/zol/mcp-ai-helper/internal/fileops"
+)
+
+func registerFileTools(srv *server.MCPServer) {
+	srv.AddTool(basemcp.NewTool("read_file",
+		basemcp.WithDescription("Read file content with line numbers as structured data. Prefer this over shell cat/head/tail for reading files."),
+		basemcp.WithString("repo_path", basemcp.Required()),
+		basemcp.WithString("path", basemcp.Required()),
+		basemcp.WithNumber("offset", basemcp.Description("Optional 1-based line number to start reading from.")),
+		basemcp.WithNumber("limit", basemcp.Description("Optional maximum number of lines to return.")),
+	), func(_ context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+		var args struct {
+			RepoPath string `json:"repo_path"`
+			Path     string `json:"path"`
+			Offset   int    `json:"offset"`
+			Limit    int    `json:"limit"`
+		}
+		if err := bind(req, &args); err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
+		fc, err := fileops.ReadFileContentInRepo(args.RepoPath, args.Path)
+		if err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
+		if args.Offset > 0 || args.Limit > 0 {
+			start := args.Offset - 1
+			if start < 0 {
+				start = 0
+			}
+			if start < len(fc.Lines) {
+				end := len(fc.Lines)
+				if args.Limit > 0 {
+					if start+args.Limit < end {
+						end = start + args.Limit
+					}
+				}
+				fc.Lines = fc.Lines[start:end]
+			}
+		}
+		return structured(fc)
+	})
+	srv.AddTool(basemcp.NewTool("search_files",
+		basemcp.WithDescription("Search for text pattern in files under a directory. Returns structured results with file path, line number, and matched text. Prefer this over raw grep/rg for safety and structured output."),
+		basemcp.WithString("repo_path", basemcp.Required()),
+		basemcp.WithString("path", basemcp.Description("Repo-relative directory to search. Defaults to repo root.")),
+		basemcp.WithString("pattern", basemcp.Required()),
+		basemcp.WithNumber("max_matches", basemcp.Description("Maximum total matches. Defaults to 100.")),
+	), func(_ context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+		var args struct {
+			RepoPath   string `json:"repo_path"`
+			Path       string `json:"path"`
+			Pattern    string `json:"pattern"`
+			MaxMatches int    `json:"max_matches"`
+		}
+		if err := bind(req, &args); err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
+		if args.Pattern == "" {
+			return basemcp.NewToolResultError("pattern is required"), nil
+		}
+		result, err := fileops.SearchFilesInRepo(args.RepoPath, args.Path, args.Pattern, args.MaxMatches)
+		if err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
+		return structured(result)
+	})
+	srv.AddTool(basemcp.NewTool("snapshot_file",
+		basemcp.WithDescription("Read file hash/size before guarded edits."),
+		basemcp.WithString("repo_path", basemcp.Required()),
+		basemcp.WithString("path", basemcp.Required()),
+	), func(_ context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+		var args struct {
+			RepoPath string `json:"repo_path"`
+			Path     string `json:"path"`
+		}
+		if err := bind(req, &args); err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
+		snapshot, err := fileops.ReadSnapshotInRepo(args.RepoPath, args.Path)
+		if err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
+		return structured(snapshot)
+	})
+
+	srv.AddTool(basemcp.NewTool("apply_guarded_replace",
+		basemcp.WithDescription("Replace one unique text span only if the file hash still matches. Use old_b64/new_b64 for text with characters that are hard to escape in JSON (e.g. Go raw strings with backslashes)."),
+		basemcp.WithString("repo_path", basemcp.Required()),
+		basemcp.WithString("path", basemcp.Required()),
+		basemcp.WithString("expected_hash", basemcp.Required()),
+		basemcp.WithString("old", basemcp.Description("Text to replace. Omit when using old_b64.")),
+		basemcp.WithString("old_b64", basemcp.Description("Base64-encoded old text. Use instead of old for safe transport of strings with backslashes.")),
+		basemcp.WithString("new", basemcp.Description("Replacement text. Omit when using new_b64.")),
+		basemcp.WithString("new_b64", basemcp.Description("Base64-encoded new text. Use instead of new for safe transport of strings with backslashes.")),
+	), func(_ context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+		var args fileops.ReplaceRequest
+		if err := bind(req, &args); err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
+		result, err := fileops.ApplyGuardedReplace(args)
+		if err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
+		return structured(result)
+	})
+}

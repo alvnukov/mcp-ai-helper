@@ -3,6 +3,7 @@ package fileops
 
 import (
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -22,12 +23,17 @@ type Snapshot struct {
 }
 
 // ReplaceRequest describes one unique text replacement guarded by file hash.
+// When Old/New contain characters that are difficult to represent in JSON strings
+// (e.g. raw Go literals with backslashes), use OldB64 and NewB64 instead —
+// they carry the same content base64-encoded and avoid escaping problems.
 type ReplaceRequest struct {
 	RepoPath     string `json:"repo_path"`
 	Path         string `json:"path"`
 	ExpectedHash string `json:"expected_hash"`
 	Old          string `json:"old"`
 	New          string `json:"new"`
+	OldB64       string `json:"old_b64,omitempty"`
+	NewB64       string `json:"new_b64,omitempty"`
 }
 
 // ReplaceResult reports the result of a guarded replacement.
@@ -67,30 +73,90 @@ func ReadSnapshotInRepo(repoPath string, path string) (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, err
 	}
-	snapshot.RepoPath = filepath.Clean(repoPath)
+	snapshot.RepoPath = repoPath
 	snapshot.RelativePath = rel
 	return snapshot, nil
 }
 
-// ApplyGuardedReplace replaces one unique old span when the file hash still matches.
+func resolveText(req ReplaceRequest) (old string, new string, err error) {
+	if req.OldB64 != "" {
+		decoded, decodeErr := base64.StdEncoding.DecodeString(req.OldB64)
+		if decodeErr != nil {
+			return "", "", fmt.Errorf("old_b64: invalid base64: %w", decodeErr)
+		}
+		old = string(decoded)
+	} else {
+		old = req.Old
+	}
+	if req.NewB64 != "" {
+		decoded, decodeErr := base64.StdEncoding.DecodeString(req.NewB64)
+		if decodeErr != nil {
+			return "", "", fmt.Errorf("new_b64: invalid base64: %w", decodeErr)
+		}
+		new = string(decoded)
+	} else {
+		new = req.New
+	}
+	return old, new, nil
+}
+
+func findBestPartialMatch(text string, old string) string {
+	best := 0
+	bestPos := 0
+	for i := 0; i < len(text); i++ {
+		j := 0
+		for i+j < len(text) && j < len(old) && text[i+j] == old[j] {
+			j++
+		}
+		if j > best {
+			best = j
+			bestPos = i
+		}
+	}
+	if best == 0 {
+		return ""
+	}
+	start := bestPos
+	if start > 20 {
+		start = bestPos - 20
+	}
+	end := bestPos + best + 40
+	if end > len(text) {
+		end = len(text)
+	}
+	return text[start:end]
+}
+
+// ApplyGuardedReplace replaces one unique text span only if the file hash still matches.
+// Prefer OldB64/NewB64 over Old/New when the text contains characters that are
+// difficult to represent in JSON strings (e.g. Go raw string literals).
 func ApplyGuardedReplace(req ReplaceRequest) (ReplaceResult, error) {
-	path := req.Path
+	if strings.TrimSpace(req.Path) == "" {
+		return ReplaceResult{}, errors.New("path is required")
+	}
+	var clean string
 	if strings.TrimSpace(req.RepoPath) != "" {
-		resolved, _, err := repoRelativePath(req.RepoPath, req.Path)
+		var err error
+		clean, _, err = repoRelativePath(req.RepoPath, req.Path)
 		if err != nil {
 			return ReplaceResult{}, err
 		}
-		path = resolved
-	}
-	clean, err := cleanPath(path)
-	if err != nil {
-		return ReplaceResult{}, err
+	} else {
+		var err error
+		clean, err = cleanPath(req.Path)
+		if err != nil {
+			return ReplaceResult{}, err
+		}
 	}
 	if req.ExpectedHash == "" {
 		return ReplaceResult{}, errors.New("expected_hash is required")
 	}
-	if req.Old == "" {
-		return ReplaceResult{}, errors.New("old text is required")
+	old, new, err := resolveText(req)
+	if err != nil {
+		return ReplaceResult{}, err
+	}
+	if old == "" {
+		return ReplaceResult{}, errors.New("old text is required (set old or old_b64)")
 	}
 	// #nosec G304 -- clean is resolved from a validated local path or repo-relative path.
 	data, err := os.ReadFile(clean)
@@ -102,23 +168,189 @@ func ApplyGuardedReplace(req ReplaceRequest) (ReplaceResult, error) {
 		return ReplaceResult{Status: "conflict", Path: clean, OldHash: oldHash, Reason: "file hash changed after snapshot"}, nil
 	}
 	text := string(data)
-	if strings.Contains(text, req.New) && !strings.Contains(text, req.Old) {
+	if strings.Contains(text, new) && !strings.Contains(text, old) {
 		return ReplaceResult{Status: "ok", Path: clean, Changed: false, OldHash: oldHash, NewHash: oldHash, Reason: "desired text already present"}, nil
 	}
-	count := strings.Count(text, req.Old)
+	count := strings.Count(text, old)
 	if count == 0 {
-		return ReplaceResult{Status: "conflict", Path: clean, OldHash: oldHash, Reason: "old text not found"}, nil
+		detail := findBestPartialMatch(text, old)
+		msg := "old text not found"
+		if detail != "" {
+			msg += fmt.Sprintf("; best partial match near: %q", detail)
+		}
+		return ReplaceResult{Status: "conflict", Path: clean, OldHash: oldHash, Reason: msg}, nil
 	}
 	if count > 1 {
 		return ReplaceResult{Status: "conflict", Path: clean, OldHash: oldHash, Reason: "old text is not unique"}, nil
 	}
-	next := strings.Replace(text, req.Old, req.New, 1)
+	next := strings.Replace(text, old, new, 1)
 	newHash := Hash([]byte(next))
 	// #nosec G703 -- clean is resolved from a validated local path or repo-relative path.
 	if err := os.WriteFile(clean, []byte(next), 0o600); err != nil {
 		return ReplaceResult{}, err
 	}
 	return ReplaceResult{Status: "ok", Path: clean, Changed: newHash != oldHash, OldHash: oldHash, NewHash: newHash}, nil
+}
+
+// FileLine is one numbered line of file content.
+type FileLine struct {
+	Number int    `json:"n"`
+	Text   string `json:"text"`
+}
+
+// FileContent holds structured file read results.
+type FileContent struct {
+	Path         string     `json:"path"`
+	RepoPath     string     `json:"repo_path,omitempty"`
+	RelativePath string     `json:"relative_path,omitempty"`
+	Hash         string     `json:"hash"`
+	Size         int        `json:"size"`
+	Exists       bool       `json:"exists"`
+	Lines        []FileLine `json:"lines"`
+}
+
+// ReadFileContent reads a file and returns structured content with line numbers.
+func ReadFileContent(path string) (FileContent, error) {
+	clean, err := cleanPath(path)
+	if err != nil {
+		return FileContent{}, err
+	}
+	data, err := os.ReadFile(clean)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return FileContent{Path: clean, Exists: false}, nil
+		}
+		return FileContent{}, err
+	}
+	text := string(data)
+	raw := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	// Drop trailing empty line from final newline.
+	if len(raw) > 0 && raw[len(raw)-1] == "" {
+		raw = raw[:len(raw)-1]
+	}
+	lines := make([]FileLine, 0, len(raw))
+	for i, line := range raw {
+		lines = append(lines, FileLine{Number: i + 1, Text: line})
+	}
+	return FileContent{
+		Path:   clean,
+		Hash:   Hash(data),
+		Size:   len(data),
+		Exists: true,
+		Lines:  lines,
+	}, nil
+}
+
+// ReadFileContentInRepo reads a repo-relative file and returns structured content.
+func ReadFileContentInRepo(repoPath string, path string) (FileContent, error) {
+	resolved, rel, err := repoRelativePath(repoPath, path)
+	if err != nil {
+		return FileContent{}, err
+	}
+	fc, err := ReadFileContent(resolved)
+	if err != nil {
+		return FileContent{}, err
+	}
+	fc.RepoPath = repoPath
+	fc.RelativePath = rel
+	return fc, nil
+}
+
+
+// SearchMatch is one search result.
+type SearchMatch struct {
+	File       string `json:"file"`
+	LineNumber int    `json:"line_number"`
+	Text       string `json:"text"`
+}
+
+// SearchResult holds structured search results.
+type SearchResult struct {
+	Pattern string        `json:"pattern"`
+	Path    string        `json:"path"`
+	Matches []SearchMatch `json:"matches"`
+	Total   int           `json:"total"`
+}
+
+// SearchFiles runs a simple text search in a directory and returns structured results.
+// It reads each non-binary file under root, splits into lines, and matches pattern.
+func SearchFiles(root string, pattern string, maxMatches int) (SearchResult, error) {
+	if maxMatches <= 0 {
+		maxMatches = 100
+	}
+	result := SearchResult{Pattern: pattern, Path: root}
+	seenFiles := 0
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return nil // skip inaccessible entries
+		}
+		if d.IsDir() {
+			base := filepath.Base(path)
+			if strings.HasPrefix(base, ".") && path != root {
+				return filepath.SkipDir
+			}
+			if base == "node_modules" || base == "__pycache__" || base == "vendor" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		// Skip binary and large files.
+		ext := strings.ToLower(filepath.Ext(path))
+		switch ext {
+		case ".exe", ".dll", ".so", ".dylib", ".bin", ".jpg", ".png", ".gif", ".ico",
+			".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".pdf", ".class", ".pyc", ".pyo":
+			return nil
+		}
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil
+		}
+		if len(data) > 1<<20 { // skip files > 1MB
+			return nil
+		}
+		text := string(data)
+		lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+		fileMatchCount := 0
+		for i, line := range lines {
+			if strings.Contains(line, pattern) {
+				rel, _ := filepath.Rel(root, path)
+				if rel == "" {
+					rel = path
+				}
+				result.Matches = append(result.Matches, SearchMatch{
+					File:       filepath.ToSlash(rel),
+					LineNumber: i + 1,
+					Text:       line,
+				})
+				fileMatchCount++
+				result.Total++
+				if result.Total >= maxMatches {
+					return filepath.SkipAll
+				}
+			}
+		}
+		if fileMatchCount > 0 {
+			seenFiles++
+		}
+		return nil
+	})
+	if err != nil {
+		return result, err
+	}
+	return result, nil
+}
+
+
+// SearchFilesInRepo runs a text search under a repo-relative directory.
+func SearchFilesInRepo(repoPath string, path string, pattern string, maxMatches int) (SearchResult, error) {
+	if strings.TrimSpace(path) == "" {
+		return SearchFiles(repoPath, pattern, maxMatches)
+	}
+	resolved, _, err := repoRelativePath(repoPath, path)
+	if err != nil {
+		return SearchResult{}, err
+	}
+	return SearchFiles(resolved, pattern, maxMatches)
 }
 
 // Hash returns a SHA-256 hex digest for data.

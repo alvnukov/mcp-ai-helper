@@ -26,7 +26,7 @@ type configReplaceRequest struct {
 	Reload     *bool  `json:"reload"`
 }
 
-func registerConfigTools(srv *server.MCPServer, current *config.Config, reload configReloadFunc) {
+func registerConfigTools(srv *server.MCPServer, deps *Server, reload configReloadFunc) {
 	srv.AddTool(basemcp.NewTool("config_schema",
 		basemcp.WithDescription("Return machine-readable documentation for every mcp-ai-helper config field and the safe model-driven setup workflow."),
 	), func(_ context.Context, _ basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
@@ -42,7 +42,8 @@ func registerConfigTools(srv *server.MCPServer, current *config.Config, reload c
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
 		if strings.TrimSpace(args.Path) == "" {
-			return structured(map[string]any{"config": current, "config_path": current.SourcePath, "source": "memory"})
+			cfg, _, _, _, _ := deps.loadDeps()
+			return structured(map[string]any{"config": cfg, "config_path": cfg.SourcePath, "source": "memory"})
 		}
 		loaded, err := config.Load(args.Path)
 		if err != nil {
@@ -61,7 +62,8 @@ func registerConfigTools(srv *server.MCPServer, current *config.Config, reload c
 		if err := bind(req, &args); err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
-		path := effectiveConfigPath(args.Path, current.SourcePath)
+		cfg, _, _, _, _ := deps.loadDeps()
+		path := effectiveConfigPath(args.Path, cfg.SourcePath)
 		loaded, err := writeValidatedConfig(path, args.ConfigYAML)
 		if err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
@@ -84,7 +86,8 @@ func registerConfigTools(srv *server.MCPServer, current *config.Config, reload c
 		if err := bind(req, &args); err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
-		path := effectiveConfigPath(args.Path, current.SourcePath)
+		cfg, _, _, _, _ := deps.loadDeps()
+		path := effectiveConfigPath(args.Path, cfg.SourcePath)
 		loaded, err := reload(path)
 		if err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
@@ -136,7 +139,13 @@ func writeValidatedConfig(path string, yamlText string) (*config.Config, error) 
 		return nil, fmt.Errorf("validate config: %w", err)
 	}
 	if err := os.Rename(tmpPath, path); err != nil {
-		return nil, fmt.Errorf("replace config: %w", err)
+		src, readErr := os.ReadFile(tmpPath)
+		if readErr != nil {
+			return nil, fmt.Errorf("read temp config for copy: %w", readErr)
+		}
+		if writeErr := os.WriteFile(path, src, 0o600); writeErr != nil {
+			return nil, fmt.Errorf("write config via copy: %w", writeErr)
+		}
 	}
 	loaded.SourcePath = path
 	return loaded, nil

@@ -32,7 +32,7 @@ func TestStoreReturnsRepoScopedDirs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantTasks := filepath.Join(root, "repos", name, "tasks")
+	wantTasks := filepath.Join(repoPath, "tasks")
 	if tasksDir != wantTasks {
 		t.Fatalf("tasks dir = %q, want %q", tasksDir, wantTasks)
 	}

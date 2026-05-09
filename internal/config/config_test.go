@@ -67,6 +67,9 @@ func TestLoadCreatesDefaultConfigInHomeDir(t *testing.T) {
 	if !strings.Contains(cfg.AssistantGuidance, "one long run_workflow") {
 		t.Fatal("loaded config guidance is missing workflow policy")
 	}
+	if !strings.Contains(cfg.AssistantGuidance, "no commit means the task is not done") {
+		t.Fatal("loaded config guidance is missing commit closeout policy")
+	}
 }
 
 func TestLayerEnabledDefaultsAndOverrides(t *testing.T) {
@@ -153,6 +156,45 @@ func TestSchemaDocumentsModelDrivenConfig(t *testing.T) {
 	for path, seen := range want {
 		if !seen {
 			t.Fatalf("schema does not document %s", path)
+		}
+	}
+}
+
+func TestGuidanceDocumentsLeanTaskRegistry(t *testing.T) {
+	guidance := DefaultAssistantGuidance()
+	if !strings.Contains(guidance, "Lean registry/exporter") || !strings.Contains(guidance, "not fallback storage") {
+		t.Fatalf("guidance does not document Lean task registry mode: %q", guidance)
+	}
+	setup := SetupGuidance("")
+	if !strings.Contains(setup["tasks"], "Lean registry/exporter") || !strings.Contains(setup["tasks"], "not fallback storage") {
+		t.Fatalf("setup guidance does not document task storage mode: %#v", setup)
+	}
+}
+
+func TestGuidanceDocumentsStrictRepoTaskWorkflow(t *testing.T) {
+	guidance := DefaultAssistantGuidance()
+	for _, want := range []string{
+		"first gather complete minimal sufficient context",
+		"After context gathering, stop and state the decision",
+		"selected tasks, why they fit the current model",
+		"one self-contained run_pipeline or run_workflow",
+		"Never set a task to done until its acceptance criteria, relevant gate, and required owned-files commit are actually closed",
+		"evidence-only analysis success",
+		"If a workflow fails or times out, do not close the task",
+		"complete authoritative task set",
+		"Never edit tasks by modifying task registry/source/projection files directly",
+		"use task_upsert, task_batch_upsert, task_set_status, task_delete",
+		"stop with a surface mismatch/blocker",
+		"configurable in the server config through assistant_guidance",
+	} {
+		if !strings.Contains(guidance, want) {
+			t.Fatalf("guidance missing %q in %q", want, guidance)
+		}
+	}
+	setup := SetupGuidance("")
+	for _, want := range []string{"batch task updates", "close_missing only intentionally", "because it can close omitted active tasks", "acceptance criteria, gates, and required owned-files commit pass", "no commit means the task is not done", "evidence-only analysis"} {
+		if !strings.Contains(setup["tasks"], want) {
+			t.Fatalf("setup guidance missing %q in %#v", want, setup)
 		}
 	}
 }

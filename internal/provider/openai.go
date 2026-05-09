@@ -10,7 +10,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/zol/mcp-ai-helper/internal/config"
 )
@@ -48,8 +47,39 @@ type OpenAICompatibleClient struct {
 // NewOpenAICompatibleClient creates a client over configured providers.
 func NewOpenAICompatibleClient(providers map[string]config.ProviderConfig) *OpenAICompatibleClient {
 	return &OpenAICompatibleClient{
-		httpClient: &http.Client{},
+		httpClient: &http.Client{Transport: sharedTransport},
 		providers:  providers,
+	}
+}
+
+// Client routes chat completions to the correct provider backend.
+type Client struct {
+	openAI    *OpenAICompatibleClient
+	anthropic *anthropicClient
+}
+
+// NewClient creates a multi-provider client that routes by provider type.
+func NewClient(providers map[string]config.ProviderConfig) *Client {
+	return &Client{
+		openAI:    NewOpenAICompatibleClient(providers),
+		anthropic: &anthropicClient{httpClient: &http.Client{Transport: sharedTransport}, providers: providers},
+	}
+}
+
+// Complete routes the request to the matching provider backend.
+func (c *Client) Complete(ctx context.Context, req ChatRequest) (ChatResponse, error) {
+	cfg, ok := c.openAI.providers[req.ProviderID]
+	if !ok {
+		cfg, ok = c.anthropic.providers[req.ProviderID]
+		if !ok {
+			return ChatResponse{}, fmt.Errorf("provider %q is not configured", req.ProviderID)
+		}
+	}
+	switch cfg.Type {
+	case "anthropic":
+		return c.anthropic.Complete(ctx, req)
+	default:
+		return c.openAI.Complete(ctx, req)
 	}
 }
 
@@ -80,24 +110,25 @@ func (c *OpenAICompatibleClient) Complete(ctx context.Context, req ChatRequest) 
 		return ChatResponse{}, err
 	}
 
-	var lastErr error
 	urls := completionURLs(cfg)
-	for attempt := 0; attempt <= cfg.RetryCount(); attempt++ {
+	var lastErr error
+	text, err := retryLoop(cfg, func() (string, error) {
 		for _, url := range urls {
 			text, err := c.post(ctx, cfg, apiKey, url, payload)
 			if err == nil {
-				return ChatResponse{ProviderID: req.ProviderID, ModelID: req.ModelID, Model: req.Model, Text: text}, nil
+				return text, nil
+			}
+			if !isRetryable(err) {
+				return "", err
 			}
 			lastErr = err
-			if !isRetryable(err) {
-				break
-			}
 		}
-		if attempt < cfg.RetryCount() {
-			time.Sleep(time.Duration(attempt+1) * 200 * time.Millisecond)
-		}
+		return "", lastErr
+	})
+	if err != nil {
+		return ChatResponse{}, err
 	}
-	return ChatResponse{}, lastErr
+	return ChatResponse{ProviderID: req.ProviderID, ModelID: req.ModelID, Model: req.Model, Text: text}, nil
 }
 
 func (c *OpenAICompatibleClient) post(ctx context.Context, cfg config.ProviderConfig, apiKey string, url string, payload []byte) (string, error) {
