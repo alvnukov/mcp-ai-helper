@@ -68,7 +68,7 @@ func (b leanTaskBackend) SetStatus(ctx context.Context, req tasks.StatusRequest)
 
 func (b leanTaskBackend) BatchUpsert(ctx context.Context, req tasks.BatchUpsertRequest) (tasks.BatchUpsertResult, error) {
 	result, err := batchUpsertTasks(ctx, req, b.commands, b.store)
-	return tasks.BatchUpsertResult{Upserted: result.Upserted, Closed: result.Closed}, err
+	return tasks.BatchUpsertResult{Upserted: result.Upserted, Closed: result.Closed, Source: result.Source, Validation: result.Validation}, err
 }
 
 // New constructs an MCP server with all configured helper tools.
