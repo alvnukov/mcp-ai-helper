@@ -51,6 +51,8 @@ type Filter struct {
 	ContextBefore   int      `json:"context_before"`
 	ContextAfter    int      `json:"context_after"`
 	Preset          string   `json:"preset"`
+	Packs           []string `json:"packs"`
+	Regexes         []string `json:"regexes"`
 	Keywords        []string `json:"keywords"`
 }
 
@@ -295,9 +297,34 @@ func redact(text string) string {
 	return out
 }
 
+var builtInRegexPacks = map[string][]string{
+	"errors-only": {
+		`(?i)\b(error|failed|failure|panic|fatal|exception|timeout)\b`,
+	},
+	"test-failures": {
+		`(?i)(^--- FAIL:|^FAIL\b|panic:|assert|expected|traceback|not equal|failure|failed|error:)`,
+	},
+	"compile-errors": {
+		`(?i)(^#\s|:\d+:\d+:|:\d+:|undefined:|undeclared|syntax error|fatal error:|compilation terminated|build failed|cannot (find|use)|no required module provides package)`,
+	},
+	"git-status": {
+		`^(##|[ MADRCU?!]{1,2}\s+)`,
+	},
+	"changed-files": {
+		`^(?:[ MADRCU?!]{1,2}\s+\S|[ACDMRTUXB]\d*\s+\S|(?:\./)?[\w./-]+\.[A-Za-z0-9._-]+$|rename (?:from|to) |create mode |delete mode )`,
+	},
+	"summary-with-context": {
+		`(?i)(^ok\b|^PASS\b|^FAIL\b|^Ran \d+ tests?|\bsummary\b|\btotal\b|\bfiles changed\b|\bchanged files\b|\bdone\b|\bfinished\b)`,
+	},
+}
+
 func applyFilter(lines []string, filter Filter) ([]string, bool, error) {
-	filter = normalizeFilter(filter)
-	if filter.Include == "" && filter.Exclude == "" && len(filter.Keywords) == 0 {
+	var err error
+	filter, err = normalizeFilter(filter)
+	if err != nil {
+		return nil, false, err
+	}
+	if filter.Include == "" && filter.Exclude == "" && len(filter.Keywords) == 0 && len(filter.Regexes) == 0 {
 		return nil, false, nil
 	}
 	include, err := compileFilterPattern(filter.Include, filter.CaseInsensitive)
@@ -305,6 +332,10 @@ func applyFilter(lines []string, filter Filter) ([]string, bool, error) {
 		return nil, false, err
 	}
 	exclude, err := compileFilterPattern(filter.Exclude, filter.CaseInsensitive)
+	if err != nil {
+		return nil, false, err
+	}
+	regexes, err := compileFilterPatterns(filter.Regexes, filter.CaseInsensitive)
 	if err != nil {
 		return nil, false, err
 	}
@@ -317,6 +348,9 @@ func applyFilter(lines []string, filter Filter) ([]string, bool, error) {
 			continue
 		}
 		if len(filter.Keywords) > 0 && !matchesKeyword(line, filter.Keywords, filter.CaseInsensitive) {
+			continue
+		}
+		if len(regexes) > 0 && !matchesRegexPack(line, regexes) {
 			continue
 		}
 		start := max(0, i-filter.ContextBefore)
@@ -342,21 +376,65 @@ func applyFilter(lines []string, filter Filter) ([]string, bool, error) {
 	return out, truncated, nil
 }
 
-func normalizeFilter(filter Filter) Filter {
+func normalizeFilter(filter Filter) (Filter, error) {
 	switch filter.Preset {
 	case "errors":
-		if filter.Include == "" && len(filter.Keywords) == 0 {
-			filter.Keywords = []string{"error", "failed", "failure", "panic", "fatal", "exception", "timeout"}
-		}
-	case "tests":
-		if filter.Include == "" && len(filter.Keywords) == 0 {
+		filter.Preset = "errors-only"
+	}
+	if !hasPositiveSelectors(filter) {
+		switch filter.Preset {
+		case "errors-only":
+			filter.Packs = appendUniqueStrings(filter.Packs, "errors-only")
+		case "tests":
 			filter.Include = `(?i)(FAIL|PASS|RUN|panic|error|failed|---)`
+		case "test-failures":
+			filter.Packs = appendUniqueStrings(filter.Packs, "test-failures")
+		case "compile-errors":
+			filter.Packs = appendUniqueStrings(filter.Packs, "compile-errors")
+		case "git-status":
+			filter.Packs = appendUniqueStrings(filter.Packs, "git-status")
+		case "changed-files":
+			filter.Packs = appendUniqueStrings(filter.Packs, "changed-files")
+		case "summary-with-context":
+			filter.Packs = appendUniqueStrings(filter.Packs, "summary-with-context")
 		}
 	}
+	if filter.Preset == "summary-with-context" {
+		if filter.ContextBefore <= 0 {
+			filter.ContextBefore = 1
+		}
+		if filter.ContextAfter <= 0 {
+			filter.ContextAfter = 1
+		}
+	}
+	expanded, err := expandRegexPacks(filter.Packs)
+	if err != nil {
+		return Filter{}, err
+	}
+	filter.Regexes = appendUniqueStrings(filter.Regexes, expanded...)
 	if filter.MaxLines <= 0 {
 		filter.MaxLines = 80
 	}
-	return filter
+	return filter, nil
+}
+
+func hasPositiveSelectors(filter Filter) bool {
+	return filter.Include != "" || len(filter.Keywords) > 0 || len(filter.Regexes) > 0 || len(filter.Packs) > 0
+}
+
+func expandRegexPacks(packs []string) ([]string, error) {
+	patterns := make([]string, 0)
+	for _, pack := range packs {
+		if strings.TrimSpace(pack) == "" {
+			continue
+		}
+		values, ok := builtInRegexPacks[pack]
+		if !ok {
+			return nil, fmt.Errorf("unknown filter pack %q", pack)
+		}
+		patterns = append(patterns, values...)
+	}
+	return patterns, nil
 }
 
 func compileFilterPattern(pattern string, caseInsensitive bool) (*regexp.Regexp, error) {
@@ -367,6 +445,20 @@ func compileFilterPattern(pattern string, caseInsensitive bool) (*regexp.Regexp,
 		pattern = "(?i)" + pattern
 	}
 	return regexp.Compile(pattern)
+}
+
+func compileFilterPatterns(patterns []string, caseInsensitive bool) ([]*regexp.Regexp, error) {
+	compiled := make([]*regexp.Regexp, 0, len(patterns))
+	for _, pattern := range patterns {
+		re, err := compileFilterPattern(pattern, caseInsensitive)
+		if err != nil {
+			return nil, err
+		}
+		if re != nil {
+			compiled = append(compiled, re)
+		}
+	}
+	return compiled, nil
 }
 
 func matchesKeyword(line string, keywords []string, caseInsensitive bool) bool {
@@ -384,6 +476,35 @@ func matchesKeyword(line string, keywords []string, caseInsensitive bool) bool {
 		}
 	}
 	return false
+}
+
+func matchesRegexPack(line string, regexes []*regexp.Regexp) bool {
+	for _, re := range regexes {
+		if re.MatchString(line) {
+			return true
+		}
+	}
+	return false
+}
+
+func appendUniqueStrings(base []string, values ...string) []string {
+	seen := make(map[string]struct{}, len(base)+len(values))
+	out := make([]string, 0, len(base)+len(values))
+	for _, value := range base {
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	for _, value := range values {
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 func normalizeLines(text string) []string {
