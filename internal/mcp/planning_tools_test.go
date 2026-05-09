@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/zol/mcp-ai-helper/internal/tasks"
@@ -103,6 +104,23 @@ func TestBuildTaskPacketStrongTaskRequiresSwitch(t *testing.T) {
 	}
 }
 
+func TestBuildTaskPacketForLeanRegistryForbidsGoSideSourceMutation(t *testing.T) {
+	packet := buildTaskPacket(tasks.Task{
+		ID:       "task-056",
+		Title:    "Закрепить запрет Go-side Lean registry parsing и mutation",
+		Priority: "high",
+		Tags:     []string{"tasks", "lean-registry", "lake-server", "llm-strong"},
+	}, "strong")
+
+	if packet.Action != "proceed" {
+		t.Fatalf("strong model should be allowed to inspect hardening packet: %#v", packet)
+	}
+	assertContainsText(t, packet.ForbiddenShortcuts, "regex-mutate Lean registry source")
+	assertContainsText(t, packet.ForbiddenFiles, "Go production code that parses or regex-mutates")
+	assertContainsText(t, packet.KnownRisks, "not an allowed production fallback")
+	assertContainsText(t, packet.RequiredGates, "lake build")
+}
+
 func TestPlanTaskExecutionBlocksWithoutCurrentTask(t *testing.T) {
 	result := planTaskExecution(nil, planTaskExecutionRequest{CurrentModelLevel: "standard"})
 
@@ -112,4 +130,14 @@ func TestPlanTaskExecutionBlocksWithoutCurrentTask(t *testing.T) {
 	if len(result.MinimalNextDataCollection) == 0 {
 		t.Fatal("expected minimal data collection hints")
 	}
+}
+
+func assertContainsText(t *testing.T, values []string, needle string) {
+	t.Helper()
+	for _, value := range values {
+		if strings.Contains(value, needle) {
+			return
+		}
+	}
+	t.Fatalf("%q not found in %#v", needle, values)
 }
