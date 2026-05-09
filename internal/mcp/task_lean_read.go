@@ -19,16 +19,14 @@ type leanTaskListPayload struct {
 }
 
 type leanTaskProjection struct {
-	ID                 string   `json:"id"`
-	Status             string   `json:"status"`
-	Title              string   `json:"title"`
-	Body               string   `json:"body"`
-	Priority           string   `json:"priority"`
-	Tags               []string `json:"tags"`
-	AcceptanceCriteria []string `json:"acceptance_criteria"`
-	VerificationPlan   []string `json:"verification_plan"`
-	CreatedAt          string   `json:"created_at"`
-	UpdatedAt          string   `json:"updated_at"`
+	ID        string   `json:"id"`
+	Status    string   `json:"status"`
+	Title     string   `json:"title"`
+	Body      string   `json:"body"`
+	Priority  string   `json:"priority"`
+	Tags      []string `json:"tags"`
+	CreatedAt string   `json:"created_at"`
+	UpdatedAt string   `json:"updated_at"`
 }
 
 func readCurrentTasks(ctx context.Context, repoPath string, commands *command.Runner, _ *tasks.Store) ([]tasks.Task, string, error) {
@@ -134,17 +132,15 @@ func (p leanTaskProjection) toTask() (tasks.Task, error) {
 		return tasks.Task{}, fmt.Errorf("parse updated_at for %s: %w", p.ID, err)
 	}
 	return tasks.Task{
-		ID:                 p.ID,
-		Status:             p.Status,
-		Title:              p.Title,
-		Body:               p.Body,
-		Priority:           p.Priority,
-		Tags:               p.Tags,
-		AcceptanceCriteria: p.AcceptanceCriteria,
-		VerificationPlan:   p.VerificationPlan,
-		ProjectionSource:   "lean_registry",
-		CreatedAt:          createdAt,
-		UpdatedAt:          updatedAt,
+		ID:               p.ID,
+		Status:           p.Status,
+		Title:            p.Title,
+		Body:             p.Body,
+		Priority:         p.Priority,
+		Tags:             p.Tags,
+		ProjectionSource: "lean_registry",
+		CreatedAt:        createdAt,
+		UpdatedAt:        updatedAt,
 	}, nil
 }
 

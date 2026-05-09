@@ -212,19 +212,7 @@ func (s *leanActiveTasksState) upsert(req tasks.AddRequest) (tasks.Task, error) 
 	if existing, err := s.taskByID(id); err == nil && !existing.CreatedAt.IsZero() {
 		createdAt = existing.CreatedAt.Format(time.RFC3339Nano)
 	}
-	task := tasks.Task{
-		ID:                 id,
-		Status:             req.Status,
-		Title:              req.Title,
-		Body:               req.Body,
-		Priority:           req.Priority,
-		Tags:               uniqueStrings(req.Tags),
-		AcceptanceCriteria: cleanLeanLines(req.AcceptanceCriteria),
-		VerificationPlan:   cleanLeanLines(req.VerificationPlan),
-		CreatedAt:          parseTaskTimeOrZero(createdAt),
-		UpdatedAt:          time.Now().UTC(),
-		ProjectionSource:   "lean_registry",
-	}
+	task := tasks.Task{ID: id, Status: req.Status, Title: req.Title, Body: req.Body, Priority: req.Priority, Tags: uniqueStrings(req.Tags), CreatedAt: parseTaskTimeOrZero(createdAt), UpdatedAt: time.Now().UTC(), ProjectionSource: "lean_registry"}
 	block, err := renderLeanTaskBlock(decl, task)
 	if err != nil {
 		return tasks.Task{}, err
@@ -361,18 +349,7 @@ func leanProjectionFromText(text string, id string) (leanTaskProjection, error) 
 	if err != nil {
 		return leanTaskProjection{}, err
 	}
-	return leanTaskProjection{
-		ID:                 id,
-		Status:             goStatusFromLean(mustFindLeanField(full, `status := \.(\w+),`)),
-		Title:              mustFindLeanStringField(full, "title"),
-		Body:               mustFindLeanStringField(full, "body"),
-		Priority:           goPriorityFromLean(mustFindLeanField(full, `priority := \.(\w+),`)),
-		Tags:               mustFindLeanStringList(full, decl+"Tags"),
-		AcceptanceCriteria: mustFindLeanStringList(full, decl+"AcceptanceCriteria"),
-		VerificationPlan:   mustFindLeanStringList(full, decl+"VerificationPlan"),
-		CreatedAt:          mustFindLeanStringField(full, "createdAt"),
-		UpdatedAt:          mustFindLeanStringField(full, "updatedAt"),
-	}, nil
+	return leanTaskProjection{ID: id, Status: goStatusFromLean(mustFindLeanField(full, `status := \.(\w+),`)), Title: mustFindLeanStringField(full, "title"), Body: mustFindLeanStringField(full, "body"), Priority: goPriorityFromLean(mustFindLeanField(full, `priority := \.(\w+),`)), Tags: mustFindLeanStringList(full, decl+"Tags"), CreatedAt: mustFindLeanStringField(full, "createdAt"), UpdatedAt: mustFindLeanStringField(full, "updatedAt")}, nil
 }
 
 func renderLeanTaskBlock(decl string, task tasks.Task) (string, error) {
@@ -384,9 +361,7 @@ func renderLeanTaskBlock(decl string, task tasks.Task) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	createdAt := leanQuote(task.CreatedAt.Format(time.RFC3339Nano))
-	updatedAt := leanQuote(task.UpdatedAt.Format(time.RFC3339Nano))
-	return fmt.Sprintf("def %sId : ArtifactId :=\n  { value := %s }\n\ndef %sTags : List String :=\n  %s\n\ndef %sAcceptanceCriteria : List String :=\n  %s\n\ndef %sVerificationPlan : List String :=\n  %s\n\ndef %sArtifact : Artifact :=\n  { id := %sId,\n    kind := .task,\n    status := %s,\n    priority := %s,\n    title := %s,\n    body := %s,\n    tags := %sTags,\n    acceptanceCriteria := %sAcceptanceCriteria,\n    verificationPlan := %sVerificationPlan,\n    createdAt := %s,\n    updatedAt := %s }\n\n", decl, leanQuote(task.ID), decl, leanStringList(task.Tags), decl, leanLineList(task.AcceptanceCriteria), decl, leanLineList(task.VerificationPlan), decl, decl, status, priority, leanQuote(task.Title), leanQuote(task.Body), decl, decl, decl, createdAt, updatedAt), nil
+	return fmt.Sprintf("def %sId : ArtifactId :=\n  { value := %s }\n\ndef %sTags : List String :=\n  %s\n\ndef %sArtifact : Artifact :=\n  { id := %sId,\n    kind := .task,\n    status := %s,\n    priority := %s,\n    title := %s,\n    body := %s,\n    tags := %sTags,\n    createdAt := %s,\n    updatedAt := %s }\n\n", decl, leanQuote(task.ID), decl, leanStringList(task.Tags), decl, decl, status, priority, leanQuote(task.Title), leanQuote(task.Body), decl, leanQuote(task.CreatedAt.Format(time.RFC3339Nano)), leanQuote(task.UpdatedAt.Format(time.RFC3339Nano))), nil
 }
 
 func leanTaskDecl(id string) (string, error) {
@@ -452,36 +427,15 @@ func leanQuote(value string) string {
 }
 
 func leanStringList(values []string) string {
-	return renderLeanStringList(uniqueStrings(values))
-}
-
-func leanLineList(values []string) string {
-	return renderLeanStringList(cleanLeanLines(values))
-}
-
-func renderLeanStringList(values []string) string {
-	if len(values) == 0 {
+	cleaned := uniqueStrings(values)
+	if len(cleaned) == 0 {
 		return "[]"
 	}
-	parts := make([]string, 0, len(values))
-	for _, value := range values {
+	parts := make([]string, 0, len(cleaned))
+	for _, value := range cleaned {
 		parts = append(parts, leanQuote(value))
 	}
 	return "[" + strings.Join(parts, ", ") + "]"
-}
-
-func cleanLeanLines(values []string) []string {
-	if len(values) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value != "" {
-			out = append(out, value)
-		}
-	}
-	return out
 }
 
 func mustFindLeanField(text string, pattern string) string {
