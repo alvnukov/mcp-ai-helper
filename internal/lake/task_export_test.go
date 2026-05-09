@@ -28,6 +28,12 @@ func TestTaskRegistryExporterGetTaskThroughLakeExe(t *testing.T) {
 	if _, ok := task["tags"].([]any); !ok {
 		t.Fatalf("tags field missing or not an array: %#v", task["tags"])
 	}
+	if _, ok := task["acceptance_criteria"].([]any); !ok {
+		t.Fatalf("acceptance_criteria field missing or not an array: %#v", task["acceptance_criteria"])
+	}
+	if _, ok := task["verification_plan"].([]any); !ok {
+		t.Fatalf("verification_plan field missing or not an array: %#v", task["verification_plan"])
+	}
 }
 
 func TestTaskRegistryExporterListActiveThroughLakeExe(t *testing.T) {
