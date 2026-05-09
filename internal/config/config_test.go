@@ -67,8 +67,11 @@ func TestLoadCreatesDefaultConfigInHomeDir(t *testing.T) {
 	if !strings.Contains(cfg.AssistantGuidance, "one long run_workflow") {
 		t.Fatal("loaded config guidance is missing workflow policy")
 	}
-	if !strings.Contains(cfg.AssistantGuidance, "no commit means the task is not done") {
-		t.Fatal("loaded config guidance is missing commit closeout policy")
+	if !strings.Contains(cfg.AssistantGuidance, "no such unified commit means the task is not done") {
+		t.Fatal("loaded config guidance is missing atomic commit closeout policy")
+	}
+	if !strings.Contains(cfg.AssistantGuidance, "post-hoc status commit") {
+		t.Fatal("loaded config guidance is missing post-hoc status commit prohibition")
 	}
 }
 
