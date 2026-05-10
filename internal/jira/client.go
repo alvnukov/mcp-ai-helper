@@ -149,6 +149,9 @@ func (c *Client) GetWorklogs(key string, since, until time.Time) ([]gojira.Workl
 	}
 	var filtered []gojira.WorklogRecord
 	for _, r := range wl.Worklogs {
+		if r.Started == nil {
+			continue
+		}
 		started := time.Time(*r.Started)
 		if !since.IsZero() && started.Before(since) {
 			continue

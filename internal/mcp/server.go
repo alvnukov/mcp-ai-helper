@@ -110,6 +110,7 @@ func New(cfg *config.Config) *server.MCPServer {
 			deps.commands = cmds
 			deps.pipelines = pipes
 			deps.taskStore = store
+			deps.secretMask = buildSecretMask(next)
 			deps.mu.Unlock()
 			return next, nil
 		}
