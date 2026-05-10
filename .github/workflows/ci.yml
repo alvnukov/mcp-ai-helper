@@ -30,7 +30,7 @@ jobs:
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
 
       - name: Install Lean toolchain
-        run: elan run lake --version
+        run: lake --version
 
       - name: Download dependencies
         run: go mod download
