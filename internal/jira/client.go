@@ -25,11 +25,20 @@ func NewClient(cfg config.JiraConfig) (*Client, error) {
 	if apiKey == "" {
 		return nil, fmt.Errorf("jira: api key is required — set api_key or api_key_env")
 	}
-	tp := gojira.BasicAuthTransport{
-		Username: cfg.Username,
-		Password: apiKey,
+	var httpClient *http.Client
+	if cfg.Username != "" {
+		tp := gojira.BasicAuthTransport{
+			Username: cfg.Username,
+			Password: apiKey,
+		}
+		httpClient = tp.Client()
+	} else {
+		tp := gojira.BearerAuthTransport{
+			Token: apiKey,
+		}
+		httpClient = tp.Client()
 	}
-	jc, err := gojira.NewClient(tp.Client(), cfg.URL)
+	jc, err := gojira.NewClient(httpClient, cfg.URL)
 	if err != nil {
 		return nil, fmt.Errorf("jira: connect to %s: %w", cfg.URL, err)
 	}
@@ -160,7 +169,7 @@ type WorklogEntry struct {
 
 // GetWorklogsByUser searches worklogs by user in a date range.
 func (c *Client) GetWorklogsByUser(username string, since, until time.Time) ([]WorklogEntry, error) {
-	jql := fmt.Sprintf("worklogAuthor = %s", username)
+	jql := fmt.Sprintf("worklogAuthor = \"%s\"", username)
 	if !since.IsZero() {
 		jql += fmt.Sprintf(" AND worklogDate >= %s", since.Format("2006-01-02"))
 	}
