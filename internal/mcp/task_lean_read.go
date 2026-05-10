@@ -27,6 +27,7 @@ type leanTaskProjection struct {
 	Title        string   `json:"title"`
 	Body         string   `json:"body"`
 	Priority     string   `json:"priority"`
+	ModelLevel   string   `json:"model_level"`
 	Tags         []string `json:"tags"`
 	CreatedAt    string   `json:"created_at"`
 	UpdatedAt    string   `json:"updated_at"`
@@ -134,6 +135,13 @@ func (p leanTaskProjection) toTask() (tasks.Task, error) {
 	if err != nil {
 		return tasks.Task{}, fmt.Errorf("parse updated_at for %s: %w", p.ID, err)
 	}
+	modelLevel := ""
+	if strings.TrimSpace(p.ModelLevel) != "" {
+		modelLevel, err = tasks.NormalizeModelLevel(p.ModelLevel)
+		if err != nil {
+			return tasks.Task{}, err
+		}
+	}
 	return tasks.Task{
 		ID:               p.ID,
 		TaskType:         p.TaskType,
@@ -143,6 +151,7 @@ func (p leanTaskProjection) toTask() (tasks.Task, error) {
 		Title:            p.Title,
 		Body:             p.Body,
 		Priority:         p.Priority,
+		ModelLevel:       modelLevel,
 		Tags:             p.Tags,
 		ProjectionSource: "lean_registry",
 		CreatedAt:        createdAt,

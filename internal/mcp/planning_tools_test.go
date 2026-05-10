@@ -7,22 +7,23 @@ import (
 	"github.com/zol/mcp-ai-helper/internal/tasks"
 )
 
-func TestPlanTaskExecutionStandardTaskCanProceed(t *testing.T) {
+func TestPlanTaskExecutionMediumTaskCanProceed(t *testing.T) {
 	result := planTaskExecution([]tasks.Task{{
-		ID:       "impl",
-		Status:   "in_progress",
-		Title:    "[type-implementation-standard] Implement thing",
-		Tags:     []string{"type-implementation-standard", "llm-standard"},
-		Priority: "high",
-	}}, planTaskExecutionRequest{CurrentModelLevel: "standard"})
+		ID:         "impl",
+		Status:     "in_progress",
+		Title:      "Implement thing",
+		TaskType:   "type-implementation",
+		ModelLevel: "medium",
+		Priority:   "critical",
+	}}, planTaskExecutionRequest{CurrentModelLevel: "medium"})
 
 	if result.Mode != "weak_safe" || result.Action != "proceed" || result.PlanningOnly {
 		t.Fatalf("result = %#v", result)
 	}
-	if result.RequiredLLMLevel != "standard" || result.RequiredTaskType != "type-implementation-standard" {
-		t.Fatalf("task routing = level %q type %q", result.RequiredLLMLevel, result.RequiredTaskType)
+	if result.RequiredLLMLevel != "medium" || result.ModelLevel != "medium" || result.RequiredTaskType != "type-implementation" {
+		t.Fatalf("task routing = level %q model %q type %q", result.RequiredLLMLevel, result.ModelLevel, result.RequiredTaskType)
 	}
-	if len(result.AllowedDelegateLevels) != 2 || result.AllowedDelegateLevels[0] != "standard" {
+	if len(result.AllowedDelegateLevels) != 3 || result.AllowedDelegateLevels[0] != "medium" {
 		t.Fatalf("allowed delegate levels = %#v", result.AllowedDelegateLevels)
 	}
 	if len(result.RequiredPipeline) == 0 || result.RequiredPipeline[len(result.RequiredPipeline)-1] != "run_workflow" {
@@ -30,15 +31,33 @@ func TestPlanTaskExecutionStandardTaskCanProceed(t *testing.T) {
 	}
 }
 
-func TestPlanTaskExecutionStrongTaskRequiresSwitchWhenUnknown(t *testing.T) {
+func TestPlanTaskExecutionVeryHighDelegatesLowerLevelTask(t *testing.T) {
 	result := planTaskExecution([]tasks.Task{{
-		ID:     "design",
-		Status: "todo",
-		Title:  "[type-design-strong] Design thing",
-		Tags:   []string{"type-design-strong", "llm-strong"},
+		ID:         "impl",
+		Status:     "in_progress",
+		Title:      "Implement thing",
+		TaskType:   "type-implementation",
+		ModelLevel: "medium",
+	}}, planTaskExecutionRequest{CurrentModelLevel: "very_high"})
+
+	if result.Action != "delegate_required" || !result.PlanningOnly {
+		t.Fatalf("very_high must plan/delegate lower-level tasks: %#v", result)
+	}
+	if result.SwitchReason == "" {
+		t.Fatal("delegate reason is required")
+	}
+}
+
+func TestPlanTaskExecutionHighTaskRequiresSwitchWhenUnknown(t *testing.T) {
+	result := planTaskExecution([]tasks.Task{{
+		ID:         "design",
+		Status:     "todo",
+		Title:      "Design thing",
+		TaskType:   "type-design",
+		ModelLevel: "high",
 	}}, planTaskExecutionRequest{})
 
-	if result.Mode != "strong_required" || result.Action != "switch_model_required" || !result.PlanningOnly {
+	if result.Mode != "high_required" || result.Action != "switch_model_required" || !result.PlanningOnly {
 		t.Fatalf("result = %#v", result)
 	}
 	if result.SwitchReason == "" {
@@ -49,14 +68,16 @@ func TestPlanTaskExecutionStrongTaskRequiresSwitchWhenUnknown(t *testing.T) {
 func TestBuildTaskPacketIncludesStructuredExecutionScope(t *testing.T) {
 	packet := buildTaskPacket(tasks.Task{
 		ID:                 "impl",
-		Title:              "[type-implementation-standard] Implement thing",
+		Title:              "Implement thing",
 		Body:               "local implementation only",
-		Tags:               []string{"type-implementation-standard", "llm-standard", "planning"},
+		TaskType:           "type-implementation",
+		ModelLevel:         "medium",
+		Tags:               []string{"planning"},
 		AcceptanceCriteria: []string{"criterion"},
 		VerificationPlan:   []string{"go test ./internal/mcp"},
-	}, "standard")
+	}, "medium")
 
-	if packet.Action != "proceed" || packet.Readiness != "ready" || packet.RequiredLLMLevel != "standard" || !packet.ReadyForStandardModel {
+	if packet.Action != "proceed" || packet.Readiness != "ready" || packet.RequiredLLMLevel != "medium" || packet.ModelLevel != "medium" || !packet.ReadyForStandardModel {
 		t.Fatalf("packet = %#v", packet)
 	}
 	if len(packet.AcceptanceCriteria) != 1 || len(packet.VerificationPlan) != 1 {
@@ -70,50 +91,47 @@ func TestBuildTaskPacketIncludesStructuredExecutionScope(t *testing.T) {
 	}
 }
 
-func TestBuildTaskPacketInfersCriticalTaskNeedsStrongModel(t *testing.T) {
+func TestBuildTaskPacketPriorityDoesNotInferModelLevel(t *testing.T) {
 	packet := buildTaskPacket(tasks.Task{
 		ID:       "task-044",
 		Title:    "Добавить task execution packet и readiness contract",
 		Body:     "Packet must contain context, owned files, forbidden files, risks, gates, and readiness.",
 		Priority: "critical",
 		Tags:     []string{"tasks", "workflow", "planning", "llm-ergonomics"},
-	}, "standard")
+	}, "very_high")
 
-	if packet.Action != "switch_model_required" || packet.Readiness != "requires_strong_model" || !packet.NeedsStrongModel || packet.ReadyForStandardModel {
-		t.Fatalf("packet routing = %#v", packet)
-	}
-	for _, field := range [][]string{packet.MinimalRequiredContext, packet.OwnedFiles, packet.ForbiddenFiles, packet.KnownRisks, packet.RequiredGates} {
-		if len(field) == 0 {
-			t.Fatalf("packet missing readiness field: %#v", packet)
-		}
+	if packet.Action != "blocked" || packet.RequiredLLMLevel != "unknown" || packet.ModelLevel != "unknown" || packet.Readiness != "blocked" {
+		t.Fatalf("priority must not imply model_level: %#v", packet)
 	}
 }
 
-func TestBuildTaskPacketStrongTaskRequiresSwitch(t *testing.T) {
+func TestBuildTaskPacketHighTaskRequiresSwitch(t *testing.T) {
 	packet := buildTaskPacket(tasks.Task{
-		ID:    "design",
-		Title: "[type-design-strong] Design thing",
-		Tags:  []string{"type-design-strong", "llm-strong"},
-	}, "standard")
+		ID:         "design",
+		Title:      "Design thing",
+		TaskType:   "type-design",
+		ModelLevel: "high",
+	}, "medium")
 
-	if packet.Action != "switch_model_required" || packet.SwitchReason == "" {
+	if packet.Action != "switch_model_required" || packet.SwitchReason == "" || packet.Readiness != "requires_higher_model_level" {
 		t.Fatalf("packet = %#v", packet)
 	}
 	if len(packet.AcceptanceCriteria) != 0 || len(packet.VerificationPlan) != 0 {
-		t.Fatalf("strong packet should not expose execution instructions: %#v", packet)
+		t.Fatalf("higher-level packet should not expose execution instructions: %#v", packet)
 	}
 }
 
 func TestBuildTaskPacketForLeanRegistryForbidsGoSideSourceMutation(t *testing.T) {
 	packet := buildTaskPacket(tasks.Task{
-		ID:       "task-056",
-		Title:    "Закрепить запрет Go-side Lean registry parsing и mutation",
-		Priority: "high",
-		Tags:     []string{"tasks", "lean-registry", "lake-server", "llm-strong"},
-	}, "strong")
+		ID:         "task-056",
+		Title:      "Закрепить запрет Go-side Lean registry parsing и mutation",
+		Priority:   "high",
+		ModelLevel: "high",
+		Tags:       []string{"tasks", "lean-registry", "lake-server"},
+	}, "high")
 
 	if packet.Action != "proceed" {
-		t.Fatalf("strong model should be allowed to inspect hardening packet: %#v", packet)
+		t.Fatalf("high model should be allowed to inspect hardening packet: %#v", packet)
 	}
 	assertContainsText(t, packet.ForbiddenShortcuts, "regex-mutate Lean registry source")
 	assertContainsText(t, packet.ForbiddenFiles, "Go production code that parses or regex-mutates")
@@ -122,7 +140,7 @@ func TestBuildTaskPacketForLeanRegistryForbidsGoSideSourceMutation(t *testing.T)
 }
 
 func TestPlanTaskExecutionBlocksWithoutCurrentTask(t *testing.T) {
-	result := planTaskExecution(nil, planTaskExecutionRequest{CurrentModelLevel: "standard"})
+	result := planTaskExecution(nil, planTaskExecutionRequest{CurrentModelLevel: "medium"})
 
 	if result.Mode != "blocked" || result.Action != "blocked" || !result.PlanningOnly {
 		t.Fatalf("result = %#v", result)

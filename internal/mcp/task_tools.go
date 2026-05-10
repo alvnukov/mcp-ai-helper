@@ -20,6 +20,7 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 		basemcp.WithString("id"),
 		basemcp.WithString("task_type"),
 		basemcp.WithString("priority"),
+		basemcp.WithString("model_level"),
 		basemcp.WithArray("tags"),
 		basemcp.WithArray("acceptance_criteria"),
 		basemcp.WithArray("verification_plan"),
@@ -79,6 +80,7 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 		basemcp.WithString("status"),
 		basemcp.WithString("task_type"),
 		basemcp.WithString("priority"),
+		basemcp.WithString("model_level"),
 		basemcp.WithArray("tags"),
 		basemcp.WithArray("acceptance_criteria"),
 		basemcp.WithArray("verification_plan"),
@@ -142,7 +144,8 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 		basemcp.WithString("title", basemcp.Required()),
 		basemcp.WithString("status", basemcp.Description("Task status: todo, in_progress, blocked, done.")),
 		basemcp.WithString("task_type", basemcp.Description("Branch type for task worktree, e.g. feature, bug, hotfix, chore, docs, refactor, test, ci.")),
-		basemcp.WithString("priority", basemcp.Description("Task priority: low, normal, high, critical.")),
+		basemcp.WithString("priority", basemcp.Description("Task priority: low, medium, high, critical.")),
+		basemcp.WithString("model_level", basemcp.Description("Minimum model level for the task: low, medium, high, very_high.")),
 		basemcp.WithString("body", basemcp.Description("Task description.")),
 		basemcp.WithArray("tags", basemcp.Description("Optional tags.")),
 		basemcp.WithArray("acceptance_criteria", basemcp.Description("Structured completion criteria.")),
@@ -225,7 +228,7 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 }
 
 func mergeTaskUpdate(existing tasks.Task, update tasks.UpdateRequest) tasks.AddRequest {
-	merged := tasks.AddRequest{RepoPath: update.RepoPath, ID: existing.ID, TaskType: existing.TaskType, Branch: existing.Branch, WorktreePath: existing.WorktreePath, ParentID: existing.ParentID, Status: existing.Status, Title: existing.Title, Body: existing.Body, Priority: existing.Priority, Tags: existing.Tags, AcceptanceCriteria: existing.AcceptanceCriteria, VerificationPlan: existing.VerificationPlan}
+	merged := tasks.AddRequest{RepoPath: update.RepoPath, ID: existing.ID, TaskType: existing.TaskType, Branch: existing.Branch, WorktreePath: existing.WorktreePath, ParentID: existing.ParentID, Status: existing.Status, Title: existing.Title, Body: existing.Body, Priority: existing.Priority, ModelLevel: existing.ModelLevel, Tags: existing.Tags, AcceptanceCriteria: existing.AcceptanceCriteria, VerificationPlan: existing.VerificationPlan}
 	if strings.TrimSpace(update.Status) != "" {
 		merged.Status = strings.TrimSpace(update.Status)
 	}
@@ -249,6 +252,9 @@ func mergeTaskUpdate(existing tasks.Task, update tasks.UpdateRequest) tasks.AddR
 	}
 	if strings.TrimSpace(update.Priority) != "" {
 		merged.Priority = strings.TrimSpace(update.Priority)
+	}
+	if strings.TrimSpace(update.ModelLevel) != "" {
+		merged.ModelLevel = strings.TrimSpace(update.ModelLevel)
 	}
 	if update.Tags != nil {
 		merged.Tags = update.Tags
@@ -281,7 +287,7 @@ func taskMatchesMCP(task tasks.Task, query string) bool {
 	if q == "" {
 		return true
 	}
-	fields := []string{task.ID, task.TaskType, task.Branch, task.WorktreePath, task.CodePath, task.Status, task.Title, task.Body, task.Priority, task.ParentID}
+	fields := []string{task.ID, task.TaskType, task.Branch, task.WorktreePath, task.CodePath, task.Status, task.Title, task.Body, task.Priority, task.ModelLevel, task.ParentID}
 	for _, field := range fields {
 		if strings.Contains(strings.ToLower(field), q) {
 			return true

@@ -21,6 +21,7 @@ func TestStoreAddListGetDelete(t *testing.T) {
 		RepoPath:           repoPath,
 		Title:              "Improve filters",
 		Body:               "Add go_test preset",
+		ModelLevel:         "very_high",
 		AcceptanceCriteria: []string{"preset is available", "  "},
 		VerificationPlan:   []string{"run targeted tests"},
 	})
@@ -45,6 +46,9 @@ func TestStoreAddListGetDelete(t *testing.T) {
 	}
 	if got.Title != task.Title {
 		t.Fatalf("title = %q, want %q", got.Title, task.Title)
+	}
+	if got.ModelLevel != "very_high" {
+		t.Fatalf("model_level = %q, want very_high", got.ModelLevel)
 	}
 	if len(got.AcceptanceCriteria) != 1 || got.AcceptanceCriteria[0] != "preset is available" {
 		t.Fatalf("acceptance_criteria = %#v", got.AcceptanceCriteria)
@@ -103,6 +107,7 @@ func TestStoreUpdateSearchAndBatchUpsert(t *testing.T) {
 		ID:                 first.ID,
 		Status:             "in_progress",
 		Body:               "Expose task_batch_upsert",
+		ModelLevel:         "high",
 		AcceptanceCriteria: []string{"batch criteria preserved"},
 		VerificationPlan:   []string{"targeted store tests"},
 	})
@@ -114,6 +119,9 @@ func TestStoreUpdateSearchAndBatchUpsert(t *testing.T) {
 	}
 	if updated.Status != "in_progress" {
 		t.Fatalf("status = %q, want in_progress", updated.Status)
+	}
+	if updated.ModelLevel != "high" {
+		t.Fatalf("model_level = %q, want high", updated.ModelLevel)
 	}
 	if len(updated.AcceptanceCriteria) != 1 || updated.AcceptanceCriteria[0] != "batch criteria preserved" {
 		t.Fatalf("acceptance_criteria = %#v", updated.AcceptanceCriteria)
@@ -143,6 +151,9 @@ func TestStoreUpdateSearchAndBatchUpsert(t *testing.T) {
 	}
 	if len(result.Upserted) != 1 || result.Upserted[0].ID != "new-task" {
 		t.Fatalf("upserted = %#v", result.Upserted)
+	}
+	if result.Upserted[0].ModelLevel != "" {
+		t.Fatalf("default model_level = %q, want empty", result.Upserted[0].ModelLevel)
 	}
 	if len(result.Closed) != 1 || result.Closed[0].ID != first.ID || result.Closed[0].Status != "done" {
 		t.Fatalf("closed = %#v", result.Closed)

@@ -23,6 +23,7 @@ type taskPlanSummary struct {
 	Priority           string   `json:"priority,omitempty"`
 	TaskType           string   `json:"task_type,omitempty"`
 	RequiredLLMLevel   string   `json:"required_llm_level,omitempty"`
+	ModelLevel         string   `json:"model_level"`
 	AcceptanceCriteria []string `json:"acceptance_criteria,omitempty"`
 	VerificationPlan   []string `json:"verification_plan,omitempty"`
 }
@@ -41,6 +42,7 @@ type taskPacketResult struct {
 	NeedsStrongModel       bool     `json:"needs_strong_model"`
 	RequiredTaskType       string   `json:"required_task_type,omitempty"`
 	RequiredLLMLevel       string   `json:"required_llm_level,omitempty"`
+	ModelLevel             string   `json:"model_level"`
 	AllowedModelLevels     []string `json:"allowed_model_levels,omitempty"`
 	Objective              string   `json:"objective,omitempty"`
 	Body                   string   `json:"body,omitempty"`
@@ -68,6 +70,7 @@ type planTaskExecutionResult struct {
 	SuggestedTaskType         string            `json:"suggested_task_type,omitempty"`
 	RequiredTaskType          string            `json:"required_task_type,omitempty"`
 	RequiredLLMLevel          string            `json:"required_llm_level,omitempty"`
+	ModelLevel                string            `json:"model_level"`
 	CurrentModelLevel         string            `json:"current_model_level"`
 	AllowedDelegateLevels     []string          `json:"allowed_delegate_levels,omitempty"`
 	SwitchReason              string            `json:"switch_reason,omitempty"`
@@ -115,13 +118,11 @@ func registerPlanningTools(srv *server.MCPServer, deps *Server) {
 
 func buildTaskPacket(task tasks.Task, currentModelLevel string) taskPacketResult {
 	taskType, level := taskTypeAndLevel(task)
-	if strings.TrimSpace(currentModelLevel) == "" {
-		currentModelLevel = "unknown"
-	}
+	currentModelLevel = normalizeRequestedModelLevel(currentModelLevel)
 	action := actionForLevel(level, currentModelLevel)
 	forbiddenShortcuts := []string{
 		"do not change unrelated roadmap or parent planning policy",
-		"do not mark design/research tasks done without strong-level review",
+		"do not mark design/research tasks done without higher-level review",
 		"do not weaken tests or checks to get a green result",
 	}
 	if hasAnyTag(task.Tags, "tasks", "lean-registry", "lake-server") {
@@ -131,10 +132,11 @@ func buildTaskPacket(task tasks.Task, currentModelLevel string) taskPacketResult
 		TaskID:                 task.ID,
 		Action:                 action,
 		Readiness:              readinessForAction(action),
-		ReadyForStandardModel:  actionForLevel(level, "standard") == "proceed",
-		NeedsStrongModel:       level == "strong",
+		ReadyForStandardModel:  actionForLevel(level, "medium") == "proceed",
+		NeedsStrongModel:       modelLevelRank(level) >= modelLevelRank("high"),
 		RequiredTaskType:       taskType,
 		RequiredLLMLevel:       level,
+		ModelLevel:             level,
 		AllowedModelLevels:     allowedDelegateLevels(level),
 		Objective:              task.Title,
 		Body:                   task.Body,
@@ -152,7 +154,7 @@ func buildTaskPacket(task tasks.Task, currentModelLevel string) taskPacketResult
 		StatusUpdate: "set task to done only after verification passes; otherwise set blocked with reason",
 	}
 	if packet.Action == "switch_model_required" {
-		packet.SwitchReason = "task requires a stronger model level"
+		packet.SwitchReason = "task requires a higher model_level"
 		return packet
 	}
 	packet.AcceptanceCriteria = task.AcceptanceCriteria
@@ -161,10 +163,7 @@ func buildTaskPacket(task tasks.Task, currentModelLevel string) taskPacketResult
 }
 
 func planTaskExecution(list []tasks.Task, req planTaskExecutionRequest) planTaskExecutionResult {
-	currentModelLevel := strings.TrimSpace(req.CurrentModelLevel)
-	if currentModelLevel == "" {
-		currentModelLevel = "unknown"
-	}
+	currentModelLevel := normalizeRequestedModelLevel(req.CurrentModelLevel)
 
 	var goal *taskPlanSummary
 	var current *taskPlanSummary
@@ -213,13 +212,17 @@ func planTaskExecution(list []tasks.Task, req planTaskExecutionRequest) planTask
 	result.SuggestedTaskType = current.TaskType
 	result.RequiredTaskType = current.TaskType
 	result.RequiredLLMLevel = current.RequiredLLMLevel
+	result.ModelLevel = current.ModelLevel
 	result.AllowedDelegateLevels = allowedDelegateLevels(current.RequiredLLMLevel)
 	result.RequiredPipeline = pipelineForTask(current)
 	result.Mode = modeForLevel(current.RequiredLLMLevel)
 	result.Action = actionForLevel(current.RequiredLLMLevel, currentModelLevel)
 	result.PlanningOnly = result.Action != "proceed"
 	if result.Action == "switch_model_required" {
-		result.SwitchReason = "current model level is below required task level"
+		result.SwitchReason = "current model level is below required task model_level"
+	}
+	if result.Action == "delegate_required" {
+		result.SwitchReason = "very_high model should plan and delegate lower-level execution tasks"
 	}
 	return result
 }
@@ -233,6 +236,7 @@ func summarizeTaskForPlan(task tasks.Task) taskPlanSummary {
 		Priority:           task.Priority,
 		TaskType:           taskType,
 		RequiredLLMLevel:   level,
+		ModelLevel:         level,
 		AcceptanceCriteria: task.AcceptanceCriteria,
 		VerificationPlan:   task.VerificationPlan,
 	}
@@ -243,7 +247,9 @@ func readinessForAction(action string) string {
 	case "proceed":
 		return "ready"
 	case "switch_model_required":
-		return "requires_strong_model"
+		return "requires_higher_model_level"
+	case "delegate_required":
+		return "delegate_to_lower_model"
 	default:
 		return "blocked"
 	}
@@ -359,60 +365,41 @@ func hasAnyTag(tags []string, targets ...string) bool {
 }
 
 func taskTypeAndLevel(task tasks.Task) (string, string) {
-	for _, tag := range task.Tags {
-		if strings.HasPrefix(tag, "type-") {
-			return tag, llmLevelFromTags(task.Tags)
+	taskType := strings.TrimSpace(task.TaskType)
+	if taskType == "" {
+		for _, tag := range task.Tags {
+			if strings.HasPrefix(tag, "type-") {
+				taskType = tag
+				break
+			}
 		}
 	}
-	start := strings.Index(task.Title, "[")
-	end := strings.Index(task.Title, "]")
-	if start >= 0 && end > start {
-		candidate := task.Title[start+1 : end]
-		if strings.HasPrefix(candidate, "type-") {
-			return candidate, llmLevelFromTaskType(candidate)
+	if taskType == "" {
+		start := strings.Index(task.Title, "[")
+		end := strings.Index(task.Title, "]")
+		if start >= 0 && end > start {
+			candidate := task.Title[start+1 : end]
+			if strings.HasPrefix(candidate, "type-") {
+				taskType = candidate
+			}
 		}
 	}
-	return inferredTaskTypeAndLevel(task)
+	return taskType, modelLevelForTask(task)
 }
 
-func inferredTaskTypeAndLevel(task tasks.Task) (string, string) {
-	switch {
-	case task.Priority == "critical" || hasAnyTag(task.Tags, "fileops", "git", "security", "routing", "models", "providers", "lean-registry", "evidence", "quality"):
-		return "type-implementation-strong", "strong"
-	case hasAnyTag(task.Tags, "workflow") && task.Priority != "medium":
-		return "type-implementation-strong", "strong"
-	case hasAnyTag(task.Tags, "logs", "output", "filtering", "observability", "audit", "testing", "planning"):
-		return "type-implementation-standard", "standard"
-	default:
-		return "", "unknown"
-	}
+func modelLevelForTask(task tasks.Task) string {
+	return normalizeRequestedModelLevel(task.ModelLevel)
 }
 
-func llmLevelFromTags(tags []string) string {
-	for _, tag := range tags {
-		switch tag {
-		case "llm-strong":
-			return "strong"
-		case "llm-standard":
-			return "standard"
-		case "llm-cheap":
-			return "cheap"
-		}
+func normalizeRequestedModelLevel(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "unknown"
 	}
-	return "unknown"
-}
-
-func llmLevelFromTaskType(taskType string) string {
-	if strings.HasSuffix(taskType, "-strong") {
-		return "strong"
+	level, err := tasks.NormalizeModelLevel(value)
+	if err != nil || level == "" {
+		return "unknown"
 	}
-	if strings.HasSuffix(taskType, "-standard") {
-		return "standard"
-	}
-	if strings.HasSuffix(taskType, "-cheap") {
-		return "cheap"
-	}
-	return "unknown"
+	return level
 }
 
 func pipelineForTask(task *taskPlanSummary) []string {
@@ -430,37 +417,59 @@ func pipelineForTask(task *taskPlanSummary) []string {
 }
 
 func modeForLevel(level string) string {
-	if level == "strong" {
-		return "strong_required"
-	}
-	if level == "cheap" || level == "standard" {
+	switch normalizeRequestedModelLevel(level) {
+	case "very_high":
+		return "very_high_required"
+	case "high":
+		return "high_required"
+	case "medium", "low":
 		return "weak_safe"
+	default:
+		return "blocked"
 	}
-	return "blocked"
 }
 
 func allowedDelegateLevels(required string) []string {
-	switch required {
-	case "strong":
-		return []string{"strong"}
-	case "standard":
-		return []string{"standard", "strong"}
-	case "cheap":
-		return []string{"cheap", "standard", "strong"}
+	switch normalizeRequestedModelLevel(required) {
+	case "very_high":
+		return []string{"very_high"}
+	case "high":
+		return []string{"high", "very_high"}
+	case "medium":
+		return []string{"medium", "high", "very_high"}
+	case "low":
+		return []string{"low", "medium", "high", "very_high"}
 	default:
 		return nil
 	}
 }
 
 func actionForLevel(required string, current string) string {
-	if required == "unknown" || required == "" {
+	required = normalizeRequestedModelLevel(required)
+	if required == "unknown" {
 		return "blocked"
 	}
-	if required == "strong" && current != "strong" {
+	current = normalizeRequestedModelLevel(current)
+	if current == "unknown" || modelLevelRank(current) < modelLevelRank(required) {
 		return "switch_model_required"
 	}
-	if required == "standard" && current == "cheap" {
-		return "switch_model_required"
+	if current == "very_high" && required != "very_high" {
+		return "delegate_required"
 	}
 	return "proceed"
+}
+
+func modelLevelRank(level string) int {
+	switch normalizeRequestedModelLevel(level) {
+	case "low":
+		return 0
+	case "medium":
+		return 1
+	case "high":
+		return 2
+	case "very_high":
+		return 3
+	default:
+		return -1
+	}
 }

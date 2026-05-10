@@ -35,6 +35,7 @@ type Task struct {
 	Title              string    `json:"title"`
 	Body               string    `json:"body"`
 	Priority           string    `json:"priority,omitempty"`
+	ModelLevel         string    `json:"model_level"`
 	Tags               []string  `json:"tags,omitempty"`
 	AcceptanceCriteria []string  `json:"acceptance_criteria,omitempty"`
 	VerificationPlan   []string  `json:"verification_plan,omitempty"`
@@ -54,6 +55,7 @@ type AddRequest struct {
 	Title              string   `json:"title"`
 	Body               string   `json:"body"`
 	Priority           string   `json:"priority"`
+	ModelLevel         string   `json:"model_level"`
 	Tags               []string `json:"tags"`
 	AcceptanceCriteria []string `json:"acceptance_criteria"`
 	VerificationPlan   []string `json:"verification_plan"`
@@ -86,6 +88,7 @@ type UpdateRequest struct {
 	Title              string   `json:"title"`
 	Body               string   `json:"body"`
 	Priority           string   `json:"priority"`
+	ModelLevel         string   `json:"model_level"`
 	Tags               []string `json:"tags"`
 	AcceptanceCriteria []string `json:"acceptance_criteria"`
 	VerificationPlan   []string `json:"verification_plan"`
@@ -132,6 +135,10 @@ func (s *Store) Add(req AddRequest) (Task, error) {
 	if status == "" {
 		status = "todo"
 	}
+	modelLevel, err := NormalizeModelLevel(req.ModelLevel)
+	if err != nil {
+		return Task{}, err
+	}
 	task := Task{
 		ID:                 id,
 		TaskType:           cleanTaskType(req.TaskType),
@@ -142,6 +149,7 @@ func (s *Store) Add(req AddRequest) (Task, error) {
 		Title:              req.Title,
 		Body:               req.Body,
 		Priority:           strings.TrimSpace(req.Priority),
+		ModelLevel:         modelLevel,
 		Tags:               cleanTags(req.Tags),
 		AcceptanceCriteria: cleanLines(req.AcceptanceCriteria),
 		VerificationPlan:   cleanLines(req.VerificationPlan),
@@ -192,6 +200,13 @@ func (s *Store) Update(req UpdateRequest) (Task, error) {
 	}
 	if strings.TrimSpace(req.Priority) != "" {
 		task.Priority = strings.TrimSpace(req.Priority)
+	}
+	if strings.TrimSpace(req.ModelLevel) != "" {
+		modelLevel, err := NormalizeModelLevel(req.ModelLevel)
+		if err != nil {
+			return Task{}, err
+		}
+		task.ModelLevel = modelLevel
 	}
 	if req.Tags != nil {
 		task.Tags = cleanTags(req.Tags)
@@ -385,6 +400,13 @@ func readLeanContent(data []byte) (Task, error) {
 	if err := json.Unmarshal([]byte(text[start:start+end]), &task); err != nil {
 		return Task{}, fmt.Errorf("decode task metadata: %w", err)
 	}
+	if strings.TrimSpace(task.ModelLevel) != "" {
+		modelLevel, err := NormalizeModelLevel(task.ModelLevel)
+		if err != nil {
+			return Task{}, err
+		}
+		task.ModelLevel = modelLevel
+	}
 	return task, nil
 }
 
@@ -410,7 +432,11 @@ func encodeLeanTask(task Task) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("marshal task priority: %w", err)
 	}
-	content := fmt.Sprintf("/- mcp-ai-helper-task %s -/\nnamespace MCPAIHelper.Tasks\n\ndef %s_id : String := %q\ndef %s_status : String := %s\ndef %s_title : String := %s\ndef %s_body : String := %s\ndef %s_priority : String := %s\n\nend MCPAIHelper.Tasks\n", metadata, ident, task.ID, ident, status, ident, title, ident, body, ident, priority)
+	modelLevel, err := json.Marshal(task.ModelLevel)
+	if err != nil {
+		return nil, fmt.Errorf("marshal task model level: %w", err)
+	}
+	content := fmt.Sprintf("/- mcp-ai-helper-task %s -/\nnamespace MCPAIHelper.Tasks\n\ndef %s_id : String := %q\ndef %s_status : String := %s\ndef %s_title : String := %s\ndef %s_body : String := %s\ndef %s_priority : String := %s\ndef %s_model_level : String := %s\n\nend MCPAIHelper.Tasks\n", metadata, ident, task.ID, ident, status, ident, title, ident, body, ident, priority, ident, modelLevel)
 	return []byte(content), nil
 }
 
@@ -574,6 +600,22 @@ func WithWorktreeContext(repoPath string, task Task) Task {
 	return task
 }
 
+func NormalizeModelLevel(value string) (string, error) {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.ReplaceAll(value, "-", "_")
+	value = strings.Join(strings.Fields(value), "_")
+	switch value {
+	case "":
+		return "", nil
+	case "low", "medium", "high", "very_high":
+		return value, nil
+	case "veryhigh":
+		return "very_high", nil
+	default:
+		return "", fmt.Errorf("unsupported task model_level %q", value)
+	}
+}
+
 func cleanTaskType(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
 	value = taskIDPattern.ReplaceAllString(value, "-")
@@ -606,6 +648,7 @@ func taskMatches(task Task, query string) bool {
 		task.Title,
 		task.Body,
 		task.Priority,
+		task.ModelLevel,
 		strings.Join(task.Tags, "\n"),
 		strings.Join(task.AcceptanceCriteria, "\n"),
 		strings.Join(task.VerificationPlan, "\n"),
