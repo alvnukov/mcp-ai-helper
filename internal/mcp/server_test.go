@@ -14,6 +14,19 @@ import (
 	"github.com/zol/mcp-ai-helper/internal/tasks"
 )
 
+func TestNewCanDisableReasoningPatterns(t *testing.T) {
+	disabled := false
+	cfg := &config.Config{AssistantGuidance: config.DefaultAssistantGuidance()}
+	cfg.Layers.ReasoningPatterns.Enabled = &disabled
+	srv := New(cfg)
+	if _, ok := srv.ListTools()["reasoning_patterns"]; ok {
+		t.Fatal("reasoning_patterns tool should not be registered when disabled")
+	}
+	if _, ok := srv.ListTools()["task_packet"]; !ok {
+		t.Fatal("task_packet should remain registered when reasoning patterns are disabled")
+	}
+}
+
 func TestCurrentTasksReturnsOnlyActiveStatuses(t *testing.T) {
 	now := time.Now().UTC()
 	list := []tasks.Task{
@@ -54,6 +67,9 @@ func TestNewExposesAssistantGuidance(t *testing.T) {
 	}
 	if _, ok := srv.ListTools()["task_packet"]; !ok {
 		t.Fatal("task_packet tool is not registered")
+	}
+	if _, ok := srv.ListTools()["reasoning_patterns"]; !ok {
+		t.Fatal("reasoning_patterns tool is not registered")
 	}
 	resource, ok := srv.ListResources()[guidanceURI]
 	if !ok {

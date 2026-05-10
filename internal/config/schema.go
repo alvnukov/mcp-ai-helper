@@ -31,6 +31,7 @@ func Schema() map[string]any {
 			{Path: "layers.models.enabled", Type: "bool", Default: "true", Description: "Enables model listing and remote model query tools."},
 			{Path: "layers.commands.enabled", Type: "bool", Default: "true", Description: "Enables local command execution, output filtering, and command history."},
 			{Path: "layers.workflows.enabled", Type: "bool", Default: "true", Description: "Enables multi-step repo workflows with guarded edits, checks, task updates, and owned-file commits."},
+			{Path: "layers.reasoning_patterns.enabled", Type: "bool", Default: "true", Description: "Enables the reusable reasoning pattern catalog and task_packet reasoning_patterns/pattern_gate fields."},
 			{Path: "language_profiles", Type: "built-in registry", Default: "go", Description: "Language-aware guardrails used by callers before code edits: file matching, formatter, targeted tests, broad tests, static checks, and common safety rules."},
 			{Path: "providers.<id>.type", Type: "string", Default: "generic", Description: "Provider adapter type: generic for OpenAI-compatible providers, anthropic for Anthropic Messages API.", Examples: []string{"generic", "anthropic"}},
 			{Path: "providers.<id>.base_url", Type: "string", Description: "OpenAI-compatible base URL used to derive /chat/completions when completions_url is not set."},

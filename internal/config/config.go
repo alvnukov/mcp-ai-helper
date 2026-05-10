@@ -55,13 +55,14 @@ type Config struct {
 
 // LayerPolicy controls optional server capability layers.
 type LayerPolicy struct {
-	Logs      LayerConfig `yaml:"logs" json:"logs"`
-	Tasks     LayerConfig `yaml:"tasks" json:"tasks"`
-	Issues    LayerConfig `yaml:"issues" json:"issues"`
-	Guidance  LayerConfig `yaml:"guidance" json:"guidance"`
-	Models    LayerConfig `yaml:"models" json:"models"`
-	Commands  LayerConfig `yaml:"commands" json:"commands"`
-	Workflows LayerConfig `yaml:"workflows" json:"workflows"`
+	Logs              LayerConfig `yaml:"logs" json:"logs"`
+	Tasks             LayerConfig `yaml:"tasks" json:"tasks"`
+	Issues            LayerConfig `yaml:"issues" json:"issues"`
+	Guidance          LayerConfig `yaml:"guidance" json:"guidance"`
+	Models            LayerConfig `yaml:"models" json:"models"`
+	Commands          LayerConfig `yaml:"commands" json:"commands"`
+	Workflows         LayerConfig `yaml:"workflows" json:"workflows"`
+	ReasoningPatterns LayerConfig `yaml:"reasoning_patterns" json:"reasoning_patterns"`
 }
 
 // LayerConfig controls one optional server layer.
@@ -216,6 +217,8 @@ layers:
     enabled: true
   workflows:
     enabled: true
+  reasoning_patterns:
+    enabled: true
 
 providers:
   # example:
@@ -295,6 +298,8 @@ func (c *Config) LayerEnabled(name string) bool {
 		return layerEnabled(c.Layers.Commands)
 	case "workflows":
 		return layerEnabled(c.Layers.Workflows)
+	case "reasoning_patterns":
+		return layerEnabled(c.Layers.ReasoningPatterns)
 	default:
 		return true
 	}

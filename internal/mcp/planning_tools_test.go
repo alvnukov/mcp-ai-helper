@@ -89,6 +89,77 @@ func TestBuildTaskPacketIncludesStructuredExecutionScope(t *testing.T) {
 	if len(packet.ForbiddenShortcuts) == 0 || len(packet.ExpectedOutput) == 0 {
 		t.Fatalf("packet missing delegation guardrails: %#v", packet)
 	}
+	if len(packet.ReasoningPatterns) == 0 || packet.PatternGate == "" {
+		t.Fatalf("packet missing reasoning pattern gates: %#v", packet)
+	}
+	assertPatternID(t, packet.ReasoningPatterns, "invariant_preservation.v1")
+	assertPatternID(t, packet.ReasoningPatterns, "test_oracle_regression.v1")
+}
+
+func TestBuildTaskPacketCanDisableReasoningPatterns(t *testing.T) {
+	packet := buildTaskPacket(tasks.Task{
+		ID:         "impl",
+		Title:      "Implement thing",
+		TaskType:   "type-implementation",
+		ModelLevel: "medium",
+	}, "medium", false)
+
+	if len(packet.ReasoningPatterns) != 0 || packet.PatternGate != "" {
+		t.Fatalf("reasoning patterns should be disabled: %#v", packet)
+	}
+}
+
+func TestReasoningPatternsCatalogIncludesCorePatterns(t *testing.T) {
+	patterns := defaultReasoningPatterns()
+	if len(patterns) < 14 {
+		t.Fatalf("catalog too small: %#v", patterns)
+	}
+	assertPatternID(t, patterns, "precedence_fallback.v1")
+	assertPatternID(t, patterns, "state_machine_transaction.v1")
+	assertPatternID(t, patterns, "boundary_ownership.v1")
+	assertPatternID(t, patterns, "invariant_preservation.v1")
+	assertPatternID(t, patterns, "schema_contract_compatibility.v1")
+	assertPatternID(t, patterns, "failure_semantics.v1")
+	assertPatternID(t, patterns, "concurrency_ordering.v1")
+	assertPatternID(t, patterns, "data_migration_projection.v1")
+	assertPatternID(t, patterns, "parser_serializer_roundtrip.v1")
+	assertPatternID(t, patterns, "security_policy_boundary.v1")
+	assertPatternID(t, patterns, "evidence_grounding.v1")
+	assertPatternID(t, patterns, "test_oracle_regression.v1")
+	assertPatternID(t, patterns, "resource_budget_loop_control.v1")
+	assertPatternID(t, patterns, "adapter_integration.v1")
+}
+
+func TestBuildTaskPacketSelectsPrecedencePattern(t *testing.T) {
+	packet := buildTaskPacket(tasks.Task{
+		ID:         "task-048",
+		Title:      "run_workflow git_commit_owned ignores top-level owned_files",
+		Body:       "Choose precedence between step args, top-level owned_files, and changedSet fallback. Do not let changedSet override explicit top-level owned_files.",
+		TaskType:   "type-implementation",
+		ModelLevel: "high",
+		Tags:       []string{"workflow", "git"},
+	}, "high")
+
+	pattern := findPattern(t, packet.ReasoningPatterns, "precedence_fallback.v1")
+	assertContainsText(t, pattern.RequiredArtifacts, "source precedence matrix")
+	assertContainsText(t, pattern.ValidationGates, "fallback sources are after explicit sources")
+	assertPatternID(t, packet.ReasoningPatterns, "boundary_ownership.v1")
+	assertPatternID(t, packet.ReasoningPatterns, "failure_semantics.v1")
+}
+
+func TestBuildTaskPacketReturnsFullCatalogForPromptPatternDesign(t *testing.T) {
+	packet := buildTaskPacket(tasks.Task{
+		ID:         "task-050",
+		Title:      "Спроектировать формат техзадания и паттерн-промпты",
+		Body:       "Нужен полный список prompt-patterns и критерии spec-quality для младшей модели.",
+		TaskType:   "type-design",
+		ModelLevel: "very_high",
+		Tags:       []string{"prompt-patterns", "spec-quality"},
+	}, "very_high")
+
+	if got, want := len(packet.ReasoningPatterns), len(defaultReasoningPatterns()); got != want {
+		t.Fatalf("task-050 should expose full catalog: got %d want %d", got, want)
+	}
 }
 
 func TestBuildTaskPacketPriorityDoesNotInferModelLevel(t *testing.T) {
@@ -158,4 +229,20 @@ func assertContainsText(t *testing.T, values []string, needle string) {
 		}
 	}
 	t.Fatalf("%q not found in %#v", needle, values)
+}
+
+func assertPatternID(t *testing.T, patterns []reasoningPattern, id string) {
+	t.Helper()
+	_ = findPattern(t, patterns, id)
+}
+
+func findPattern(t *testing.T, patterns []reasoningPattern, id string) reasoningPattern {
+	t.Helper()
+	for _, pattern := range patterns {
+		if pattern.ID == id {
+			return pattern
+		}
+	}
+	t.Fatalf("pattern %q not found in %#v", id, patterns)
+	return reasoningPattern{}
 }
