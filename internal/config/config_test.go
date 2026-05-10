@@ -64,6 +64,9 @@ func TestLoadCreatesDefaultConfigInHomeDir(t *testing.T) {
 	if !strings.Contains(text, "issues:\n    enabled: false") {
 		t.Fatal("generated config should disable issues layer by default")
 	}
+	if !strings.Contains(text, "reasoning_patterns:\n    enabled: true") {
+		t.Fatal("generated config should expose reasoning_patterns layer")
+	}
 	if !strings.Contains(cfg.AssistantGuidance, "one long run_workflow") {
 		t.Fatal("loaded config guidance is missing workflow policy")
 	}
@@ -84,6 +87,13 @@ func TestLayerEnabledDefaultsAndOverrides(t *testing.T) {
 	cfg.Layers.Tasks.Enabled = &disabled
 	if cfg.LayerEnabled("tasks") {
 		t.Fatal("tasks layer should be disabled")
+	}
+	if !cfg.LayerEnabled("reasoning_patterns") {
+		t.Fatal("reasoning_patterns layer should default to enabled")
+	}
+	cfg.Layers.ReasoningPatterns.Enabled = &disabled
+	if cfg.LayerEnabled("reasoning_patterns") {
+		t.Fatal("reasoning_patterns layer should be disabled")
 	}
 }
 
