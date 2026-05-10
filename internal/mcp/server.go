@@ -51,6 +51,7 @@ func buildConfluenceClient(cfg *config.Config) (*confluence.Client, error) {
 	}
 	cc, err := confluence.NewClient(confluence.Config{
 		URL:       cfg.Integrations.Confluence.URL,
+		Username:  cfg.Integrations.Confluence.Username,
 		APIKey:    cfg.Integrations.Confluence.APIKey,
 		APIKeyEnv: cfg.Integrations.Confluence.APIKeyEnv,
 	})

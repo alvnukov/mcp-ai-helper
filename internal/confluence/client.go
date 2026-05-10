@@ -12,6 +12,7 @@ import (
 // Config holds Confluence connection settings (package-local, converted from config.ConfluenceConfig).
 type Config struct {
 	URL       string
+	Username  string
 	APIKey    string
 	APIKeyEnv string
 }
@@ -44,7 +45,7 @@ func NewClient(cfg Config) (*Client, error) {
 	if apiKey == "" {
 		return nil, fmt.Errorf("confluence: api key is required — set api_key or api_key_env")
 	}
-	api, err := goconfluence.NewAPI(cfg.URL, "", apiKey)
+	api, err := goconfluence.NewAPI(cfg.URL, cfg.Username, apiKey)
 	if err != nil {
 		return nil, fmt.Errorf("confluence: connect to %s: %w", cfg.URL, err)
 	}
