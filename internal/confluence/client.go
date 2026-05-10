@@ -39,9 +39,6 @@ func NewClient(cfg Config) (*Client, error) {
 		return nil, fmt.Errorf("confluence: url is required")
 	}
 	apiKey := cfg.ResolvedAPIKey()
-	if apiKey == "" && cfg.APIKeyEnv != "" {
-		apiKey = "" // resolved at library level for env
-	}
 	if apiKey == "" {
 		return nil, fmt.Errorf("confluence: api key is required — set api_key or api_key_env")
 	}
@@ -147,20 +144,27 @@ type SpaceInfo struct {
 
 // GetSpaces returns all spaces.
 func (c *Client) GetSpaces() ([]SpaceInfo, error) {
-	result, err := c.api.GetAllSpaces(goconfluence.AllSpacesQuery{
-		Limit: 50,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("confluence spaces: %w", err)
-	}
-	spaces := make([]SpaceInfo, 0, len(result.Results))
-	for _, s := range result.Results {
-		spaces = append(spaces, SpaceInfo{
-			ID:   s.ID,
-			Key:  s.Key,
-			Name: s.Name,
-			Type: s.Type,
+	var spaces []SpaceInfo
+	start := 0
+	const pageSize = 50
+	for {
+		result, err := c.api.GetAllSpaces(goconfluence.AllSpacesQuery{
+			Start: start,
+			Limit: pageSize,
 		})
+		if err != nil {
+			return nil, fmt.Errorf("confluence spaces: %w", err)
+		}
+		for _, s := range result.Results {
+			spaces = append(spaces, SpaceInfo{
+				ID:   s.ID,
+				Key:  s.Key,
+				Name: s.Name,
+				Type: s.Type,
+			})
+		}
+		if len(result.Results) < pageSize { break }
+		start += pageSize
 	}
 	return spaces, nil
 }
