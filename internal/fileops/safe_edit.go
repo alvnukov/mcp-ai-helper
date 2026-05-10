@@ -218,6 +218,9 @@ func ReadFileContent(path string) (FileContent, error) {
 	dir, name := filepath.Split(clean)
 	root, err := os.OpenRoot(dir)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return FileContent{Path: clean, Exists: false}, nil
+		}
 		return FileContent{}, err
 	}
 	defer func() { _ = root.Close() }()
