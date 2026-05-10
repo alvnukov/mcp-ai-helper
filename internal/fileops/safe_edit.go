@@ -398,6 +398,17 @@ func repoRelativePath(repoPath string, path string) (string, string, error) {
 	if rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 		return "", "", fmt.Errorf("path escapes repo_path: %q", path)
 	}
+	repoReal, err := filepath.EvalSymlinks(repoAbs)
+	if err != nil {
+		return "", "", err
+	}
 	resolved := filepath.Join(repoAbs, rel)
-	return resolved, filepath.ToSlash(rel), nil
+	realPath, err := filepath.EvalSymlinks(resolved)
+	if err != nil {
+		return "", "", err
+	}
+	if realPath != repoReal && !strings.HasPrefix(realPath, repoReal+string(os.PathSeparator)) {
+		return "", "", fmt.Errorf("path escapes repo_path via symlink: %q", path)
+	}
+	return realPath, filepath.ToSlash(rel), nil
 }
