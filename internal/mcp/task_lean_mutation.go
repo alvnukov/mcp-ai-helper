@@ -136,8 +136,12 @@ func mutateLeanActiveTasks(ctx context.Context, repoPath string, commands *comma
 	if err != nil {
 		return tasks.Task{}, err
 	}
-	path := filepath.Join(workspace.Dir, activeTasksLeanPath)
-	original, err := os.ReadFile(path)
+	registryRoot, err := os.OpenRoot(workspace.Dir)
+	if err != nil {
+		return tasks.Task{}, fmt.Errorf("open Lean workspace root: %w", err)
+	}
+	defer func() { _ = registryRoot.Close() }()
+	original, err := registryRoot.ReadFile(activeTasksLeanPath)
 	if err != nil {
 		return tasks.Task{}, fmt.Errorf("read Lean task registry: %w", err)
 	}
@@ -160,12 +164,12 @@ func mutateLeanActiveTasks(ctx context.Context, repoPath string, commands *comma
 	if beforeHash == afterHash {
 		return withProjectionSource(task, "lean_registry"), nil
 	}
-	if err := os.WriteFile(path, updated, 0o600); err != nil {
+	if err := registryRoot.WriteFile(activeTasksLeanPath, updated, 0o600); err != nil {
 		return tasks.Task{}, fmt.Errorf("write Lean task registry: %w", err)
 	}
 	result, buildErr := lake.Build(ctx, repoPath, lake.CommandRunner{Commands: commands, TimeoutSeconds: 20})
 	if buildErr != nil || result.ExitCode != 0 {
-		_ = os.WriteFile(path, original, 0o600)
+		_ = registryRoot.WriteFile(activeTasksLeanPath, original, 0o600)
 		if buildErr != nil {
 			return tasks.Task{}, fmt.Errorf("validate Lean task registry: %w", buildErr)
 		}

@@ -23,6 +23,12 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Install elan
+        run: |
+          curl -sSfL https://github.com/leanprover/elan/releases/latest/download/elan-init -o elan-init.sh
+          sh elan-init.sh -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
       - name: Download dependencies
         run: go mod download
 
@@ -44,8 +50,8 @@ jobs:
       - name: Vulnerability scan (govulncheck)
         run: $(go env GOPATH)/bin/govulncheck -show verbose ./...
 
-      - name: Install golangci-lint
-        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+      - name: Install gosec
+        run: go install github.com/securego/gosec/v2/cmd/gosec@latest
 
       - name: Security lint (gosec)
-        run: $(go env GOPATH)/bin/golangci-lint run ./...
+        run: $(go env GOPATH)/bin/gosec -quiet ./...
