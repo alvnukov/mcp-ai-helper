@@ -30,7 +30,8 @@ type Server struct {
 	taskStore  *tasks.Store
 	secretMask *security.Mask
 	jiraClient      *jira.Client
-	confluenceClient *confluence.Client
+	confluenceClient    *confluence.Client
+	confluenceClientErr error
 }
 
 func buildJiraClient(cfg *config.Config) *jira.Client {
@@ -44,9 +45,9 @@ func buildJiraClient(cfg *config.Config) *jira.Client {
 	return jc
 }
 
-func buildConfluenceClient(cfg *config.Config) *confluence.Client {
+func buildConfluenceClient(cfg *config.Config) (*confluence.Client, error) {
 	if cfg.Integrations.Confluence == nil || !cfg.Integrations.Confluence.IsEnabled() {
-		return nil
+		return nil, nil
 	}
 	cc, err := confluence.NewClient(confluence.Config{
 		URL:       cfg.Integrations.Confluence.URL,
@@ -54,15 +55,21 @@ func buildConfluenceClient(cfg *config.Config) *confluence.Client {
 		APIKeyEnv: cfg.Integrations.Confluence.APIKeyEnv,
 	})
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	return cc
+	return cc, nil
 }
 
-func (s *Server) getConfluenceClient() *confluence.Client {
+func (s *Server) getConfluenceClient() (*confluence.Client, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.confluenceClient
+	if s.confluenceClient == nil {
+		if s.confluenceClientErr != nil {
+			return nil, s.confluenceClientErr
+		}
+		return nil, fmt.Errorf("confluence: not configured")
+	}
+	return s.confluenceClient, nil
 }
 
 func (s *Server) getJiraClient() (*jira.Client, error) {
@@ -157,7 +164,7 @@ func New(cfg *config.Config) *server.MCPServer {
 			deps.taskStore = store
 			deps.secretMask = buildSecretMask(next)
 			deps.jiraClient = buildJiraClient(next)
-			deps.confluenceClient = buildConfluenceClient(next)
+			deps.confluenceClient, deps.confluenceClientErr = buildConfluenceClient(next)
 			deps.mu.Unlock()
 			return next, nil
 		}
