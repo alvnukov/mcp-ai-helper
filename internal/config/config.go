@@ -210,6 +210,7 @@ func (j JiraConfig) ResolvedAPIKey() string {
 }
 
 // Load reads a YAML config file and applies safe defaults.
+// #nosec G703 -- path from validated config, local fs operations only
 func ensureDefaultConfigFile(path string) error {
 	if strings.TrimSpace(path) == "" {
 		return nil
@@ -219,7 +220,7 @@ func ensureDefaultConfigFile(path string) error {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return err
 	}
 	return os.WriteFile(path, []byte(defaultConfigYAML()), 0o600)
