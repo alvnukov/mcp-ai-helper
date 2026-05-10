@@ -343,7 +343,10 @@ func (s *leanActiveTasksState) upsert(req tasks.AddRequest) (tasks.Task, error) 
 	if existing, err := s.taskByID(id); err == nil && !existing.CreatedAt.IsZero() {
 		createdAt = existing.CreatedAt.Format(time.RFC3339Nano)
 	}
-	task := tasks.Task{ID: id, Status: req.Status, Title: req.Title, Body: req.Body, Priority: req.Priority, Tags: uniqueStrings(req.Tags), CreatedAt: parseTaskTimeOrZero(createdAt), UpdatedAt: time.Now().UTC(), ProjectionSource: "lean_registry"}
+	task := tasks.Task{ID: id, TaskType: req.TaskType, Branch: req.Branch, WorktreePath: req.WorktreePath, Status: req.Status, Title: req.Title, Body: req.Body, Priority: req.Priority, Tags: uniqueStrings(req.Tags), CreatedAt: parseTaskTimeOrZero(createdAt), UpdatedAt: time.Now().UTC(), ProjectionSource: "lean_registry"}
+	if err := tasks.NormalizeWorktreeFields(&task); err != nil {
+		return tasks.Task{}, err
+	}
 	block, err := renderLeanTaskBlock(decl, task)
 	if err != nil {
 		return tasks.Task{}, err
@@ -480,7 +483,7 @@ func leanProjectionFromText(text string, id string) (leanTaskProjection, error) 
 	if err != nil {
 		return leanTaskProjection{}, err
 	}
-	return leanTaskProjection{ID: id, Status: goStatusFromLean(mustFindLeanField(full, `status := \.(\w+),`)), Title: mustFindLeanStringField(full, "title"), Body: mustFindLeanStringField(full, "body"), Priority: goPriorityFromLean(mustFindLeanField(full, `priority := \.(\w+),`)), Tags: mustFindLeanStringList(full, decl+"Tags"), CreatedAt: mustFindLeanStringField(full, "createdAt"), UpdatedAt: mustFindLeanStringField(full, "updatedAt")}, nil
+	return leanTaskProjection{ID: id, TaskType: mustFindLeanStringField(full, "taskType"), Branch: mustFindLeanStringField(full, "branch"), WorktreePath: mustFindLeanStringField(full, "worktreePath"), Status: goStatusFromLean(mustFindLeanField(full, `status := \.(\w+),`)), Title: mustFindLeanStringField(full, "title"), Body: mustFindLeanStringField(full, "body"), Priority: goPriorityFromLean(mustFindLeanField(full, `priority := \.(\w+),`)), Tags: mustFindLeanStringList(full, decl+"Tags"), CreatedAt: mustFindLeanStringField(full, "createdAt"), UpdatedAt: mustFindLeanStringField(full, "updatedAt")}, nil
 }
 
 func renderLeanTaskBlock(decl string, task tasks.Task) (string, error) {
@@ -492,7 +495,7 @@ func renderLeanTaskBlock(decl string, task tasks.Task) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("def %sId : ArtifactId :=\n  { value := %s }\n\ndef %sTags : List String :=\n  %s\n\ndef %sArtifact : Artifact :=\n  { id := %sId,\n    kind := .task,\n    status := %s,\n    priority := %s,\n    title := %s,\n    body := %s,\n    tags := %sTags,\n    createdAt := %s,\n    updatedAt := %s }\n\n", decl, leanQuote(task.ID), decl, leanStringList(task.Tags), decl, decl, status, priority, leanQuote(task.Title), leanQuote(task.Body), decl, leanQuote(task.CreatedAt.Format(time.RFC3339Nano)), leanQuote(task.UpdatedAt.Format(time.RFC3339Nano))), nil
+	return fmt.Sprintf("def %sId : ArtifactId :=\n  { value := %s }\n\ndef %sTags : List String :=\n  %s\n\ndef %sArtifact : Artifact :=\n  { id := %sId,\n    kind := .task,\n    status := %s,\n    priority := %s,\n    title := %s,\n    body := %s,\n    tags := %sTags,\n    taskType := %s,\n    branch := %s,\n    worktreePath := %s,\n    createdAt := %s,\n    updatedAt := %s }\n\n", decl, leanQuote(task.ID), decl, leanStringList(task.Tags), decl, decl, status, priority, leanQuote(task.Title), leanQuote(task.Body), decl, leanQuote(task.TaskType), leanQuote(task.Branch), leanQuote(task.WorktreePath), leanQuote(task.CreatedAt.Format(time.RFC3339Nano)), leanQuote(task.UpdatedAt.Format(time.RFC3339Nano))), nil
 }
 
 func leanTaskDecl(id string) (string, error) {

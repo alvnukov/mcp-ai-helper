@@ -39,6 +39,12 @@ func TestReadTaskPrefersLeanExporter(t *testing.T) {
 	if task.ID != "task-006" || task.Body == "" || len(task.Tags) == 0 {
 		t.Fatalf("core fields were not projected from Lean: %#v", task)
 	}
+	if task.WorktreePath != ".worktrees/task-006" {
+		t.Fatalf("worktree_path = %q", task.WorktreePath)
+	}
+	if !strings.HasSuffix(task.CodePath, filepath.Join(".worktrees", "task-006")) {
+		t.Fatalf("code_path = %q", task.CodePath)
+	}
 }
 
 func TestReadTaskExporterFailureDoesNotFallbackToLegacy(t *testing.T) {

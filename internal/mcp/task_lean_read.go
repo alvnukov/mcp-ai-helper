@@ -19,14 +19,17 @@ type leanTaskListPayload struct {
 }
 
 type leanTaskProjection struct {
-	ID        string   `json:"id"`
-	Status    string   `json:"status"`
-	Title     string   `json:"title"`
-	Body      string   `json:"body"`
-	Priority  string   `json:"priority"`
-	Tags      []string `json:"tags"`
-	CreatedAt string   `json:"created_at"`
-	UpdatedAt string   `json:"updated_at"`
+	ID           string   `json:"id"`
+	TaskType     string   `json:"task_type"`
+	Branch       string   `json:"branch"`
+	WorktreePath string   `json:"worktree_path"`
+	Status       string   `json:"status"`
+	Title        string   `json:"title"`
+	Body         string   `json:"body"`
+	Priority     string   `json:"priority"`
+	Tags         []string `json:"tags"`
+	CreatedAt    string   `json:"created_at"`
+	UpdatedAt    string   `json:"updated_at"`
 }
 
 func readCurrentTasks(ctx context.Context, repoPath string, commands *command.Runner, _ *tasks.Store) ([]tasks.Task, string, error) {
@@ -77,7 +80,7 @@ func readLeanTaskList(ctx context.Context, repoPath string, commands *command.Ru
 		if err != nil {
 			return nil, true, err
 		}
-		out = append(out, task)
+		out = append(out, tasks.WithWorktreeContext(repoPath, task))
 	}
 	return out, true, nil
 }
@@ -95,7 +98,7 @@ func readLeanTask(ctx context.Context, repoPath string, id string, commands *com
 	if err != nil {
 		return tasks.Task{}, true, err
 	}
-	return task, true, nil
+	return tasks.WithWorktreeContext(repoPath, task), true, nil
 }
 
 func runLeanTaskExporter(ctx context.Context, repoPath string, commands *command.Runner, args []string) (lake.CommandResult, bool, error) {
@@ -133,6 +136,9 @@ func (p leanTaskProjection) toTask() (tasks.Task, error) {
 	}
 	return tasks.Task{
 		ID:               p.ID,
+		TaskType:         p.TaskType,
+		Branch:           p.Branch,
+		WorktreePath:     p.WorktreePath,
 		Status:           p.Status,
 		Title:            p.Title,
 		Body:             p.Body,

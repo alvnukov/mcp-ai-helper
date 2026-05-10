@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/zol/mcp-ai-helper/internal/tasks"
 )
 
 // CommitRequest describes a safe commit over explicitly owned files.
@@ -27,6 +29,82 @@ type CommitResult struct {
 	Commit      string   `json:"commit,omitempty"`
 	StagedFiles []string `json:"staged_files"`
 	Reason      string   `json:"reason,omitempty"`
+}
+
+type PrepareTaskWorktreeRequest struct {
+	RepoPath string `json:"repo_path"`
+	TaskID   string `json:"task_id"`
+	TaskType string `json:"task_type"`
+}
+
+type PrepareTaskWorktreeResult struct {
+	Status       string `json:"status"`
+	Branch       string `json:"branch"`
+	WorktreePath string `json:"worktree_path"`
+	CodePath     string `json:"code_path"`
+	Created      bool   `json:"created"`
+	Reason       string `json:"reason,omitempty"`
+}
+
+func PrepareTaskWorktree(ctx context.Context, req PrepareTaskWorktreeRequest) (PrepareTaskWorktreeResult, error) {
+	if strings.TrimSpace(req.RepoPath) == "" {
+		return PrepareTaskWorktreeResult{}, errors.New("repo_path is required")
+	}
+	branch, err := tasks.BranchForTask(req.TaskType, req.TaskID)
+	if err != nil {
+		return PrepareTaskWorktreeResult{}, err
+	}
+	worktreePath := tasks.WorktreePathForID(req.TaskID)
+	if worktreePath == "" {
+		return PrepareTaskWorktreeResult{}, errors.New("task_id is required")
+	}
+	repo, err := filepath.Abs(req.RepoPath)
+	if err != nil {
+		return PrepareTaskWorktreeResult{}, err
+	}
+	top, err := runGit(ctx, repo, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return PrepareTaskWorktreeResult{}, fmt.Errorf("not a git repo: %w", err)
+	}
+	repo = strings.TrimSpace(top)
+	codePath := filepath.Join(repo, filepath.FromSlash(worktreePath))
+	worktreesDir := filepath.Join(repo, ".worktrees")
+	if rel, err := filepath.Rel(worktreesDir, codePath); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return PrepareTaskWorktreeResult{}, fmt.Errorf("worktree path escapes .worktrees: %s", worktreePath)
+	}
+	if info, statErr := os.Stat(codePath); statErr == nil {
+		if !info.IsDir() {
+			return PrepareTaskWorktreeResult{Status: "conflict", Branch: branch, WorktreePath: worktreePath, CodePath: codePath, Reason: "worktree path exists and is not a directory"}, nil
+		}
+		current, err := runGit(ctx, codePath, "rev-parse", "--abbrev-ref", "HEAD")
+		if err != nil {
+			return PrepareTaskWorktreeResult{Status: "conflict", Branch: branch, WorktreePath: worktreePath, CodePath: codePath, Reason: "worktree path is not a git checkout"}, nil
+		}
+		if strings.TrimSpace(current) != branch {
+			return PrepareTaskWorktreeResult{Status: "conflict", Branch: branch, WorktreePath: worktreePath, CodePath: codePath, Reason: "worktree path is on branch " + strings.TrimSpace(current)}, nil
+		}
+		return PrepareTaskWorktreeResult{Status: "ok", Branch: branch, WorktreePath: worktreePath, CodePath: codePath, Created: false, Reason: "worktree already exists"}, nil
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return PrepareTaskWorktreeResult{}, statErr
+	}
+	if err := os.MkdirAll(worktreesDir, 0o700); err != nil {
+		return PrepareTaskWorktreeResult{}, err
+	}
+	args := []string{"worktree", "add"}
+	if gitBranchExists(ctx, repo, branch) {
+		args = append(args, codePath, branch)
+	} else {
+		args = append(args, "-b", branch, codePath, "HEAD")
+	}
+	if _, err := runGit(ctx, repo, args...); err != nil {
+		return PrepareTaskWorktreeResult{}, err
+	}
+	return PrepareTaskWorktreeResult{Status: "ok", Branch: branch, WorktreePath: worktreePath, CodePath: codePath, Created: true}, nil
+}
+
+func gitBranchExists(ctx context.Context, repo string, branch string) bool {
+	_, err := runGit(ctx, repo, "show-ref", "--verify", "--quiet", "refs/heads/"+branch)
+	return err == nil
 }
 
 // CommitOwned stages and commits only the repo-relative files listed in req.

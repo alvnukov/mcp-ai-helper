@@ -67,6 +67,14 @@ func registerPipelineTools(srv *server.MCPServer, deps *Server) {
 						"message": "Commit message (string, required).",
 					},
 				},
+				{
+					"type":        "git_prepare_task_worktree",
+					"description": "Create or reuse .worktrees/<task_id> on branch <task_type>/<task_id>.",
+					"fields": map[string]string{
+						"task_id":   "Task id, e.g. task-057 (string, required).",
+						"task_type": "Branch type, e.g. feature, bug, hotfix, chore, docs, refactor, test, ci (string, required).",
+					},
+				},
 			},
 		})
 	})
@@ -104,7 +112,7 @@ func registerPipelineTools(srv *server.MCPServer, deps *Server) {
 		basemcp.WithString("task_on_success", basemcp.Description("Optional status for current_task_id after successful workflow; defaults to done.")),
 		basemcp.WithString("task_on_failure", basemcp.Description("Optional status for current_task_id after failed workflow; defaults to blocked.")),
 		basemcp.WithArray("steps",
-			basemcp.Description("Workflow steps: command, guarded_replace, task_batch_upsert, task_transition, git_commit_owned."),
+			basemcp.Description("Workflow steps: command, guarded_replace, task_batch_upsert, task_transition, git_commit_owned, git_prepare_task_worktree."),
 			basemcp.Items(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
