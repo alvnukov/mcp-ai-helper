@@ -321,3 +321,15 @@ func TestSearchFilesInRepo(t *testing.T) {
 		t.Fatalf("total = %d, want 1", result.Total)
 	}
 }
+
+func TestReadFileContentInRepoRejectsSymlinkEscape(t *testing.T) {
+	dir := t.TempDir()
+	linkPath := filepath.Join(dir, "link.txt")
+	if err := os.Symlink("/etc/passwd", linkPath); err != nil {
+		t.Fatal(err)
+	}
+	_, err := ReadFileContentInRepo(dir, "link.txt")
+	if err == nil {
+		t.Fatal("expected error for symlink escape")
+	}
+}
