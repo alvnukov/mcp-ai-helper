@@ -71,16 +71,21 @@ type SearchResult struct {
 
 // Search performs a CQL search.
 func (c *Client) Search(cql string, limit int) ([]SearchResult, error) {
-	if limit <= 0 {
-		limit = 20
+	if limit <= 0 { limit = 20 }
+	items, _, err := c.searchPage(cql, limit, "")
+	return items, err
+}
+
+func (c *Client) searchPage(cql string, limit int, next string) ([]SearchResult, string, error) {
+	query := goconfluence.SearchQuery{CQL: cql, Limit: limit}
+	var result *goconfluence.Search
+	var err error
+	if next == "" {
+		result, err = c.api.Search(query)
+	} else {
+		result, err = c.api.SearchWithNext(query, next)
 	}
-	result, err := c.api.Search(goconfluence.SearchQuery{
-		CQL:   cql,
-		Limit: limit,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("confluence search: %w", err)
-	}
+	if err != nil { return nil, "", fmt.Errorf("confluence search: %w", err) }
 	items := make([]SearchResult, 0, len(result.Results))
 	for _, r := range result.Results {
 		id, typ := r.ID, r.Type
@@ -88,14 +93,9 @@ func (c *Client) Search(cql string, limit int) ([]SearchResult, error) {
 			id = r.Content.ID
 			if typ == "" { typ = r.Content.Type }
 		}
-		items = append(items, SearchResult{
-			ID:     id,
-			Type:   typ,
-			Title:  r.Title,
-			Status: r.Status,
-		})
+		items = append(items, SearchResult{ID: id, Type: typ, Title: r.Title, Status: r.Status})
 	}
-	return items, nil
+	return items, result.Links.Next, nil
 }
 
 // PageInfo holds content page data.
@@ -130,6 +130,9 @@ func (c *Client) GetContentByID(id string) (*PageInfo, error) {
 	}
 	if content.Space != nil {
 		page.Space = content.Space.Key
+	}
+	if content.Links != nil && content.Links.WebUI != "" {
+		page.URL = content.Links.WebUI
 	}
 	return page, nil
 }
