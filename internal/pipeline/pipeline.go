@@ -610,11 +610,11 @@ func (r *Runner) executeWorkflowStep(ctx context.Context, repoPath string, step 
 			return WorkflowStepResult{}, err
 		}
 		files := args.Files
-		if len(files) == 0 {
-			files = sortedKeys(changedSet)
-		}
 		if len(files) == 0 && topLevelCommit != nil {
 			files = topLevelCommit.Files
+		}
+		if len(files) == 0 {
+			files = sortedKeys(changedSet)
 		}
 		message := args.Message
 		if message == "" && topLevelCommit != nil {

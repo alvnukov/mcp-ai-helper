@@ -88,12 +88,16 @@ func TestRunWorkflowStepsCommitUsesTopLevelOwnedFiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "x.txt"), []byte("old\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(dir, "y.txt"), []byte("before\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	runner := NewRunner(testConfig(dir), nil)
 	result, err := runner.RunWorkflow(t.Context(), WorkflowRequest{
 		RepoPath: dir,
-		Commit:   WorkflowCommit{Enabled: true, Files: []string{"x.txt"}, Message: "commit from top-level"},
+		Commit:   WorkflowCommit{Enabled: true, Files: []string{"x.txt", "y.txt"}, Message: "commit from top-level"},
 		Steps: []WorkflowStep{
-			{ID: "edit", Tool: "guarded_replace", Args: map[string]any{"path": "x.txt", "old": "old", "new": "new"}},
+			{ID: "edit-x", Tool: "guarded_replace", Args: map[string]any{"path": "x.txt", "old": "old", "new": "new"}},
+			{ID: "touch-y", Tool: "command", Args: map[string]any{"command": "printf after > y.txt"}},
 			{ID: "commit", Tool: "git_commit_owned", If: "changed_files_count > 0", Args: map[string]any{}},
 		},
 	})
