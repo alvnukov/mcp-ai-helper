@@ -112,3 +112,44 @@ func TestGetSpaces(t *testing.T) {
 		t.Fatalf("unexpected spaces: %+v", spaces)
 	}
 }
+
+func TestSearch_NestedContentID(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// Search returns nested content.id (real Confluence API format)
+		w.Write([]byte(`{"results":[{"content":{"id":"999","type":"page"},"title":"Nested Page"}],"totalSize":1}`))
+	}))
+	defer srv.Close()
+
+	c, err := NewClientWithHTTP(srv.URL, srv.Client())
+	if err != nil { t.Fatal(err) }
+
+	results, err := c.Search("title ~ Nested", 10)
+	if err != nil { t.Fatal(err) }
+	if results[0].ID != "999" {
+		t.Fatalf("expected ID 999 from nested content, got %q", results[0].ID)
+	}
+}
+
+func TestGetSpaces_Pagination(t *testing.T) {
+	callCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		callCount++
+		if callCount == 1 {
+			w.Write([]byte(`{"results":[{"id":1,"key":"A"},{"id":2,"key":"B"},{"id":3,"key":"C"}],"size":3}`))
+		} else {
+			w.Write([]byte(`{"results":[],"size":0}`))
+		}
+	}))
+	defer srv.Close()
+
+	c, err := NewClientWithHTTP(srv.URL, srv.Client())
+	if err != nil { t.Fatal(err) }
+
+	spaces, err := c.GetSpaces()
+	if err != nil { t.Fatal(err) }
+	if len(spaces) != 3 {
+		t.Fatalf("expected 3 spaces, got %d", len(spaces))
+	}
+}
