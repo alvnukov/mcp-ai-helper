@@ -126,6 +126,7 @@ type IntegrationsConfig struct {
 type JiraConfig struct {
 	URL       string `yaml:"url" json:"url"`
 	Username  string `yaml:"username" json:"username"`
+	APIKey    string `yaml:"api_key" json:"-"`
 	APIKeyEnv string `yaml:"api_key_env" json:"-"`
 	Enabled   *bool  `yaml:"enabled" json:"enabled"`
 }
@@ -138,12 +139,15 @@ func (j *JiraConfig) IsEnabled() bool {
 	return j.Enabled == nil || *j.Enabled
 }
 
-// ResolvedAPIKey returns the API key from the environment variable.
+// ResolvedAPIKey returns the API key: direct value first, then env fallback.
 func (j JiraConfig) ResolvedAPIKey() string {
-	if j.APIKeyEnv == "" {
-		return ""
+	if j.APIKey != "" {
+		return j.APIKey
 	}
-	return os.Getenv(j.APIKeyEnv)
+	if j.APIKeyEnv != "" {
+		return os.Getenv(j.APIKeyEnv)
+	}
+	return ""
 }
 
 // Load reads a YAML config file and applies safe defaults.
