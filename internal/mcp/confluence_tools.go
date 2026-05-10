@@ -27,11 +27,7 @@ func checkConfSpace(deps *Server, spaceKey string) bool {
 
 func registerConfluenceTools(srv *server.MCPServer, deps *Server) {
 	getClient := func() (*confluence.Client, error) {
-		srv := deps.getConfluenceClient()
-		if srv == nil {
-			return nil, fmt.Errorf("confluence: not configured")
-		}
-		return srv, nil
+		return deps.getConfluenceClient()
 	}
 
 	srv.AddTool(basemcp.NewTool("conf_search",
