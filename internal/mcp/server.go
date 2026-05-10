@@ -14,17 +14,19 @@ import (
 	"github.com/zol/mcp-ai-helper/internal/pipeline"
 	"github.com/zol/mcp-ai-helper/internal/project"
 	"github.com/zol/mcp-ai-helper/internal/provider"
+	"github.com/zol/mcp-ai-helper/internal/security"
 	"github.com/zol/mcp-ai-helper/internal/tasks"
 )
 
 // Server holds mutable server state protected by a read-write mutex.
 type Server struct {
-	mu        sync.RWMutex
-	cfg       *config.Config
-	chat      provider.ChatClient
-	commands  *command.Runner
-	pipelines *pipeline.Runner
-	taskStore *tasks.Store
+	mu         sync.RWMutex
+	cfg        *config.Config
+	chat       provider.ChatClient
+	commands   *command.Runner
+	pipelines  *pipeline.Runner
+	taskStore  *tasks.Store
+	secretMask *security.Mask
 }
 
 func (s *Server) loadDeps() (*config.Config, provider.ChatClient, *command.Runner, *pipeline.Runner, *tasks.Store) {
@@ -81,7 +83,7 @@ func New(cfg *config.Config) *server.MCPServer {
 		server.WithPromptCapabilities(false),
 	)
 
-	deps := &Server{cfg: cfg}
+	deps := &Server{cfg: cfg, secretMask: buildSecretMask(cfg)}
 	deps.chat, deps.commands, deps.pipelines, deps.taskStore = buildDeps(cfg)
 
 	registerLanguageTools(srv)
@@ -129,4 +131,39 @@ func New(cfg *config.Config) *server.MCPServer {
 	}
 
 	return srv
+}
+
+// sanitize masks known secrets in a string before it reaches the LLM.
+func (s *Server) sanitize(msg string) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.secretMask != nil {
+		return s.secretMask.Apply(msg)
+	}
+	return msg
+}
+
+func buildSecretMask(cfg *config.Config) *security.Mask {
+	var secrets []string
+	if cfg.Integrations.Jira != nil {
+		if cfg.Integrations.Jira.APIKey != "" {
+			secrets = append(secrets, cfg.Integrations.Jira.APIKey)
+		}
+		if cfg.Integrations.Jira.APIKeyEnv != "" {
+			if v := os.Getenv(cfg.Integrations.Jira.APIKeyEnv); v != "" {
+				secrets = append(secrets, v)
+			}
+		}
+	}
+	for _, p := range cfg.Providers {
+		if p.APIKey != "" {
+			secrets = append(secrets, p.APIKey)
+		}
+		if p.APIKeyEnv != "" {
+			if v := os.Getenv(p.APIKeyEnv); v != "" {
+				secrets = append(secrets, v)
+			}
+		}
+	}
+	return security.NewMask(secrets...)
 }
