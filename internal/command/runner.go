@@ -203,6 +203,12 @@ func (r *Runner) FilterHistory(commandID string, filter Filter) (Result, error) 
 	return r.history.Filter(commandID, filter)
 }
 
+// CleanupHistory removes command log records that exceed retention policy limits.
+// Safe to call multiple times; subsequent calls are no-ops when policy limits are satisfied.
+func (r *Runner) CleanupHistory() error {
+	return r.history.Cleanup()
+}
+
 func (r *Runner) safeCWD(cwd string) (string, error) {
 	if cwd == "" {
 		cwd = "."

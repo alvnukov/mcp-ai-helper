@@ -34,6 +34,16 @@ func registerCommandTools(srv *server.MCPServer, deps *Server) {
 		return structured(result)
 	})
 
+	srv.AddTool(basemcp.NewTool("cleanup_command_history",
+		basemcp.WithDescription("Remove command log records that exceed retention policy (age, max records)."),
+	), func(_ context.Context, _ basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+		_, _, cmds, _, _ := deps.loadDeps()
+		if err := cmds.CleanupHistory(); err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
+		return basemcp.NewToolResultText("cleanup complete"), nil
+	})
+
 	srv.AddTool(basemcp.NewTool("filter_command_history",
 		basemcp.WithDescription("Re-filter retained command output by command_id without rerunning the command."),
 		basemcp.WithString("command_id", basemcp.Required()),
