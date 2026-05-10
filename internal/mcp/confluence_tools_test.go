@@ -51,14 +51,14 @@ func TestRegisterConfluenceTools(t *testing.T) {
 	deps := &Server{
 		cfg: &config.Config{Integrations: config.IntegrationsConfig{
 			Confluence: &config.ConfluenceConfig{
-				URL: "https://example.com/wiki/rest/api",
-				APIKey: "test",
+				URL:     "https://example.com/wiki/rest/api",
+				APIKey:  "test",
 				Enabled: func() *bool { b := true; return &b }(),
 			},
 		}},
 	}
 	deps.confluenceClient, _ = confluence.NewClient(confluence.Config{
-		URL: "https://example.com/wiki/rest/api",
+		URL:    "https://example.com/wiki/rest/api",
 		APIKey: "test",
 	})
 	registerConfluenceTools(srv, deps)

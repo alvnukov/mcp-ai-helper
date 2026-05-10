@@ -256,7 +256,6 @@ func ReadFileContentInRepo(repoPath string, path string) (FileContent, error) {
 	return fc, nil
 }
 
-
 // SearchMatch is one search result.
 type SearchMatch struct {
 	File       string `json:"file"`
@@ -339,7 +338,6 @@ func SearchFiles(root string, pattern string, maxMatches int) (SearchResult, err
 	}
 	return result, nil
 }
-
 
 // SearchFilesInRepo runs a text search under a repo-relative directory.
 func SearchFilesInRepo(repoPath string, path string, pattern string, maxMatches int) (SearchResult, error) {
