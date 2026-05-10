@@ -145,6 +145,7 @@ func (m *childManager) handleLocal(line []byte) bool {
 }
 
 func (m *childManager) build() error {
+	// #nosec G204 -- internal go build with fixed args
 	cmd := exec.Command("go", "build", "-o", m.binaryPath, "./cmd/mcp-ai-helper")
 	cmd.Dir = m.repoRoot
 	var stderr bytes.Buffer
@@ -179,6 +180,7 @@ func (m *childManager) start() error {
 	if m.cmd != nil && m.cmd.Process != nil {
 		return nil
 	}
+	// #nosec G204 -- internal binary restart with trusted config path
 	cmd := exec.Command(m.binaryPath, "--config", m.configPath)
 	cmd.Dir = m.repoRoot
 	stdin, err := cmd.StdinPipe()
