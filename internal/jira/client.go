@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	gojira "github.com/andygrunwald/go-jira"
@@ -189,7 +190,10 @@ type WorklogEntry struct {
 
 // GetWorklogsByUser searches worklogs by user in a date range.
 func (c *Client) GetWorklogsByUser(username string, since, until time.Time) ([]WorklogEntry, error) {
-	jql := fmt.Sprintf("worklogAuthor = \"%s\"", username)
+	escaped := username
+	escaped = strings.ReplaceAll(escaped, `\`, `\\`)
+	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
+	jql := fmt.Sprintf("worklogAuthor = \"%s\"", escaped)
 	if !since.IsZero() {
 		jql += fmt.Sprintf(" AND worklogDate >= %s", since.Format("2006-01-02"))
 	}
