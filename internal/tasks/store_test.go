@@ -53,7 +53,18 @@ func TestStoreAddListGetDelete(t *testing.T) {
 		t.Fatalf("verification_plan = %#v", got.VerificationPlan)
 	}
 
+	worktreeTask, err := store.Add(AddRequest{RepoPath: repoPath, ID: "task-123", Title: "Task worktree", TaskType: "feature"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if worktreeTask.Branch != "feature/task-123" || worktreeTask.WorktreePath != ".worktrees/task-123" {
+		t.Fatalf("worktree fields = %#v", worktreeTask)
+	}
+
 	if err := store.Delete(DeleteRequest{RepoPath: repoPath, ID: task.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Delete(DeleteRequest{RepoPath: repoPath, ID: worktreeTask.ID}); err != nil {
 		t.Fatal(err)
 	}
 	listed, err = store.List(ListRequest{RepoPath: repoPath})

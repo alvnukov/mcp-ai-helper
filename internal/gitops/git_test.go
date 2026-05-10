@@ -106,6 +106,64 @@ func TestCommitOwnedCommitsDeletedOwnedFile(t *testing.T) {
 	}
 }
 
+func TestPrepareTaskWorktreeCreatesTypedBranchInTaskPath(t *testing.T) {
+	repo := initRepo(t)
+	writeFile(t, filepath.Join(repo, "README.md"), "initial\n")
+	run(t, repo, "add", "README.md")
+	run(t, repo, "commit", "-m", "initial")
+
+	result, err := PrepareTaskWorktree(t.Context(), PrepareTaskWorktreeRequest{RepoPath: repo, TaskID: "task-123", TaskType: "feature"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "ok" || !result.Created {
+		t.Fatalf("result = %#v, want created ok", result)
+	}
+	if result.Branch != "feature/task-123" {
+		t.Fatalf("branch = %q", result.Branch)
+	}
+	if result.WorktreePath != ".worktrees/task-123" {
+		t.Fatalf("worktree_path = %q", result.WorktreePath)
+	}
+	canonicalRepo, err := filepath.EvalSymlinks(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.CodePath != filepath.Join(canonicalRepo, ".worktrees", "task-123") {
+		t.Fatalf("code_path = %q", result.CodePath)
+	}
+	if got := run(t, result.CodePath, "rev-parse", "--abbrev-ref", "HEAD"); got != "feature/task-123\n" {
+		t.Fatalf("worktree branch = %q", got)
+	}
+}
+
+func TestPrepareTaskWorktreeRequiresTaskType(t *testing.T) {
+	repo := initRepo(t)
+	_, err := PrepareTaskWorktree(t.Context(), PrepareTaskWorktreeRequest{RepoPath: repo, TaskID: "task-123"})
+	if err == nil {
+		t.Fatal("expected task_type error")
+	}
+}
+
+func TestPrepareTaskWorktreeIsIdempotentForSameBranch(t *testing.T) {
+	repo := initRepo(t)
+	writeFile(t, filepath.Join(repo, "README.md"), "initial\n")
+	run(t, repo, "add", "README.md")
+	run(t, repo, "commit", "-m", "initial")
+
+	first, err := PrepareTaskWorktree(t.Context(), PrepareTaskWorktreeRequest{RepoPath: repo, TaskID: "task-123", TaskType: "bug"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := PrepareTaskWorktree(t.Context(), PrepareTaskWorktreeRequest{RepoPath: repo, TaskID: "task-123", TaskType: "bug"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !first.Created || second.Created || second.Status != "ok" {
+		t.Fatalf("first=%#v second=%#v", first, second)
+	}
+}
+
 func initRepo(t *testing.T) string {
 	t.Helper()
 	repo := t.TempDir()

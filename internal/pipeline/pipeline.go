@@ -621,6 +621,20 @@ func (r *Runner) executeWorkflowStep(ctx context.Context, repoPath string, step 
 		base.Reason = commitResult.Reason
 		base.Output = commitResult
 		return base, nil
+	case "git_prepare_task_worktree":
+		var args gitops.PrepareTaskWorktreeRequest
+		if err := bindStepArgs(step.Args, &args); err != nil {
+			return WorkflowStepResult{}, err
+		}
+		args.RepoPath = repoPath
+		worktreeResult, err := gitops.PrepareTaskWorktree(ctx, args)
+		if err != nil {
+			return WorkflowStepResult{}, err
+		}
+		base.Status = worktreeResult.Status
+		base.Reason = worktreeResult.Reason
+		base.Output = worktreeResult
+		return base, nil
 	case "task_batch_upsert":
 		if !r.cfg.LayerEnabled("tasks") {
 			base.Status = "failed"
