@@ -4,6 +4,7 @@ package jira
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	gojira "github.com/andygrunwald/go-jira"
@@ -140,15 +141,31 @@ func (c *Client) UnassignIssue(key string) error {
 
 // GetWorklogs returns worklogs for an issue, optionally filtered by date range.
 func (c *Client) GetWorklogs(key string, since, until time.Time) ([]gojira.WorklogRecord, error) {
-	wl, _, err := c.jc.Issue.GetWorklogs(key)
-	if err != nil {
-		return nil, fmt.Errorf("jira worklogs %s: %w", key, err)
+	var all []gojira.WorklogRecord
+	startAt := 0
+	const pageSize = 50
+	for {
+		wl, _, err := c.jc.Issue.GetWorklogs(key, func(r *http.Request) error {
+			q := r.URL.Query()
+			q.Set("startAt", strconv.Itoa(startAt))
+			q.Set("maxResults", strconv.Itoa(pageSize))
+			r.URL.RawQuery = q.Encode()
+			return nil
+		})
+		if err != nil {
+			return nil, fmt.Errorf("jira worklogs %s: %w", key, err)
+		}
+		all = append(all, wl.Worklogs...)
+		if len(wl.Worklogs) < pageSize || len(all) >= wl.Total {
+			break
+		}
+		startAt += pageSize
 	}
 	if since.IsZero() && until.IsZero() {
-		return wl.Worklogs, nil
+		return all, nil
 	}
 	var filtered []gojira.WorklogRecord
-	for _, r := range wl.Worklogs {
+	for _, r := range all {
 		if r.Started == nil {
 			continue
 		}

@@ -85,11 +85,7 @@ func safeError(deps *Server, err error) *basemcp.CallToolResult {
 
 func registerJiraTools(srv *server.MCPServer, deps *Server) {
 	getClient := func() (*jira.Client, error) {
-		cfg, _, _, _, _ := deps.loadDeps()
-		if cfg.Integrations.Jira == nil {
-			return nil, fmt.Errorf("jira: not configured")
-		}
-		return jira.NewClient(*cfg.Integrations.Jira)
+		return deps.getJiraClient()
 	}
 
 	// --- Issue tools ---

@@ -11,6 +11,7 @@ import (
 
 	"github.com/zol/mcp-ai-helper/internal/command"
 	"github.com/zol/mcp-ai-helper/internal/config"
+	"github.com/zol/mcp-ai-helper/internal/jira"
 	"github.com/zol/mcp-ai-helper/internal/pipeline"
 	"github.com/zol/mcp-ai-helper/internal/project"
 	"github.com/zol/mcp-ai-helper/internal/provider"
@@ -27,6 +28,27 @@ type Server struct {
 	pipelines  *pipeline.Runner
 	taskStore  *tasks.Store
 	secretMask *security.Mask
+	jiraClient *jira.Client
+}
+
+func buildJiraClient(cfg *config.Config) *jira.Client {
+	if cfg.Integrations.Jira == nil || !cfg.Integrations.Jira.IsEnabled() {
+		return nil
+	}
+	jc, err := jira.NewClient(*cfg.Integrations.Jira)
+	if err != nil {
+		return nil
+	}
+	return jc
+}
+
+func (s *Server) getJiraClient() (*jira.Client, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.jiraClient == nil {
+		return nil, fmt.Errorf("jira: not configured or connection failed")
+	}
+	return s.jiraClient, nil
 }
 
 func (s *Server) loadDeps() (*config.Config, provider.ChatClient, *command.Runner, *pipeline.Runner, *tasks.Store) {
@@ -83,7 +105,7 @@ func New(cfg *config.Config) *server.MCPServer {
 		server.WithPromptCapabilities(false),
 	)
 
-	deps := &Server{cfg: cfg, secretMask: buildSecretMask(cfg)}
+	deps := &Server{cfg: cfg, secretMask: buildSecretMask(cfg), jiraClient: buildJiraClient(cfg)}
 	deps.chat, deps.commands, deps.pipelines, deps.taskStore = buildDeps(cfg)
 
 	registerLanguageTools(srv)
@@ -111,6 +133,7 @@ func New(cfg *config.Config) *server.MCPServer {
 			deps.pipelines = pipes
 			deps.taskStore = store
 			deps.secretMask = buildSecretMask(next)
+			deps.jiraClient = buildJiraClient(next)
 			deps.mu.Unlock()
 			return next, nil
 		}
