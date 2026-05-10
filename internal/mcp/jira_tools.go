@@ -79,6 +79,10 @@ type jiraWorklogDeleteRequest struct {
 
 // --- Registration ---
 
+func safeError(deps *Server, err error) *basemcp.CallToolResult {
+	return basemcp.NewToolResultError(deps.sanitize(err.Error()))
+}
+
 func registerJiraTools(srv *server.MCPServer, deps *Server) {
 	getClient := func() (*jira.Client, error) {
 		cfg, _, _, _, _ := deps.loadDeps()
@@ -104,11 +108,11 @@ func registerJiraTools(srv *server.MCPServer, deps *Server) {
 		}
 		jc, err := getClient()
 		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
+			return safeError(deps, err), nil
 		}
 		issues, err := jc.SearchIssues(args.JQL, args.MaxResults)
 		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
+			return safeError(deps, err), nil
 		}
 		type summary struct {
 			Key      string `json:"key"`
@@ -147,11 +151,11 @@ func registerJiraTools(srv *server.MCPServer, deps *Server) {
 		}
 		jc, err := getClient()
 		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
+			return safeError(deps, err), nil
 		}
 		issue, err := jc.GetIssue(args.IssueKey)
 		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
+			return safeError(deps, err), nil
 		}
 		transitions, _ := jc.GetTransitions(args.IssueKey)
 		transitionNames := make([]string, 0, len(transitions))
@@ -181,7 +185,7 @@ func registerJiraTools(srv *server.MCPServer, deps *Server) {
 		}
 		jc, err := getClient()
 		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
+			return safeError(deps, err), nil
 		}
 		fields := make(map[string]interface{})
 		if args.Summary != nil {
@@ -216,10 +220,10 @@ func registerJiraTools(srv *server.MCPServer, deps *Server) {
 			}
 		}
 		if len(fields) == 0 {
-			return basemcp.NewToolResultError("jira_update: no fields to update"), nil
+			return safeError(deps, fmt.Errorf("no fields to update")), nil
 		}
 		if err := jc.UpdateIssue(args.IssueKey, fields); err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
+			return safeError(deps, err), nil
 		}
 		return structured(map[string]any{"status": "ok", "updated_fields": fieldKeys(fields)})
 	})
@@ -235,10 +239,10 @@ func registerJiraTools(srv *server.MCPServer, deps *Server) {
 		}
 		jc, err := getClient()
 		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
+			return safeError(deps, err), nil
 		}
 		if err := jc.DoTransition(args.IssueKey, args.TransitionName); err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
+			return safeError(deps, err), nil
 		}
 		return structured(map[string]any{"status": "ok", "issue_key": args.IssueKey, "transition": args.TransitionName})
 	})
@@ -255,16 +259,16 @@ func registerJiraTools(srv *server.MCPServer, deps *Server) {
 		}
 		jc, err := getClient()
 		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
+			return safeError(deps, err), nil
 		}
 		if args.Unassign {
 			if err := jc.UnassignIssue(args.IssueKey); err != nil {
-				return basemcp.NewToolResultError(err.Error()), nil
+				return safeError(deps, err), nil
 			}
 			return structured(map[string]any{"status": "ok", "issue_key": args.IssueKey, "assigned": false})
 		}
 		if err := jc.AssignIssue(args.IssueKey, args.Username); err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
+			return safeError(deps, err), nil
 		}
 		return structured(map[string]any{"status": "ok", "issue_key": args.IssueKey, "assigned": args.Username})
 	})
@@ -284,15 +288,15 @@ func registerJiraTools(srv *server.MCPServer, deps *Server) {
 		}
 		jc, err := getClient()
 		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
+			return safeError(deps, err), nil
 		}
 		since, until, err := parseDateRange(args.Since, args.Until)
 		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
+			return safeError(deps, err), nil
 		}
 		records, err := jc.GetWorklogs(args.IssueKey, since, until)
 		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
+			return safeError(deps, err), nil
 		}
 		if args.Username != "" {
 			var filtered []gojira.WorklogRecord
@@ -318,15 +322,15 @@ func registerJiraTools(srv *server.MCPServer, deps *Server) {
 		}
 		jc, err := getClient()
 		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
+			return safeError(deps, err), nil
 		}
 		since, until, err := parseDateRange(args.Since, args.Until)
 		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
+			return safeError(deps, err), nil
 		}
 		entries, err := jc.GetWorklogsByUser(args.Username, since, until)
 		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
+			return safeError(deps, err), nil
 		}
 		type issueSummary struct {
 			Key     string                   `json:"key"`
@@ -371,19 +375,19 @@ func registerJiraTools(srv *server.MCPServer, deps *Server) {
 		}
 		jc, err := getClient()
 		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
+			return safeError(deps, err), nil
 		}
 		var started *time.Time
 		if args.Started != "" {
 			t, err := time.Parse(time.RFC3339, args.Started)
 			if err != nil {
-				return basemcp.NewToolResultError(fmt.Sprintf("jira_worklog_add: invalid started time: %v", err)), nil
+				return safeError(deps, fmt.Errorf("invalid started time: %w", err)), nil
 			}
 			started = &t
 		}
 		record, err := jc.AddWorklog(args.IssueKey, args.TimeSpent, args.Comment, started)
 		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
+			return safeError(deps, err), nil
 		}
 		return structured(map[string]any{"status": "ok", "worklog": record})
 	})
@@ -401,10 +405,10 @@ func registerJiraTools(srv *server.MCPServer, deps *Server) {
 		}
 		jc, err := getClient()
 		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
+			return safeError(deps, err), nil
 		}
 		if err := jc.UpdateWorklog(args.IssueKey, args.WorklogID, args.TimeSpent, args.Comment); err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
+			return safeError(deps, err), nil
 		}
 		return structured(map[string]any{"status": "ok", "issue_key": args.IssueKey, "worklog_id": args.WorklogID})
 	})
@@ -420,10 +424,10 @@ func registerJiraTools(srv *server.MCPServer, deps *Server) {
 		}
 		jc, err := getClient()
 		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
+			return safeError(deps, err), nil
 		}
 		if err := jc.DeleteWorklog(args.IssueKey, args.WorklogID); err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
+			return safeError(deps, err), nil
 		}
 		return structured(map[string]any{"status": "ok", "issue_key": args.IssueKey, "deleted_worklog_id": args.WorklogID})
 	})
