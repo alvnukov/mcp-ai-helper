@@ -19,6 +19,12 @@ type confReadRequest struct {
 	PageID string `json:"page_id"`
 }
 
+func checkConfSpace(deps *Server, spaceKey string) bool {
+	cfg, _, _, _, _ := deps.loadDeps()
+	if cfg.Integrations.Confluence == nil { return false }
+	return cfg.Integrations.Confluence.IsSpaceAllowed(spaceKey)
+}
+
 func registerConfluenceTools(srv *server.MCPServer, deps *Server) {
 	getClient := func() (*confluence.Client, error) {
 		srv := deps.getConfluenceClient()
@@ -67,6 +73,7 @@ func registerConfluenceTools(srv *server.MCPServer, deps *Server) {
 		if err != nil {
 			return safeError(deps, err), nil
 		}
+		if !checkConfSpace(deps, page.Space) { return safeError(deps, fmt.Errorf("confluence: space %q not in allowed_spaces", page.Space)), nil }
 		return structured(map[string]any{"page": page})
 	})
 
