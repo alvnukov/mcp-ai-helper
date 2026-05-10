@@ -119,7 +119,35 @@ type PipelinePolicy struct {
 
 // IntegrationsConfig holds third-party integration settings.
 type IntegrationsConfig struct {
-	Jira *JiraConfig `yaml:"jira" json:"jira"`
+	Jira       *JiraConfig       `yaml:"jira" json:"jira"`
+	Confluence *ConfluenceConfig `yaml:"confluence" json:"confluence"`
+}
+
+// ConfluenceConfig holds Confluence connection settings.
+type ConfluenceConfig struct {
+	URL       string `yaml:"url" json:"url"`
+	APIKey    string `yaml:"api_key" json:"-"`
+	APIKeyEnv string `yaml:"api_key_env" json:"-"`
+	Enabled   *bool  `yaml:"enabled" json:"enabled"`
+}
+
+// IsEnabled returns true when the integration is enabled (default true when non-nil).
+func (c *ConfluenceConfig) IsEnabled() bool {
+	if c == nil {
+		return false
+	}
+	return c.Enabled == nil || *c.Enabled
+}
+
+// ResolvedAPIKey returns the API key: direct value first, then env fallback.
+func (c ConfluenceConfig) ResolvedAPIKey() string {
+	if c.APIKey != "" {
+		return c.APIKey
+	}
+	if c.APIKeyEnv != "" {
+		return os.Getenv(c.APIKeyEnv)
+	}
+	return ""
 }
 
 // JiraConfig holds Jira connection settings.
