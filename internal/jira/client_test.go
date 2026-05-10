@@ -412,3 +412,39 @@ func TestGetWorklogsByUser(t *testing.T) {
 }
 
 func strPtr(s string) *string { return &s }
+
+func TestGetWorklogsByUser_EscapesQuotes(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/rest/api/2/search" {
+			jql := r.URL.Query().Get("jql")
+			// Valid JQL: worklogAuthor = "value" — exactly 2 unescaped quotes.
+			// If username contains ", Sprintf produces: worklogAuthor = "test"user" — 3 quotes.
+			qcount := 0
+			prev := byte(0)
+			for _, c := range []byte(jql) {
+				if c == '"' && prev != '\\' {
+					qcount++
+				}
+				prev = c
+			}
+			if qcount != 2 {
+				w.WriteHeader(400)
+				return
+			}
+		}
+		w.Write([]byte(`{"issues":[{"key":"TEST-1","fields":{"summary":"task"}}]}`))
+	}))
+	defer srv.Close()
+
+	jc, err := newTestClient(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := &Client{jc: jc}
+
+	_, err = c.GetWorklogsByUser(`test"user`, time.Time{}, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
