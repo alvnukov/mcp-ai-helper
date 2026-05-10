@@ -85,6 +85,51 @@ func TestRunnerStoresRepoHistoryUnderProjectLogs(t *testing.T) {
 	}
 }
 
+func TestHistoryCleanupRemovesRecordsBeyondLimits(t *testing.T) {
+	repoPath := t.TempDir()
+	logRoot := t.TempDir()
+	policy := config.CommandPolicy{
+		AllowedCWDs:           []string{repoPath},
+		DefaultTimeoutSeconds: 1,
+		MaxOutputBytes:        1000,
+		MaxLines:              20,
+		LogDir:                logRoot,
+		LogRetentionDays:      0,
+		LogMaxRecords:         2,
+	}
+
+	runner := NewRunner(policy)
+	for i := 0; i < 5; i++ {
+		_, err := runner.RunFilteredInRepo(t.Context(), "printf 'record"+string(rune('0'+i))+"\n'", repoPath, "", 1, Filter{})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := runner.CleanupHistory(); err != nil {
+		t.Fatal(err)
+	}
+
+	projectName, err := project.Name(repoPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	indexPath := filepath.Join(logRoot, "repos", projectName, "logs", "index.jsonl")
+	data, err := os.ReadFile(indexPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := 0
+	for _, b := range data {
+		if b == '\n' {
+			lines++
+		}
+	}
+	if lines != 2 {
+		t.Fatalf("expected 2 index entries after cleanup, got %d", lines)
+	}
+}
+
 func TestRunnerRunInRepoRejectsEscapingCWD(t *testing.T) {
 	dir := t.TempDir()
 	runner := NewRunner(config.CommandPolicy{AllowedCWDs: []string{dir}, DefaultTimeoutSeconds: 1, MaxOutputBytes: 1000, MaxLines: 20})
