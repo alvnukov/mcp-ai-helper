@@ -124,5 +124,9 @@ func New(cfg *config.Config) *server.MCPServer {
 		registerPlanningTools(srv, deps)
 	}
 
+	if cfg.Integrations.Jira != nil && cfg.Integrations.Jira.IsEnabled() {
+		registerJiraTools(srv, deps)
+	}
+
 	return srv
 }
