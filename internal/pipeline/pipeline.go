@@ -318,7 +318,7 @@ func (r *Runner) runWorkflowSteps(ctx context.Context, req WorkflowRequest) (Wor
 				stateMu.Unlock()
 
 				fileLocks.lock(paths)
-				sr, execErr := r.executeWorkflowStep(ctx, req.RepoPath, *step, changedSet, fileHashes)
+				sr, execErr := r.executeWorkflowStep(ctx, req.RepoPath, *step, changedSet, fileHashes, commitPtr(req.Commit))
 				fileLocks.unlock(paths)
 
 				if execErr != nil {
@@ -553,7 +553,7 @@ func (s *fileLockSet) unlock(paths []string) {
 	s.mu.Unlock()
 }
 
-func (r *Runner) executeWorkflowStep(ctx context.Context, repoPath string, step WorkflowStep, changedSet map[string]struct{}, fileHashes map[string]string) (WorkflowStepResult, error) {
+func (r *Runner) executeWorkflowStep(ctx context.Context, repoPath string, step WorkflowStep, changedSet map[string]struct{}, fileHashes map[string]string, topLevelCommit *WorkflowCommit) (WorkflowStepResult, error) {
 	base := WorkflowStepResult{ID: step.ID, Tool: step.Tool, Status: "ok"}
 	switch step.Tool {
 	case "guarded_replace":
@@ -613,7 +613,14 @@ func (r *Runner) executeWorkflowStep(ctx context.Context, repoPath string, step 
 		if len(files) == 0 {
 			files = sortedKeys(changedSet)
 		}
-		commitResult, err := gitops.CommitOwned(ctx, gitops.CommitRequest{RepoPath: repoPath, Files: files, Message: args.Message})
+		if len(files) == 0 && topLevelCommit != nil {
+			files = topLevelCommit.Files
+		}
+		message := args.Message
+		if message == "" && topLevelCommit != nil {
+			message = topLevelCommit.Message
+		}
+		commitResult, err := gitops.CommitOwned(ctx, gitops.CommitRequest{RepoPath: repoPath, Files: files, Message: message})
 		if err != nil {
 			return WorkflowStepResult{}, err
 		}
@@ -1003,6 +1010,13 @@ func commandOutputContains(result command.Result, needle string) bool {
 		}
 	}
 	return false
+}
+
+func commitPtr(c WorkflowCommit) *WorkflowCommit {
+	if c.Enabled || len(c.Files) > 0 || c.Message != "" {
+		return &c
+	}
+	return nil
 }
 
 func sortedKeys(values map[string]struct{}) []string {
