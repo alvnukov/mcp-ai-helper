@@ -80,6 +80,37 @@ func TestRunWorkflowStopsBeforeCommitOnFailedCheck(t *testing.T) {
 	}
 }
 
+func TestRunWorkflowStepsCommitUsesTopLevelOwnedFiles(t *testing.T) {
+	dir := t.TempDir()
+	runTestGit(t, dir, "init")
+	runTestGit(t, dir, "config", "user.email", "test@example.invalid")
+	runTestGit(t, dir, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(dir, "x.txt"), []byte("old\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runner := NewRunner(testConfig(dir), nil)
+	result, err := runner.RunWorkflow(t.Context(), WorkflowRequest{
+		RepoPath: dir,
+		Commit:   WorkflowCommit{Enabled: true, Files: []string{"x.txt"}, Message: "commit from top-level"},
+		Steps: []WorkflowStep{
+			{ID: "edit", Tool: "guarded_replace", Args: map[string]any{"path": "x.txt", "old": "old", "new": "new"}},
+			{ID: "commit", Tool: "git_commit_owned", If: "changed_files_count > 0", Args: map[string]any{}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "ok" {
+		t.Fatalf("status = %q, reason = %q", result.Status, result.Reason)
+	}
+	if result.CommitResult == nil || result.CommitResult.Status != "ok" {
+		t.Fatalf("commit did not run successfully: %+v", result.CommitResult)
+	}
+	if got := runTestGit(t, dir, "status", "--short"); got != "" {
+		t.Fatalf("unexpected dirty status: %q", got)
+	}
+}
+
 func TestRunWorkflowStepsEditCheckCommit(t *testing.T) {
 	dir := t.TempDir()
 	runTestGit(t, dir, "init")
