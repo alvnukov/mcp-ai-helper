@@ -152,8 +152,14 @@ func (c *Client) GetWorklogs(key string, since, until time.Time) ([]gojira.Workl
 	return filtered, nil
 }
 
+// WorklogEntry pairs a worklog record with its issue key.
+type WorklogEntry struct {
+	IssueKey string
+	Record   gojira.WorklogRecord
+}
+
 // GetWorklogsByUser searches worklogs by user in a date range.
-func (c *Client) GetWorklogsByUser(username string, since, until time.Time) ([]gojira.WorklogRecord, error) {
+func (c *Client) GetWorklogsByUser(username string, since, until time.Time) ([]WorklogEntry, error) {
 	jql := fmt.Sprintf("worklogAuthor = %s", username)
 	if !since.IsZero() {
 		jql += fmt.Sprintf(" AND worklogDate >= %s", since.Format("2006-01-02"))
@@ -165,7 +171,7 @@ func (c *Client) GetWorklogsByUser(username string, since, until time.Time) ([]g
 	if err != nil {
 		return nil, fmt.Errorf("jira worklogs by user %s: %w", username, err)
 	}
-	var allRecords []gojira.WorklogRecord
+	var entries []WorklogEntry
 	for _, issue := range issues {
 		records, err := c.GetWorklogs(issue.Key, since, until)
 		if err != nil {
@@ -173,11 +179,11 @@ func (c *Client) GetWorklogsByUser(username string, since, until time.Time) ([]g
 		}
 		for _, r := range records {
 			if r.Author != nil && r.Author.Name == username {
-				allRecords = append(allRecords, r)
+				entries = append(entries, WorklogEntry{IssueKey: issue.Key, Record: r})
 			}
 		}
 	}
-	return allRecords, nil
+	return entries, nil
 }
 
 // AddWorklog adds a worklog entry.
