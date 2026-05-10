@@ -126,6 +126,7 @@ type IntegrationsConfig struct {
 // ConfluenceConfig holds Confluence connection settings.
 type ConfluenceConfig struct {
 	URL           string   `yaml:"url" json:"url"`
+	Username      string   `yaml:"username" json:"username"`
 	APIKey        string   `yaml:"api_key" json:"-"`
 	APIKeyEnv     string   `yaml:"api_key_env" json:"-"`
 	AllowedSpaces []string `yaml:"allowed_spaces" json:"allowed_spaces"`
