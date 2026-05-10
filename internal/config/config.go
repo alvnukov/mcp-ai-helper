@@ -125,10 +125,12 @@ type IntegrationsConfig struct {
 
 // ConfluenceConfig holds Confluence connection settings.
 type ConfluenceConfig struct {
-	URL       string `yaml:"url" json:"url"`
-	APIKey    string `yaml:"api_key" json:"-"`
-	APIKeyEnv string `yaml:"api_key_env" json:"-"`
-	Enabled   *bool  `yaml:"enabled" json:"enabled"`
+	URL           string   `yaml:"url" json:"url"`
+	APIKey        string   `yaml:"api_key" json:"-"`
+	APIKeyEnv     string   `yaml:"api_key_env" json:"-"`
+	AllowedSpaces []string `yaml:"allowed_spaces" json:"allowed_spaces"`
+	ReadOnly      *bool    `yaml:"read_only" json:"read_only"`
+	Enabled       *bool    `yaml:"enabled" json:"enabled"`
 }
 
 // IsEnabled returns true when the integration is enabled (default true when non-nil).
@@ -150,13 +152,41 @@ func (c ConfluenceConfig) ResolvedAPIKey() string {
 	return ""
 }
 
+// CanMutate returns false when read_only is explicitly true.
+func (c *ConfluenceConfig) CanMutate() bool { return c.ReadOnly == nil || !*c.ReadOnly }
+
+// IsSpaceAllowed checks if a space key is in the allowlist.
+func (c *ConfluenceConfig) IsSpaceAllowed(spaceKey string) bool {
+	if len(c.AllowedSpaces) == 0 { return true }
+	for _, s := range c.AllowedSpaces {
+		if s == spaceKey { return true }
+	}
+	return false
+}
+
 // JiraConfig holds Jira connection settings.
 type JiraConfig struct {
-	URL       string `yaml:"url" json:"url"`
-	Username  string `yaml:"username" json:"username"`
-	APIKey    string `yaml:"api_key" json:"-"`
-	APIKeyEnv string `yaml:"api_key_env" json:"-"`
-	Enabled   *bool  `yaml:"enabled" json:"enabled"`
+	URL             string   `yaml:"url" json:"url"`
+	Username        string   `yaml:"username" json:"username"`
+	APIKey          string   `yaml:"api_key" json:"-"`
+	APIKeyEnv       string   `yaml:"api_key_env" json:"-"`
+	AllowedProjects []string `yaml:"allowed_projects" json:"allowed_projects"`
+	ReadOnly        *bool    `yaml:"read_only" json:"read_only"`
+	Enabled         *bool    `yaml:"enabled" json:"enabled"`
+}
+
+// CanMutate returns false when read_only is explicitly true.
+func (j *JiraConfig) CanMutate() bool { return j.ReadOnly == nil || !*j.ReadOnly }
+
+// IsProjectAllowed checks if an issue key's project is in the allowlist.
+func (j *JiraConfig) IsProjectAllowed(issueKey string) bool {
+	if len(j.AllowedProjects) == 0 { return true }
+	parts := strings.SplitN(issueKey, "-", 2)
+	if len(parts) == 0 { return false }
+	for _, p := range j.AllowedProjects {
+		if p == parts[0] { return true }
+	}
+	return false
 }
 
 // IsEnabled returns true when the integration is enabled (default true when non-nil).
