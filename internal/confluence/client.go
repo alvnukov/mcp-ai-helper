@@ -86,9 +86,14 @@ func (c *Client) Search(cql string, limit int) ([]SearchResult, error) {
 	}
 	items := make([]SearchResult, 0, len(result.Results))
 	for _, r := range result.Results {
+		id, typ := r.ID, r.Type
+		if id == "" && r.Content.ID != "" {
+			id = r.Content.ID
+			if typ == "" { typ = r.Content.Type }
+		}
 		items = append(items, SearchResult{
-			ID:     r.ID,
-			Type:   r.Type,
+			ID:     id,
+			Type:   typ,
 			Title:  r.Title,
 			Status: r.Status,
 		})
