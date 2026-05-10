@@ -51,6 +51,7 @@ type Config struct {
 	Routing           map[string]string         `yaml:"routing" json:"routing"`
 	CommandPolicy     CommandPolicy             `yaml:"command_policy" json:"command_policy"`
 	PipelinePolicy    PipelinePolicy            `yaml:"pipeline_policy" json:"pipeline_policy"`
+	Integrations      IntegrationsConfig        `yaml:"integrations" json:"integrations"`
 }
 
 // LayerPolicy controls optional server capability layers.
@@ -114,6 +115,27 @@ type CommandPolicy struct {
 type PipelinePolicy struct {
 	MaxReturnChars             int  `yaml:"max_return_chars" json:"max_return_chars"`
 	RequireEvidenceForAnalysis bool `yaml:"require_evidence_for_analysis" json:"require_evidence_for_analysis"`
+}
+
+// IntegrationsConfig holds third-party integration settings.
+type IntegrationsConfig struct {
+	Jira *JiraConfig `yaml:"jira" json:"jira"`
+}
+
+// JiraConfig holds Jira connection settings.
+type JiraConfig struct {
+	URL       string `yaml:"url" json:"url"`
+	Username  string `yaml:"username" json:"username"`
+	APIKeyEnv string `yaml:"api_key_env" json:"-"`
+	Enabled   *bool  `yaml:"enabled" json:"enabled"`
+}
+
+// IsEnabled returns true when the integration is enabled (default true when non-nil).
+func (j *JiraConfig) IsEnabled() bool {
+	if j == nil {
+		return false
+	}
+	return j.Enabled == nil || *j.Enabled
 }
 
 // Load reads a YAML config file and applies safe defaults.
@@ -258,6 +280,13 @@ command_policy:
 pipeline_policy:
   max_return_chars: 4000
   require_evidence_for_analysis: true
+
+integrations:
+  jira:
+    # url: https://your-domain.atlassian.net
+    # username: bot@example.com
+    # api_key_env: JIRA_API_KEY
+    enabled: false
 `
 }
 
@@ -300,6 +329,8 @@ func (c *Config) LayerEnabled(name string) bool {
 		return layerEnabled(c.Layers.Workflows)
 	case "reasoning_patterns":
 		return layerEnabled(c.Layers.ReasoningPatterns)
+	case "jira":
+		return c.Integrations.Jira != nil && c.Integrations.Jira.IsEnabled()
 	default:
 		return true
 	}

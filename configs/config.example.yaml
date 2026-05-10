@@ -103,3 +103,10 @@ command_policy:
 pipeline_policy:
   max_return_chars: 4000
   require_evidence_for_analysis: true
+
+integrations:
+  jira:
+    url: https://your-domain.atlassian.net
+    username: bot@example.com
+    api_key_env: JIRA_API_KEY
+    enabled: true
