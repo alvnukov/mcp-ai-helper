@@ -41,7 +41,7 @@ func registerIssueTools(srv *server.MCPServer, deps *Server) {
 		basemcp.WithString("id", basemcp.Description("Canonical task-NNN id for the issue.")),
 		basemcp.WithString("title", basemcp.Required(), basemcp.Description("Short issue title.")),
 		basemcp.WithString("body", basemcp.Description("Feedback details and expected behavior.")),
-		basemcp.WithString("priority", basemcp.Description("Issue priority: low, normal, high, critical.")),
+		basemcp.WithString("priority", basemcp.Description("Issue priority: low, medium, high, critical.")),
 		basemcp.WithArray("tags", basemcp.Description("Optional additional issue tags.")),
 	), func(ctx context.Context, request basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
 		var args issueAddRequest

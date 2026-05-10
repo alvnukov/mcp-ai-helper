@@ -37,6 +37,9 @@ func TestTaskRegistryExporterGetTaskThroughLakeExe(t *testing.T) {
 	if _, ok := task["tags"].([]any); !ok {
 		t.Fatalf("tags field missing or not an array: %#v", task["tags"])
 	}
+	if _, ok := task["model_level"]; !ok {
+		t.Fatalf("model_level field missing: %#v", task)
+	}
 }
 
 func TestTaskRegistryGetThroughLakeServeRPC(t *testing.T) {
@@ -136,6 +139,9 @@ func TestTaskRegistryGetThroughLakeServeRPC(t *testing.T) {
 	}
 	if _, ok := envelope.Data["verification_plan"]; !ok {
 		t.Fatalf("verification_plan missing from server task payload: %s", rpcCall.Result)
+	}
+	if _, ok := envelope.Data["model_level"]; !ok {
+		t.Fatalf("model_level missing from server task payload: %s", rpcCall.Result)
 	}
 	writeLSPNotification(t, stdin, "$/lean/rpc/release", map[string]any{"uri": uri, "sessionId": connect.Result.SessionID, "refs": []any{}})
 }

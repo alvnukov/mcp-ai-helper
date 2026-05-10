@@ -44,7 +44,7 @@ func TestLeanTransitionServerRejectsInvalidStatusWithTypedDiagnostic(t *testing.
 
 func TestLeanUpsertCreatesDeterministicTaskAndValidates(t *testing.T) {
 	repo := copyLeanRepoFixture(t)
-	result, err := upsertTask(context.Background(), tasks.AddRequest{RepoPath: repo, ID: "task-999", Status: "todo", Title: "Generated task", Body: "Created by test", Priority: "high", Tags: []string{"lean", "test"}}, commandRunnerForRepo(repo), legacyStoreForTest(t))
+	result, err := upsertTask(context.Background(), tasks.AddRequest{RepoPath: repo, ID: "task-999", Status: "todo", Title: "Generated task", Body: "Created by test", Priority: "high", ModelLevel: "very_high", Tags: []string{"lean", "test"}}, commandRunnerForRepo(repo), legacyStoreForTest(t))
 	if err != nil {
 		t.Fatalf("upsertTask returned error: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestLeanUpsertCreatesDeterministicTaskAndValidates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read generated task: %v", err)
 	}
-	if task.Title != "Generated task" || len(task.Tags) != 2 {
+	if task.Title != "Generated task" || len(task.Tags) != 2 || task.ModelLevel != "very_high" {
 		t.Fatalf("generated task fields not preserved: %+v", task)
 	}
 }

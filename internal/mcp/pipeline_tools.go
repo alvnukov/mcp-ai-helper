@@ -46,7 +46,7 @@ func registerPipelineTools(srv *server.MCPServer, deps *Server) {
 					"type":        "task_batch_upsert",
 					"description": "Synchronize per-repository task state.",
 					"fields": map[string]string{
-						"tasks":         "Array of task objects with id, title, status, priority, tags, body (required).",
+						"tasks":         "Array of task objects with id, title, status, priority, model_level, tags, body (required).",
 						"close_missing": "Close active tasks not in this batch (boolean).",
 					},
 				},

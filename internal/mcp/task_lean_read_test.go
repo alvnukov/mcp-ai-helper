@@ -39,6 +39,9 @@ func TestReadTaskPrefersLeanExporter(t *testing.T) {
 	if task.ID != "task-006" || task.Body == "" || len(task.Tags) == 0 {
 		t.Fatalf("core fields were not projected from Lean: %#v", task)
 	}
+	if task.ModelLevel != "" {
+		t.Fatalf("model_level for unmigrated task = %q, want empty", task.ModelLevel)
+	}
 	if task.WorktreePath != ".worktrees/task-006" {
 		t.Fatalf("worktree_path = %q", task.WorktreePath)
 	}
