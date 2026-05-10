@@ -10,6 +10,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/zol/mcp-ai-helper/internal/command"
+	"github.com/zol/mcp-ai-helper/internal/confluence"
 	"github.com/zol/mcp-ai-helper/internal/config"
 	"github.com/zol/mcp-ai-helper/internal/jira"
 	"github.com/zol/mcp-ai-helper/internal/pipeline"
@@ -28,7 +29,8 @@ type Server struct {
 	pipelines  *pipeline.Runner
 	taskStore  *tasks.Store
 	secretMask *security.Mask
-	jiraClient *jira.Client
+	jiraClient      *jira.Client
+	confluenceClient *confluence.Client
 }
 
 func buildJiraClient(cfg *config.Config) *jira.Client {
@@ -40,6 +42,27 @@ func buildJiraClient(cfg *config.Config) *jira.Client {
 		return nil
 	}
 	return jc
+}
+
+func buildConfluenceClient(cfg *config.Config) *confluence.Client {
+	if cfg.Integrations.Confluence == nil || !cfg.Integrations.Confluence.IsEnabled() {
+		return nil
+	}
+	cc, err := confluence.NewClient(confluence.Config{
+		URL:       cfg.Integrations.Confluence.URL,
+		APIKey:    cfg.Integrations.Confluence.APIKey,
+		APIKeyEnv: cfg.Integrations.Confluence.APIKeyEnv,
+	})
+	if err != nil {
+		return nil
+	}
+	return cc
+}
+
+func (s *Server) getConfluenceClient() *confluence.Client {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.confluenceClient
 }
 
 func (s *Server) getJiraClient() (*jira.Client, error) {
@@ -134,6 +157,7 @@ func New(cfg *config.Config) *server.MCPServer {
 			deps.taskStore = store
 			deps.secretMask = buildSecretMask(next)
 			deps.jiraClient = buildJiraClient(next)
+			deps.confluenceClient = buildConfluenceClient(next)
 			deps.mu.Unlock()
 			return next, nil
 		}
@@ -152,6 +176,9 @@ func New(cfg *config.Config) *server.MCPServer {
 
 	if cfg.Integrations.Jira != nil && cfg.Integrations.Jira.IsEnabled() {
 		registerJiraTools(srv, deps)
+	}
+	if cfg.Integrations.Confluence != nil && cfg.Integrations.Confluence.IsEnabled() {
+		registerConfluenceTools(srv, deps)
 	}
 
 	return srv
@@ -175,6 +202,16 @@ func buildSecretMask(cfg *config.Config) *security.Mask {
 		}
 		if cfg.Integrations.Jira.APIKeyEnv != "" {
 			if v := os.Getenv(cfg.Integrations.Jira.APIKeyEnv); v != "" {
+				secrets = append(secrets, v)
+			}
+		}
+	}
+	if cfg.Integrations.Confluence != nil {
+		if cfg.Integrations.Confluence.APIKey != "" {
+			secrets = append(secrets, cfg.Integrations.Confluence.APIKey)
+		}
+		if cfg.Integrations.Confluence.APIKeyEnv != "" {
+			if v := os.Getenv(cfg.Integrations.Confluence.APIKeyEnv); v != "" {
 				secrets = append(secrets, v)
 			}
 		}
