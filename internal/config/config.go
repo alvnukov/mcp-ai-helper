@@ -138,6 +138,14 @@ func (j *JiraConfig) IsEnabled() bool {
 	return j.Enabled == nil || *j.Enabled
 }
 
+// ResolvedAPIKey returns the API key from the environment variable.
+func (j JiraConfig) ResolvedAPIKey() string {
+	if j.APIKeyEnv == "" {
+		return ""
+	}
+	return os.Getenv(j.APIKeyEnv)
+}
+
 // Load reads a YAML config file and applies safe defaults.
 func ensureDefaultConfigFile(path string) error {
 	if strings.TrimSpace(path) == "" {
