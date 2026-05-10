@@ -114,14 +114,21 @@ func writeValidatedConfig(path string, yamlText string) (*config.Config, error) 
 		path = config.DefaultConfigPath()
 	}
 	dir := filepath.Dir(path)
+	base := filepath.Base(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("create config directory: %w", err)
 	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, fmt.Errorf("open config directory root: %w", err)
+	}
+	defer func() { _ = root.Close() }()
 	tmp, err := os.CreateTemp(dir, ".config-*.yaml")
 	if err != nil {
 		return nil, fmt.Errorf("create temp config: %w", err)
 	}
 	tmpPath := tmp.Name()
+	tmpBase := filepath.Base(tmpPath)
 	defer func() { _ = os.Remove(tmpPath) }()
 	if err := tmp.Chmod(0o600); err != nil {
 		_ = tmp.Close()
@@ -139,11 +146,11 @@ func writeValidatedConfig(path string, yamlText string) (*config.Config, error) 
 		return nil, fmt.Errorf("validate config: %w", err)
 	}
 	if err := os.Rename(tmpPath, path); err != nil {
-		src, readErr := os.ReadFile(tmpPath)
+		src, readErr := root.ReadFile(tmpBase)
 		if readErr != nil {
 			return nil, fmt.Errorf("read temp config for copy: %w", readErr)
 		}
-		if writeErr := os.WriteFile(path, src, 0o600); writeErr != nil {
+		if writeErr := root.WriteFile(base, src, 0o600); writeErr != nil {
 			return nil, fmt.Errorf("write config via copy: %w", writeErr)
 		}
 	}

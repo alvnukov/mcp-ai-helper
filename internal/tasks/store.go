@@ -378,6 +378,7 @@ func (s *Store) taskPath(repoPath string, id string) (string, error) {
 }
 
 func (s *Store) readTask(path string) (Task, error) {
+	// #nosec G304 -- path from taskFilePath, repo-relative
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return Task{}, fmt.Errorf("read task file: %w", err)

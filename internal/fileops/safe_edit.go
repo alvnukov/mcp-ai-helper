@@ -215,7 +215,13 @@ func ReadFileContent(path string) (FileContent, error) {
 	if err != nil {
 		return FileContent{}, err
 	}
-	data, err := os.ReadFile(clean)
+	dir, name := filepath.Split(clean)
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return FileContent{}, err
+	}
+	defer func() { _ = root.Close() }()
+	data, err := root.ReadFile(name)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return FileContent{Path: clean, Exists: false}, nil
@@ -278,8 +284,13 @@ func SearchFiles(root string, pattern string, maxMatches int) (SearchResult, err
 		maxMatches = 100
 	}
 	result := SearchResult{Pattern: pattern, Path: root}
+	rootHandle, err := os.OpenRoot(root)
+	if err != nil {
+		return result, err
+	}
+	defer func() { _ = rootHandle.Close() }()
 	seenFiles := 0
-	err := filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
+	err = filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return nil // skip inaccessible entries
 		}
@@ -300,7 +311,11 @@ func SearchFiles(root string, pattern string, maxMatches int) (SearchResult, err
 			".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".pdf", ".class", ".pyc", ".pyo":
 			return nil
 		}
-		data, readErr := os.ReadFile(path)
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil || rel == "." {
+			return nil
+		}
+		data, readErr := rootHandle.ReadFile(rel)
 		if readErr != nil {
 			return nil
 		}
@@ -312,7 +327,6 @@ func SearchFiles(root string, pattern string, maxMatches int) (SearchResult, err
 		fileMatchCount := 0
 		for i, line := range lines {
 			if strings.Contains(line, pattern) {
-				rel, _ := filepath.Rel(root, path)
 				if rel == "" {
 					rel = path
 				}

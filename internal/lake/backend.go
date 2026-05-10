@@ -149,6 +149,7 @@ func CallServerRPC(ctx context.Context, repoPath string, req RPCRequest) (RPCRes
 	if sourceBlocker != "" {
 		return RPCResult{WorkspaceDetected: true, WorkspaceDir: ws.Dir, Blocker: sourceBlocker}, nil
 	}
+	// #nosec G304 -- sourceAbs from resolveRPCSource, validated workspace path
 	source, err := os.ReadFile(sourceAbs)
 	if err != nil {
 		return RPCResult{WorkspaceDetected: true, WorkspaceDir: ws.Dir, Blocker: "Lean RPC source is not accessible: " + sourceRel}, nil
