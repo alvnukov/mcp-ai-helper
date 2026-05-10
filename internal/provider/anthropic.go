@@ -21,11 +21,11 @@ type anthropicClient struct {
 }
 
 type anthropicRequest struct {
-	Model       string           `json:"model"`
-	MaxTokens   int              `json:"max_tokens"`
-	Temperature float64          `json:"temperature,omitempty"`
-	System      anthropicSystem  `json:"system,omitempty"`
-	Messages    []anthropicMsg   `json:"messages"`
+	Model       string          `json:"model"`
+	MaxTokens   int             `json:"max_tokens"`
+	Temperature float64         `json:"temperature,omitempty"`
+	System      anthropicSystem `json:"system,omitempty"`
+	Messages    []anthropicMsg  `json:"messages"`
 }
 
 type anthropicSystem struct {

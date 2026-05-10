@@ -122,10 +122,14 @@ func TestSearch_NestedContentID(t *testing.T) {
 	defer srv.Close()
 
 	c, err := NewClientWithHTTP(srv.URL, srv.Client())
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	results, err := c.Search("title ~ Nested", 10)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	if results[0].ID != "999" {
 		t.Fatalf("expected ID 999 from nested content, got %q", results[0].ID)
 	}
@@ -145,10 +149,14 @@ func TestGetSpaces_Pagination(t *testing.T) {
 	defer srv.Close()
 
 	c, err := NewClientWithHTTP(srv.URL, srv.Client())
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	spaces, err := c.GetSpaces()
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(spaces) != 3 {
 		t.Fatalf("expected 3 spaces, got %d", len(spaces))
 	}

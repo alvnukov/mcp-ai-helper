@@ -10,8 +10,8 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/zol/mcp-ai-helper/internal/command"
-	"github.com/zol/mcp-ai-helper/internal/confluence"
 	"github.com/zol/mcp-ai-helper/internal/config"
+	"github.com/zol/mcp-ai-helper/internal/confluence"
 	"github.com/zol/mcp-ai-helper/internal/jira"
 	"github.com/zol/mcp-ai-helper/internal/pipeline"
 	"github.com/zol/mcp-ai-helper/internal/project"
@@ -22,14 +22,14 @@ import (
 
 // Server holds mutable server state protected by a read-write mutex.
 type Server struct {
-	mu         sync.RWMutex
-	cfg        *config.Config
-	chat       provider.ChatClient
-	commands   *command.Runner
-	pipelines  *pipeline.Runner
-	taskStore  *tasks.Store
-	secretMask *security.Mask
-	jiraClient      *jira.Client
+	mu                  sync.RWMutex
+	cfg                 *config.Config
+	chat                provider.ChatClient
+	commands            *command.Runner
+	pipelines           *pipeline.Runner
+	taskStore           *tasks.Store
+	secretMask          *security.Mask
+	jiraClient          *jira.Client
 	confluenceClient    *confluence.Client
 	confluenceClientErr error
 }

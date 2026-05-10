@@ -158,9 +158,13 @@ func (c *ConfluenceConfig) CanMutate() bool { return c.ReadOnly == nil || !*c.Re
 
 // IsSpaceAllowed checks if a space key is in the allowlist.
 func (c *ConfluenceConfig) IsSpaceAllowed(spaceKey string) bool {
-	if len(c.AllowedSpaces) == 0 { return true }
+	if len(c.AllowedSpaces) == 0 {
+		return true
+	}
 	for _, s := range c.AllowedSpaces {
-		if s == spaceKey { return true }
+		if s == spaceKey {
+			return true
+		}
 	}
 	return false
 }
@@ -181,11 +185,17 @@ func (j *JiraConfig) CanMutate() bool { return j.ReadOnly == nil || !*j.ReadOnly
 
 // IsProjectAllowed checks if an issue key's project is in the allowlist.
 func (j *JiraConfig) IsProjectAllowed(issueKey string) bool {
-	if len(j.AllowedProjects) == 0 { return true }
+	if len(j.AllowedProjects) == 0 {
+		return true
+	}
 	parts := strings.SplitN(issueKey, "-", 2)
-	if len(parts) == 0 { return false }
+	if len(parts) == 0 {
+		return false
+	}
 	for _, p := range j.AllowedProjects {
-		if p == parts[0] { return true }
+		if p == parts[0] {
+			return true
+		}
 	}
 	return false
 }

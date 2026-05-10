@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
+	gojira "github.com/andygrunwald/go-jira"
 	basemcp "github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-	gojira "github.com/andygrunwald/go-jira"
 
 	"github.com/zol/mcp-ai-helper/internal/jira"
 )
@@ -24,13 +24,13 @@ type jiraReadRequest struct {
 }
 
 type jiraUpdateRequest struct {
-	IssueKey    string                 `json:"issue_key"`
-	Summary     *string                `json:"summary"`
-	Description *string                `json:"description"`
-	Priority    *string                `json:"priority"`
-	Labels      []string               `json:"labels"`
-	Components  []string               `json:"components"`
-	FixVersions []string               `json:"fix_versions"`
+	IssueKey     string                 `json:"issue_key"`
+	Summary      *string                `json:"summary"`
+	Description  *string                `json:"description"`
+	Priority     *string                `json:"priority"`
+	Labels       []string               `json:"labels"`
+	Components   []string               `json:"components"`
+	FixVersions  []string               `json:"fix_versions"`
 	CustomFields map[string]interface{} `json:"custom_fields"`
 }
 
@@ -81,9 +81,15 @@ type jiraWorklogDeleteRequest struct {
 
 func checkJiraMutate(deps *Server, issueKey string) bool {
 	cfg, _, _, _, _ := deps.loadDeps()
-	if cfg.Integrations.Jira == nil { return false }
-	if !cfg.Integrations.Jira.CanMutate() { return false }
-	if !cfg.Integrations.Jira.IsProjectAllowed(issueKey) { return false }
+	if cfg.Integrations.Jira == nil {
+		return false
+	}
+	if !cfg.Integrations.Jira.CanMutate() {
+		return false
+	}
+	if !cfg.Integrations.Jira.IsProjectAllowed(issueKey) {
+		return false
+	}
 	return true
 }
 
@@ -167,7 +173,7 @@ func registerJiraTools(srv *server.MCPServer, deps *Server) {
 			transitionNames = append(transitionNames, t.Name)
 		}
 		return structured(map[string]any{
-			"issue":              issue,
+			"issue":                 issue,
 			"available_transitions": transitionNames,
 		})
 	})
@@ -187,7 +193,9 @@ func registerJiraTools(srv *server.MCPServer, deps *Server) {
 		if err := bind(req, &args); err != nil {
 			return nil, err
 		}
-		if !checkJiraMutate(deps, args.IssueKey) { return safeError(deps, fmt.Errorf("jira: mutation not allowed")), nil }
+		if !checkJiraMutate(deps, args.IssueKey) {
+			return safeError(deps, fmt.Errorf("jira: mutation not allowed")), nil
+		}
 		jc, err := getClient()
 		if err != nil {
 			return safeError(deps, err), nil
@@ -242,7 +250,9 @@ func registerJiraTools(srv *server.MCPServer, deps *Server) {
 		if err := bind(req, &args); err != nil {
 			return nil, err
 		}
-		if !checkJiraMutate(deps, args.IssueKey) { return safeError(deps, fmt.Errorf("jira: mutation not allowed")), nil }
+		if !checkJiraMutate(deps, args.IssueKey) {
+			return safeError(deps, fmt.Errorf("jira: mutation not allowed")), nil
+		}
 		jc, err := getClient()
 		if err != nil {
 			return safeError(deps, err), nil
@@ -263,7 +273,9 @@ func registerJiraTools(srv *server.MCPServer, deps *Server) {
 		if err := bind(req, &args); err != nil {
 			return nil, err
 		}
-		if !checkJiraMutate(deps, args.IssueKey) { return safeError(deps, fmt.Errorf("jira: mutation not allowed")), nil }
+		if !checkJiraMutate(deps, args.IssueKey) {
+			return safeError(deps, fmt.Errorf("jira: mutation not allowed")), nil
+		}
 		jc, err := getClient()
 		if err != nil {
 			return safeError(deps, err), nil
@@ -340,9 +352,9 @@ func registerJiraTools(srv *server.MCPServer, deps *Server) {
 			return safeError(deps, err), nil
 		}
 		type issueSummary struct {
-			Key     string                   `json:"key"`
-			Hours   float64                  `json:"hours"`
-			Entries []gojira.WorklogRecord   `json:"entries"`
+			Key     string                 `json:"key"`
+			Hours   float64                `json:"hours"`
+			Entries []gojira.WorklogRecord `json:"entries"`
 		}
 		byIssue := make(map[string]*issueSummary)
 		var totalHours float64
@@ -380,7 +392,9 @@ func registerJiraTools(srv *server.MCPServer, deps *Server) {
 		if err := bind(req, &args); err != nil {
 			return nil, err
 		}
-		if !checkJiraMutate(deps, args.IssueKey) { return safeError(deps, fmt.Errorf("jira: mutation not allowed")), nil }
+		if !checkJiraMutate(deps, args.IssueKey) {
+			return safeError(deps, fmt.Errorf("jira: mutation not allowed")), nil
+		}
 		jc, err := getClient()
 		if err != nil {
 			return safeError(deps, err), nil
@@ -411,7 +425,9 @@ func registerJiraTools(srv *server.MCPServer, deps *Server) {
 		if err := bind(req, &args); err != nil {
 			return nil, err
 		}
-		if !checkJiraMutate(deps, args.IssueKey) { return safeError(deps, fmt.Errorf("jira: mutation not allowed")), nil }
+		if !checkJiraMutate(deps, args.IssueKey) {
+			return safeError(deps, fmt.Errorf("jira: mutation not allowed")), nil
+		}
 		jc, err := getClient()
 		if err != nil {
 			return safeError(deps, err), nil
@@ -431,7 +447,9 @@ func registerJiraTools(srv *server.MCPServer, deps *Server) {
 		if err := bind(req, &args); err != nil {
 			return nil, err
 		}
-		if !checkJiraMutate(deps, args.IssueKey) { return safeError(deps, fmt.Errorf("jira: mutation not allowed")), nil }
+		if !checkJiraMutate(deps, args.IssueKey) {
+			return safeError(deps, fmt.Errorf("jira: mutation not allowed")), nil
+		}
 		jc, err := getClient()
 		if err != nil {
 			return safeError(deps, err), nil
@@ -481,4 +499,3 @@ func fieldKeys(m map[string]interface{}) []string {
 	}
 	return keys
 }
-

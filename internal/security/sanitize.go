@@ -8,8 +8,8 @@ import (
 
 // Mask holds sensitive strings that must be redacted from output.
 type Mask struct {
-	mu       sync.RWMutex
-	secrets  []string
+	mu      sync.RWMutex
+	secrets []string
 }
 
 // NewMask creates a Mask from sensitive values.
