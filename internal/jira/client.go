@@ -23,7 +23,7 @@ func NewClient(cfg config.JiraConfig) (*Client, error) {
 	}
 	apiKey := cfg.ResolvedAPIKey()
 	if apiKey == "" {
-		return nil, fmt.Errorf("jira: api key is required (set %s)", cfg.APIKeyEnv)
+		return nil, fmt.Errorf("jira: api key is required — set api_key or api_key_env")
 	}
 	tp := gojira.BasicAuthTransport{
 		Username: cfg.Username,
