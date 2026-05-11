@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -249,5 +250,13 @@ func TestRunWorkflowCurrentTaskIDBlocksLeanTaskOnSkippedGate(t *testing.T) {
 	}
 	if source != "lean_registry" || got.Status != "blocked" {
 		t.Fatalf("skipped gate should block task closeout: source=%q task=%#v", source, got)
+	}
+}
+
+func TestLeanMutationFailsClosedWithoutLeanOwnedMutationSurface(t *testing.T) {
+	repo := copyLeanRepoFixture(t)
+	_, err := setTaskStatus(context.Background(), tasks.StatusRequest{RepoPath: repo, ID: "task-040", Status: "done"}, commandRunnerForRepo(repo), legacyStoreForTest(t))
+	if !errors.Is(err, ErrLeanRegistryMutationSurfaceMissing) {
+		t.Fatalf("expected Lean-owned mutation surface blocker, got %v", err)
 	}
 }
