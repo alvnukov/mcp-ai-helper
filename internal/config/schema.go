@@ -66,6 +66,8 @@ func Schema() map[string]any {
 			{Path: "command_policy.log_compress", Type: "bool", Default: "true", Description: "Allows old command records to be compressed by retention jobs."},
 			{Path: "pipeline_policy.max_return_chars", Type: "int", Default: "4000", Description: "Maximum compact result size returned from pipelines."},
 			{Path: "pipeline_policy.require_evidence_for_analysis", Type: "bool", Default: "true", Description: "Requires model conclusions to cite extracted evidence lines."},
+			{Path: "permissions.tools.deny", Type: "[]string", Description: "Repo-local only (.mcp-ai-helper.yaml). MCP tool names denied for LLM in this repo. User-editable; config_replace refuses to write repo configs."},
+			{Path: "repo_config", Type: "file", Default: ".mcp-ai-helper.yaml (optional)", Description: "Per-repository user-owned config merged on top of global config. Place in repo root. LLM can read via config_read with repo_path; LLM cannot modify."},
 		},
 	}
 }

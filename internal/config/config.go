@@ -14,6 +14,7 @@ import (
 
 const (
 	defaultConfigDir = ".mcp-ai-helper"
+	repoConfigFile   = ".mcp-ai-helper.yaml"
 )
 
 const defaultAssistantGuidance = `mcp-ai-helper operating guidance:
@@ -52,6 +53,26 @@ type Config struct {
 	CommandPolicy     CommandPolicy             `yaml:"command_policy" json:"command_policy"`
 	PipelinePolicy    PipelinePolicy            `yaml:"pipeline_policy" json:"pipeline_policy"`
 	Integrations      IntegrationsConfig        `yaml:"integrations" json:"integrations"`
+}
+
+// RepoPermissions defines per-repository LLM permissions set by the user in .mcp-ai-helper.yaml.
+type RepoPermissions struct {
+	Tools ToolPermissions `yaml:"tools" json:"tools"`
+}
+
+// ToolPermissions controls which MCP tools the LLM may call in this repo.
+type ToolPermissions struct {
+	Deny []string `yaml:"deny" json:"deny"`
+}
+
+// RepoConfig is a repo-local optional config loaded from .mcp-ai-helper.yaml.
+// Only the user may edit this file; config_replace refuses to write it.
+type RepoConfig struct {
+	SourcePath    string          `yaml:"-" json:"repo_config_path"`
+	Permissions   RepoPermissions `yaml:"permissions" json:"permissions"`
+	CommandPolicy *struct {
+		AllowedCWDs []string `yaml:"allowed_cwds" json:"allowed_cwds"`
+	} `yaml:"command_policy" json:"command_policy"`
 }
 
 // LayerPolicy controls optional server capability layers.
@@ -266,6 +287,33 @@ func Load(path string) (*Config, error) {
 	}
 	cfg.SourcePath = path
 	return &cfg, nil
+}
+
+// LoadRepoConfig reads an optional .mcp-ai-helper.yaml from repoPath.
+// Returns nil, nil when no repo config exists.
+func LoadRepoConfig(repoPath string) (*RepoConfig, error) {
+	if strings.TrimSpace(repoPath) == "" {
+		return nil, nil
+	}
+	path := filepath.Join(repoPath, repoConfigFile)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var cfg RepoConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("invalid repo config %s: %w", path, err)
+	}
+	cfg.SourcePath = path
+	return &cfg, nil
+}
+
+// IsRepoConfigPath returns true when path points to a repo-local config file.
+func IsRepoConfigPath(path string) bool {
+	return filepath.Base(path) == repoConfigFile
 }
 
 // DefaultConfigPath returns the per-user default config path.

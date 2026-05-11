@@ -225,7 +225,12 @@ func (r *Runner) safeCWD(cwd string) (string, error) {
 		return "", fmt.Errorf("cwd %q is not a directory", abs)
 	}
 	for _, allowed := range r.policy.AllowedCWDs {
-		allowedAbs, err := filepath.Abs(allowed)
+		var allowedAbs string
+		if filepath.IsAbs(allowed) {
+			allowedAbs, err = filepath.Abs(allowed)
+		} else {
+			allowedAbs, err = filepath.Abs(filepath.Join(abs, allowed))
+		}
 		if err != nil {
 			continue
 		}
