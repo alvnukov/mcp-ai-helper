@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/zol/mcp-ai-helper/internal/command"
-	"github.com/zol/mcp-ai-helper/internal/config"
 	"github.com/zol/mcp-ai-helper/internal/tasks"
 )
 
@@ -42,9 +41,32 @@ func (b leanTaskUIBackend) SetStatus(ctx context.Context, req tasks.StatusReques
 	return setTaskStatus(ctx, req, b.commands, b.store)
 }
 
-func NewTaskUIHandler(cfg *config.Config) http.Handler {
-	_, commands, _, store := buildDeps(cfg)
-	return newTaskUIHandler(leanTaskUIBackend{commands: commands, store: store})
+type serverTaskUIBackend struct {
+	deps *Server
+}
+
+func (b serverTaskUIBackend) List(ctx context.Context, repoPath string) ([]tasks.Task, string, error) {
+	_, _, commands, _, store := b.deps.loadDeps()
+	return readAllTasks(ctx, repoPath, commands, store)
+}
+
+func (b serverTaskUIBackend) Get(ctx context.Context, repoPath string, id string) (tasks.Task, string, error) {
+	_, _, commands, _, store := b.deps.loadDeps()
+	return readTask(ctx, repoPath, id, commands, store)
+}
+
+func (b serverTaskUIBackend) Upsert(ctx context.Context, req tasks.AddRequest) (leanMutationResult, error) {
+	_, _, commands, _, store := b.deps.loadDeps()
+	return upsertTask(ctx, req, commands, store)
+}
+
+func (b serverTaskUIBackend) SetStatus(ctx context.Context, req tasks.StatusRequest) (leanMutationResult, error) {
+	_, _, commands, _, store := b.deps.loadDeps()
+	return setTaskStatus(ctx, req, commands, store)
+}
+
+func newServerTaskUIHandler(deps *Server) http.Handler {
+	return newTaskUIHandler(serverTaskUIBackend{deps: deps})
 }
 
 func newTaskUIHandler(backend taskUIBackend) http.Handler {

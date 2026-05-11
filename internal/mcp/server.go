@@ -32,6 +32,7 @@ type Server struct {
 	jiraClient          *jira.Client
 	confluenceClient    *confluence.Client
 	confluenceClientErr error
+	taskUI              *taskUIServer
 }
 
 func buildJiraClient(cfg *config.Config) *jira.Client {
@@ -219,6 +220,7 @@ func New(cfg *config.Config) *server.MCPServer {
 			registerIssueTools(srv, deps)
 		}
 		registerTaskTools(srv, deps)
+		registerTaskUITools(srv, deps)
 		registerPlanningTools(srv, deps)
 	}
 
