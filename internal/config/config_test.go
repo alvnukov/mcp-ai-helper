@@ -205,6 +205,7 @@ func TestSchemaDocumentsModelDrivenConfig(t *testing.T) {
 		"models.<id>.system_prompt":                     false,
 		"command_policy.log_dir":                        false,
 		"pipeline_policy.require_evidence_for_analysis": false,
+		"features.overrides.<id>.enabled":               false,
 	}
 	for _, field := range fields {
 		if _, ok := want[field.Path]; ok && field.Description != "" {

@@ -209,6 +209,7 @@ func New(cfg *config.Config) *server.MCPServer {
 			return next, nil
 		}
 		registerConfigTools(srv, deps, reloadConfig)
+		registerFeatureTools(srv, deps)
 		registerModelTools(srv, deps)
 		registerCommandTools(srv, deps)
 		registerLakeTools(srv, deps)
