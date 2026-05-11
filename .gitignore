@@ -11,3 +11,5 @@ config.yaml
 .mcp.json
 CLAUDE.md
 .worktrees/
+.backups/
+.mcp-ai-helper.yaml
