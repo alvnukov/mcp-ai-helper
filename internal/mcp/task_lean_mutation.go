@@ -64,17 +64,9 @@ func setTaskStatus(ctx context.Context, req tasks.StatusRequest, commands *comma
 	if err != nil {
 		return leanMutationResult{}, err
 	}
-	buildResult, buildErr := lake.Build(ctx, req.RepoPath, lake.CommandRunner{Commands: commands, TimeoutSeconds: 20})
-	if buildErr != nil || buildResult.ExitCode != 0 {
+	if err := validateLeanRegistryBuild(ctx, req.RepoPath, commands, "after transition"); err != nil {
 		_ = writeLeanActiveTasksSource(ctx, req.RepoPath, payload.PreviousSource)
-		if buildErr != nil {
-			return leanMutationResult{}, fmt.Errorf("validate Lean task registry after transition: %w", buildErr)
-		}
-		diagnostic := strings.TrimSpace(strings.Join(buildResult.Diagnostics, "\n"))
-		if diagnostic == "" {
-			diagnostic = "lake build failed"
-		}
-		return leanMutationResult{}, fmt.Errorf("validate Lean task registry after transition: %s", diagnostic)
+		return leanMutationResult{}, err
 	}
 	task, err := payload.Task.toTask()
 	if err != nil {
@@ -83,7 +75,30 @@ func setTaskStatus(ctx context.Context, req tasks.StatusRequest, commands *comma
 	return leanMutationResult{Task: task, Source: "lean_registry", Validation: envelope.Validation.Summary + " + lake build", ChangedFiles: envelope.ChangedFiles}, nil
 }
 
+func validateLeanRegistryBuild(ctx context.Context, repoPath string, commands *command.Runner, phase string) error {
+	buildResult, buildErr := lake.Build(ctx, repoPath, lake.CommandRunner{Commands: commands, TimeoutSeconds: 20})
+	if buildErr != nil {
+		return fmt.Errorf("validate Lean task registry %s: %w", phase, buildErr)
+	}
+	if buildResult.ExitCode == 0 {
+		return nil
+	}
+	diagnostic := strings.TrimSpace(strings.Join(buildResult.Diagnostics, "\n"))
+	if diagnostic == "" {
+		diagnostic = "lake build failed"
+	}
+	if strings.Contains(diagnostic, "<<<<<<<") || strings.Contains(diagnostic, ">>>>>>>") || strings.Contains(diagnostic, "unexpected token '<<<'") {
+		diagnostic = "conflict markers in Lean task registry: " + diagnostic
+	}
+	return fmt.Errorf("validate Lean task registry %s: %s", phase, diagnostic)
+}
+
 func applyLeanTaskTransition(ctx context.Context, repoPath string, req tasks.StatusRequest, commands *command.Runner) (leanTaskTransitionApplyPayload, leanRegistryEnvelope, error) {
+	if commands != nil {
+		if err := validateLeanRegistryBuild(ctx, repoPath, commands, "before transition"); err != nil {
+			return leanTaskTransitionApplyPayload{}, leanRegistryEnvelope{}, err
+		}
+	}
 	result, err := lake.CallServerRPC(ctx, repoPath, lake.RPCRequest{
 		SourceFile:     "MCPAIHelperProject/TaskRegistryExport.lean",
 		Method:         "MCPAIHelperProject.TaskRegistryExport.taskTransitionApply",

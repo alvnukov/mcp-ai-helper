@@ -37,7 +37,7 @@ func TestLeanSetStatusUpdatesRegistryAndValidates(t *testing.T) {
 
 func TestLeanTransitionServerRejectsInvalidStatusWithTypedDiagnostic(t *testing.T) {
 	repo := copyLeanRepoFixture(t)
-	_, _, err := validateLeanTaskTransitionWithServer(context.Background(), repo, tasks.StatusRequest{RepoPath: repo, ID: "task-040", Status: "not-a-status"}, tasks.Task{})
+	_, _, err := validateLeanTaskTransitionWithServer(context.Background(), repo, tasks.StatusRequest{RepoPath: repo, ID: "task-040", Status: "not-a-status"}, tasks.Task{ID: "task-040", Status: "not-a-status"})
 	if err == nil || !strings.Contains(err.Error(), "invalid_status") {
 		t.Fatalf("expected typed invalid_status rejection, got %v", err)
 	}
@@ -83,8 +83,8 @@ func TestLeanMutationRejectsDuplicateID(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = setTaskStatus(context.Background(), tasks.StatusRequest{RepoPath: repo, ID: "task-040", Status: "done"}, commandRunnerForRepo(repo), legacyStoreForTest(t))
-	if err == nil || !strings.Contains(err.Error(), "occurrence count") {
-		t.Fatalf("expected duplicate id rejection, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "validate Lean task registry before transition") {
+		t.Fatalf("expected Lean build rejection, got %v", err)
 	}
 }
 
