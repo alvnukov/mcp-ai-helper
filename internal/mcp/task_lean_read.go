@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -33,13 +34,15 @@ type leanTaskProjection struct {
 	UpdatedAt    string   `json:"updated_at"`
 }
 
+var ErrNoLakeWorkspace = errors.New("no Lake workspace detected; run lake_init to bootstrap a Lean project")
+
 func readCurrentTasks(ctx context.Context, repoPath string, commands *command.Runner, _ *tasks.Store) ([]tasks.Task, string, error) {
 	leanTasks, usedLean, err := readLeanTaskList(ctx, repoPath, commands, []string{"--list-active"})
 	if err != nil {
 		return nil, "lean_registry", err
 	}
 	if !usedLean {
-		return nil, "lean_registry", fmt.Errorf("Lean task registry is required: Lake workspace not detected")
+		return nil, "lean_registry", ErrNoLakeWorkspace
 	}
 	return leanTasks, "lean_registry", nil
 }
@@ -50,7 +53,7 @@ func readAllTasks(ctx context.Context, repoPath string, commands *command.Runner
 		return nil, "lean_registry", err
 	}
 	if !usedLean {
-		return nil, "lean_registry", fmt.Errorf("Lean task registry is required: Lake workspace not detected")
+		return nil, "lean_registry", ErrNoLakeWorkspace
 	}
 	return leanTasks, "lean_registry", nil
 }
@@ -61,7 +64,7 @@ func readTask(ctx context.Context, repoPath string, id string, commands *command
 		return tasks.Task{}, "lean_registry", err
 	}
 	if !usedLean {
-		return tasks.Task{}, "lean_registry", fmt.Errorf("Lean task registry is required: Lake workspace not detected")
+		return tasks.Task{}, "lean_registry", ErrNoLakeWorkspace
 	}
 	return leanTask, "lean_registry", nil
 }
