@@ -2,7 +2,6 @@ package mcp
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -253,10 +252,17 @@ func TestRunWorkflowCurrentTaskIDBlocksLeanTaskOnSkippedGate(t *testing.T) {
 	}
 }
 
-func TestLeanUpsertFailsClosedWithoutLeanOwnedMutationSurface(t *testing.T) {
+func TestLeanDeleteRemovesTaskAndValidates(t *testing.T) {
 	repo := copyLeanRepoFixture(t)
-	_, err := upsertTask(context.Background(), tasks.AddRequest{RepoPath: repo, ID: "task-999", Status: "todo", Title: "Needs Lean RPC"}, commandRunnerForRepo(repo), legacyStoreForTest(t))
-	if !errors.Is(err, ErrLeanRegistryMutationSurfaceMissing) {
-		t.Fatalf("expected Lean-owned mutation surface blocker, got %v", err)
+	result, err := deleteTask(context.Background(), tasks.DeleteRequest{RepoPath: repo, ID: "task-040"}, commandRunnerForRepo(repo), legacyStoreForTest(t))
+	if err != nil {
+		t.Fatalf("deleteTask returned error: %v", err)
+	}
+	if result.Source != "lean_registry" || result.Task.ID != "task-040" || !strings.Contains(result.Validation, "server-side delete applied") {
+		t.Fatalf("unexpected delete result: %+v", result)
+	}
+	_, _, err = readTask(context.Background(), repo, "task-040", commandRunnerForRepo(repo), legacyStoreForTest(t))
+	if err == nil || !strings.Contains(err.Error(), "task not found") {
+		t.Fatalf("expected task to be absent after delete, got %v", err)
 	}
 }
