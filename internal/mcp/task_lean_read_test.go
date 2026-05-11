@@ -100,6 +100,21 @@ func TestReadCurrentTasksReportsMissingLeanTaskExporter(t *testing.T) {
 	}
 }
 
+func TestLeanTaskExporterRepairPayload(t *testing.T) {
+	payload := leanTaskExporterRepairPayload(ErrLeanTaskExporterMissing)
+	if payload["source"] != "lean_registry" || payload["repair_required"] != true || payload["action"] != "repair_lean_task_registry_exporter" {
+		t.Fatalf("unexpected repair payload: %#v", payload)
+	}
+	missingFiles, ok := payload["missing_files"].([]string)
+	if !ok || len(missingFiles) != 1 || missingFiles[0] != "MCPAIHelperProject/TaskRegistryExport.lean" {
+		t.Fatalf("unexpected missing_files: %#v", payload["missing_files"])
+	}
+	verification, ok := payload["verification"].([]string)
+	if !ok || len(verification) != 3 || verification[2] != "task_current" {
+		t.Fatalf("unexpected verification steps: %#v", payload["verification"])
+	}
+}
+
 func commandRunnerForRepo(repoRoot string) *command.Runner {
 	return command.NewRunner(config.CommandPolicy{AllowedCWDs: []string{repoRoot}, DefaultTimeoutSeconds: 20, MaxOutputBytes: 20000, MaxLines: 80})
 }
