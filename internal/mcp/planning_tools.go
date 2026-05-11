@@ -128,7 +128,7 @@ func registerPlanningTools(srv *server.MCPServer, deps *Server) {
 		basemcp.WithString("repo_path", basemcp.Required()),
 		basemcp.WithString("task"),
 		basemcp.WithString("current_model_level"),
-	), func(_ context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
 		var args planTaskExecutionRequest
 		if err := bind(req, &args); err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil

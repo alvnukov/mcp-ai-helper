@@ -166,9 +166,9 @@ lean_lib Bootstrap
 
 func detectToolchain(ctx context.Context, commands *command.Runner) (toolchain string, version string, err error) {
 	// Try elan show first
-	result, runErr := commands.Run(ctx, ".", []string{"elan", "show"})
+	result, runErr := commands.Run(ctx, "elan show", ".", 10)
 	if runErr == nil && result.ExitCode == 0 {
-		for _, line := range result.Output {
+		for _, line := range result.StdoutTail {
 			line = strings.TrimSpace(line)
 			if line == "" {
 				continue
@@ -184,9 +184,9 @@ func detectToolchain(ctx context.Context, commands *command.Runner) (toolchain s
 	}
 
 	// Fall back to lake --version
-	result, runErr = commands.Run(ctx, ".", []string{"lake", "--version"})
+	result, runErr = commands.Run(ctx, "lake --version", ".", 10)
 	if runErr == nil && result.ExitCode == 0 {
-		for _, line := range result.Output {
+		for _, line := range result.StdoutTail {
 			if idx := strings.Index(line, "Lean version "); idx >= 0 {
 				v := strings.TrimSpace(line[idx+len("Lean version "):])
 				if end := strings.IndexAny(v, ") \n"); end >= 0 {
