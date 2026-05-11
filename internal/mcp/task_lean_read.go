@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -14,6 +16,8 @@ import (
 )
 
 const leanTaskRegistryExporter = "task_registry_export"
+
+var ErrLeanTaskExporterMissing = errors.New("Lean task registry exporter is not configured")
 
 type leanTaskListPayload struct {
 	Tasks []leanTaskProjection `json:"tasks"`
@@ -105,7 +109,37 @@ func readLeanTask(ctx context.Context, repoPath string, id string, commands *com
 	return tasks.WithWorktreeContext(repoPath, task), true, nil
 }
 
+func leanTaskExporterConfigured(repoPath string) (bool, error) {
+	ws, err := lake.ResolveWorkspace(repoPath)
+	if err != nil {
+		return false, nil
+	}
+
+	activeTasksPath := filepath.Join(ws.Dir, "MCPAIHelperProject", "ActiveTasks.lean")
+	if _, err := os.Stat(activeTasksPath); err != nil {
+		return false, nil
+	}
+
+	exporterPath := filepath.Join(ws.Dir, "MCPAIHelperProject", "TaskRegistryExport.lean")
+	if _, err := os.Stat(exporterPath); err != nil {
+		if os.IsNotExist(err) {
+			return false, fmt.Errorf("%w: found MCPAIHelperProject/ActiveTasks.lean but missing MCPAIHelperProject/TaskRegistryExport.lean; add the Lean registry exporter module and declare the %q executable in the Lake config, then rebuild/restart the helper", ErrLeanTaskExporterMissing, leanTaskRegistryExporter)
+		}
+		return false, fmt.Errorf("inspect Lean task registry exporter: %w", err)
+	}
+
+	return true, nil
+}
+
 func runLeanTaskExporter(ctx context.Context, repoPath string, commands *command.Runner, args []string) (lake.CommandResult, bool, error) {
+	configured, err := leanTaskExporterConfigured(repoPath)
+	if err != nil {
+		return lake.CommandResult{}, true, err
+	}
+	if !configured {
+		return lake.CommandResult{}, false, nil
+	}
+
 	result, err := lake.RunExe(ctx, repoPath, leanTaskRegistryExporter, args, lake.CommandRunner{Commands: commands, TimeoutSeconds: 20})
 	if err != nil {
 		return lake.CommandResult{}, false, err

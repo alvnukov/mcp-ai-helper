@@ -73,6 +73,33 @@ func TestReadCurrentTasksRequiresLeanRegistry(t *testing.T) {
 	}
 }
 
+func TestReadCurrentTasksReportsMissingLeanTaskExporter(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repo, "lean-toolchain"), []byte("leanprover/lean4:v4.22.0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "lakefile.toml"), []byte("name = \"missing-exporter\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(repo, "MCPAIHelperProject"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "MCPAIHelperProject", "ActiveTasks.lean"), []byte("import MCPAIHelperProject.Registry\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, source, err := readCurrentTasks(context.Background(), repo, commandRunnerForRepo(repo), legacyStoreForTest(t))
+	if err == nil {
+		t.Fatal("expected missing Lean task exporter error")
+	}
+	if source != "lean_registry" || !errors.Is(err, ErrLeanTaskExporterMissing) {
+		t.Fatalf("unexpected source=%q err=%v", source, err)
+	}
+	if !strings.Contains(err.Error(), "MCPAIHelperProject/TaskRegistryExport.lean") || strings.Contains(err.Error(), "unknown executable") {
+		t.Fatalf("missing exporter diagnostic is not actionable: %v", err)
+	}
+}
+
 func commandRunnerForRepo(repoRoot string) *command.Runner {
 	return command.NewRunner(config.CommandPolicy{AllowedCWDs: []string{repoRoot}, DefaultTimeoutSeconds: 20, MaxOutputBytes: 20000, MaxLines: 80})
 }
