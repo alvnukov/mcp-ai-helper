@@ -20,7 +20,7 @@ func TestLeanSetStatusUpdatesRegistryAndValidates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("setTaskStatus returned error: %v", err)
 	}
-	if result.Source != "lean_registry" || !strings.Contains(result.Validation, "transition validation") || result.Task.Status != "blocked" {
+	if result.Source != "lean_registry" || !strings.Contains(result.Validation, "server-side transition applied") || result.Task.Status != "blocked" {
 		t.Fatalf("unexpected result: %+v", result)
 	}
 	if len(result.ChangedFiles) != 1 || result.ChangedFiles[0] != activeTasksLeanPath {
@@ -253,9 +253,9 @@ func TestRunWorkflowCurrentTaskIDBlocksLeanTaskOnSkippedGate(t *testing.T) {
 	}
 }
 
-func TestLeanMutationFailsClosedWithoutLeanOwnedMutationSurface(t *testing.T) {
+func TestLeanUpsertFailsClosedWithoutLeanOwnedMutationSurface(t *testing.T) {
 	repo := copyLeanRepoFixture(t)
-	_, err := setTaskStatus(context.Background(), tasks.StatusRequest{RepoPath: repo, ID: "task-040", Status: "done"}, commandRunnerForRepo(repo), legacyStoreForTest(t))
+	_, err := upsertTask(context.Background(), tasks.AddRequest{RepoPath: repo, ID: "task-999", Status: "todo", Title: "Needs Lean RPC"}, commandRunnerForRepo(repo), legacyStoreForTest(t))
 	if !errors.Is(err, ErrLeanRegistryMutationSurfaceMissing) {
 		t.Fatalf("expected Lean-owned mutation surface blocker, got %v", err)
 	}
