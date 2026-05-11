@@ -139,6 +139,25 @@ func TestRunnerRunInRepoRejectsEscapingCWD(t *testing.T) {
 	}
 }
 
+func TestRunnerRunInRepoAllowsRestrictedSubdir(t *testing.T) {
+	dir := t.TempDir()
+	safe := filepath.Join(dir, "safe")
+	blocked := filepath.Join(dir, "blocked")
+	if err := os.Mkdir(safe, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(blocked, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	runner := NewRunner(config.CommandPolicy{AllowedCWDs: []string{safe}, DefaultTimeoutSeconds: 1, MaxOutputBytes: 1000, MaxLines: 20})
+	if _, err := runner.RunInRepo(t.Context(), "pwd", dir, "safe", 1); err != nil {
+		t.Fatalf("safe subdir should be allowed: %v", err)
+	}
+	if _, err := runner.RunInRepo(t.Context(), "pwd", dir, "blocked", 1); err == nil {
+		t.Fatal("blocked subdir should be rejected")
+	}
+}
+
 func TestApplyFilterPresetProfiles(t *testing.T) {
 	tests := []struct {
 		name   string
