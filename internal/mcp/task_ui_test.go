@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/zol/mcp-ai-helper/internal/config"
 	"github.com/zol/mcp-ai-helper/internal/tasks"
 )
 
@@ -99,5 +101,57 @@ func TestTaskUIRejectsStaleEdits(t *testing.T) {
 	handler.ServeHTTP(resp, req)
 	if resp.Code != http.StatusConflict || !strings.Contains(resp.Body.String(), "stale task edit") {
 		t.Fatalf("status = %d body=%s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestTaskUIStartServesInProcessHTTP(t *testing.T) {
+	cfg := &config.Config{}
+	deps := &Server{cfg: cfg}
+	deps.chat, deps.commands, deps.pipelines, deps.taskStore = buildDeps(cfg)
+
+	result, err := deps.startTaskUI(context.Background(), "/repo", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_, _ = deps.stopTaskUI(ctx)
+	})
+	if result.AlreadyRunning {
+		t.Fatalf("first start reported already running")
+	}
+	if !strings.HasPrefix(result.URL, result.BaseURL+"?") || !strings.Contains(result.URL, "repo_path=%2Frepo") {
+		t.Fatalf("unexpected URL: %#v", result)
+	}
+
+	resp, err := http.Get(result.BaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "mcp-ai-helper tasks") {
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(body))
+	}
+
+	again, err := deps.startTaskUI(context.Background(), "/repo2", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !again.AlreadyRunning || again.BaseURL != result.BaseURL || !strings.Contains(again.URL, "repo_path=%2Frepo2") {
+		t.Fatalf("unexpected idempotent start: %#v", again)
+	}
+}
+
+func TestTaskUIStartRejectsNonLoopbackAddr(t *testing.T) {
+	cfg := &config.Config{}
+	deps := &Server{cfg: cfg}
+	deps.chat, deps.commands, deps.pipelines, deps.taskStore = buildDeps(cfg)
+	if _, err := deps.startTaskUI(context.Background(), "/repo", "0.0.0.0:0"); err == nil {
+		t.Fatal("expected non-loopback bind to be rejected")
 	}
 }
