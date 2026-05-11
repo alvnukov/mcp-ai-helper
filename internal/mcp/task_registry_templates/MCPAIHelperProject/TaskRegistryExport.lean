@@ -92,6 +92,10 @@ def taskListJson (registry : Registry) (artifacts : List Artifact) : Json :=
 def getTaskJson? (registry : Registry) (id : String) : Option Json :=
   (taskArtifacts registry).find? (fun artifact => artifact.id.value == id) |>.map (artifactJson registry)
 
+structure TaskListRequest where
+  active : Bool
+  deriving FromJson, ToJson
+
 structure TaskGetRequest where
   id : String
   deriving FromJson, ToJson
@@ -350,6 +354,15 @@ def transitionTaskEnvelope (req : TaskTransitionRequest) : Json :=
               (Json.mkObj [("task", artifactJson projectRegistry updated)])
               ["MCPAIHelperProject/ActiveTasks.lean"]
               "server-side transition validation passed"
+
+@[server_rpc_method]
+def taskList (req : TaskListRequest) : RequestM (RequestTask Json) := do
+  RequestM.asTask do
+    if !Registry.isValid projectRegistry then
+      pure (registryErrorEnvelope "task.list" "invalid_registry" "registry invariant failed")
+    else
+      let artifacts := if req.active then activeTaskArtifacts projectRegistry else taskArtifacts projectRegistry
+      pure (registryOkEnvelope "task.list" (taskListJson projectRegistry artifacts))
 
 @[server_rpc_method]
 def taskGet (req : TaskGetRequest) : RequestM (RequestTask Json) := do
