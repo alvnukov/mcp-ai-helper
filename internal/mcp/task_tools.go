@@ -187,8 +187,8 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 		_, _, commands, _, store := deps.loadDeps()
 		list, source, err := readCurrentTasks(ctx, args.RepoPath, commands, store)
 		if err != nil {
-			if errors.Is(err, ErrNoLakeWorkspace) {
-				return structured(map[string]any{"tasks": []tasks.Task{}, "source": "none", "init_required": true, "suggestion": "No Lake/Lean workspace detected. Run lake_init to bootstrap a minimal Lean project."})
+			if setup, ok := taskReadSetupPayload(err); ok {
+				return structured(setup)
 			}
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
@@ -247,6 +247,30 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 		}
 		return structured(result)
 	})
+}
+
+func taskReadSetupPayload(err error) (map[string]any, bool) {
+	if errors.Is(err, ErrNoLakeWorkspace) {
+		return map[string]any{"tasks": []tasks.Task{}, "source": "none", "init_required": true, "suggestion": "No Lake/Lean workspace detected. Run lake_init to bootstrap a minimal Lean project."}, true
+	}
+	if errors.Is(err, ErrLeanTaskExporterMissing) {
+		return leanTaskExporterRepairPayload(err), true
+	}
+	return nil, false
+}
+
+func leanTaskExporterRepairPayload(err error) map[string]any {
+	return map[string]any{
+		"tasks":           []tasks.Task{},
+		"source":          "lean_registry",
+		"repair_required": true,
+		"action":          "repair_lean_task_registry_exporter",
+		"error":           err.Error(),
+		"missing_files":   []string{"MCPAIHelperProject/TaskRegistryExport.lean"},
+		"lake_config":     "Declare a task_registry_export executable that uses MCPAIHelperProject.TaskRegistryExport as its root module.",
+		"verification":    []string{"lake build", "lake exe task_registry_export --list-active", "task_current"},
+		"suggestion":      "Run server_setup_guidance and apply the Lean task registry exporter repair steps before continuing the mandatory task workflow.",
+	}
 }
 
 func mergeTaskUpdate(existing tasks.Task, update tasks.UpdateRequest) tasks.AddRequest {

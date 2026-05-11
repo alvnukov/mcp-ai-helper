@@ -240,6 +240,16 @@ func TestGuidanceDocumentsLeanTaskRegistry(t *testing.T) {
 			t.Fatalf("setup guidance does not document task storage mode %q: %#v", want, setup)
 		}
 	}
+	for _, want := range []string{
+		"repair_lean_task_registry_exporter",
+		"MCPAIHelperProject/TaskRegistryExport.lean",
+		"task_registry_export",
+		"lake exe task_registry_export --list-active",
+	} {
+		if !strings.Contains(setup["lean_task_registry_repair"], want) {
+			t.Fatalf("setup guidance does not document repair step %q: %#v", want, setup)
+		}
+	}
 }
 
 func TestGuidanceDocumentsStrictRepoTaskWorkflow(t *testing.T) {
