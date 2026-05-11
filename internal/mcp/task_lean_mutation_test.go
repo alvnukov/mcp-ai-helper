@@ -42,6 +42,29 @@ func TestLeanTransitionServerRejectsInvalidStatusWithTypedDiagnostic(t *testing.
 	}
 }
 
+func TestLeanUpsertBootstrapsEmptyTaskRepo(t *testing.T) {
+	repo := t.TempDir()
+	result, err := upsertTask(context.Background(), tasks.AddRequest{RepoPath: repo, ID: "task-first", Status: "todo", Title: "First task"}, commandRunnerForRepo(repo), legacyStoreForTest(t))
+	if err != nil {
+		t.Fatalf("upsertTask returned error: %v", err)
+	}
+	if result.Source != "lean_registry" || result.Task.ID != "task-first" {
+		t.Fatalf("unexpected bootstrap result: %+v", result)
+	}
+	for _, path := range []string{"lean-toolchain", "lakefile.lean", "MCPAIHelperProject/ActiveTasks.lean", "MCPAIHelperProject/TaskRegistryExport.lean"} {
+		if _, err := os.Stat(filepath.Join(repo, path)); err != nil {
+			t.Fatalf("bootstrap did not create %s: %v", path, err)
+		}
+	}
+	task, _, err := readTask(context.Background(), repo, "task-first", commandRunnerForRepo(repo), legacyStoreForTest(t))
+	if err != nil {
+		t.Fatalf("read bootstrapped task: %v", err)
+	}
+	if task.Title != "First task" {
+		t.Fatalf("unexpected bootstrapped task: %+v", task)
+	}
+}
+
 func TestLeanUpsertCreatesDeterministicTaskAndValidates(t *testing.T) {
 	repo := copyLeanRepoFixture(t)
 	result, err := upsertTask(context.Background(), tasks.AddRequest{RepoPath: repo, ID: "task-999", Status: "todo", Title: "Generated task", Body: "Created by test", Priority: "high", ModelLevel: "very_high", Tags: []string{"lean", "test"}}, commandRunnerForRepo(repo), legacyStoreForTest(t))

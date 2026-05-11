@@ -2,9 +2,12 @@ package mcp
 
 import (
 	"context"
+	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/zol/mcp-ai-helper/internal/command"
@@ -13,6 +16,9 @@ import (
 )
 
 const activeTasksLeanPath = "MCPAIHelperProject/ActiveTasks.lean"
+
+//go:embed task_registry_templates/* task_registry_templates/MCPAIHelperProject/*
+var taskRegistryBootstrapTemplates embed.FS
 
 type leanMutationResult struct {
 	Task         tasks.Task `json:"task"`
@@ -104,6 +110,86 @@ func setTaskStatus(ctx context.Context, req tasks.StatusRequest, commands *comma
 	}
 	return leanMutationResult{Task: task, Source: "lean_registry", Validation: envelope.Validation.Summary + " + lake build", ChangedFiles: envelope.ChangedFiles}, nil
 }
+
+func ensureLeanTaskRegistryBootstrap(ctx context.Context, repoPath string, commands *command.Runner) error {
+	absPath, err := filepath.Abs(strings.TrimSpace(repoPath))
+	if err != nil {
+		return fmt.Errorf("resolve repo_path for Lean task registry bootstrap: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Join(absPath, "MCPAIHelperProject"), 0o755); err != nil {
+		return fmt.Errorf("create Lean task registry directory: %w", err)
+	}
+	if leanTaskRegistryBootstrapComplete(absPath) {
+		return nil
+	}
+	copies := map[string]string{
+		"lean-toolchain":                             "lean-toolchain",
+		"lakefile.lean":                              "lakefile.lean",
+		"MCPAIHelperProject.lean":                    "MCPAIHelperProject.lean",
+		"MCPAIHelperProject/ProjectState.lean":       "MCPAIHelperProject/ProjectState.lean",
+		"MCPAIHelperProject/Samples.lean":            "MCPAIHelperProject/Samples.lean",
+		"MCPAIHelperProject/Registry.lean":           "MCPAIHelperProject/Registry.lean",
+		"MCPAIHelperProject/TaskRegistryExport.lean": "MCPAIHelperProject/TaskRegistryExport.lean",
+	}
+	for targetRel, sourceRel := range copies {
+		if err := copyBootstrapTemplateIfMissing(absPath, sourceRel, targetRel); err != nil {
+			return err
+		}
+	}
+	activePath := filepath.Join(absPath, activeTasksLeanPath)
+	if !fileExists(activePath) {
+		if err := os.WriteFile(activePath, []byte(emptyActiveTasksLeanSource), 0o644); err != nil {
+			return fmt.Errorf("write %s: %w", activeTasksLeanPath, err)
+		}
+	}
+	if commands != nil {
+		return validateLeanRegistryBuild(ctx, absPath, commands, "after bootstrap")
+	}
+	return nil
+}
+
+func leanTaskRegistryBootstrapComplete(repoPath string) bool {
+	return fileExists(filepath.Join(repoPath, "lean-toolchain")) &&
+		(fileExists(filepath.Join(repoPath, "lakefile.lean")) || fileExists(filepath.Join(repoPath, "lakefile.toml"))) &&
+		fileExists(filepath.Join(repoPath, "MCPAIHelperProject.lean")) &&
+		fileExists(filepath.Join(repoPath, "MCPAIHelperProject/ProjectState.lean")) &&
+		fileExists(filepath.Join(repoPath, "MCPAIHelperProject/ActiveTasks.lean")) &&
+		fileExists(filepath.Join(repoPath, "MCPAIHelperProject/Registry.lean")) &&
+		fileExists(filepath.Join(repoPath, "MCPAIHelperProject/TaskRegistryExport.lean"))
+}
+
+func copyBootstrapTemplateIfMissing(targetRoot string, sourceRel string, targetRel string) error {
+	targetPath := filepath.Join(targetRoot, filepath.FromSlash(targetRel))
+	if fileExists(targetPath) {
+		return nil
+	}
+	data, err := taskRegistryBootstrapTemplates.ReadFile("task_registry_templates/" + sourceRel)
+	if err != nil {
+		return fmt.Errorf("read embedded task registry bootstrap template %s: %w", sourceRel, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+		return fmt.Errorf("create parent for %s: %w", targetRel, err)
+	}
+	if err := os.WriteFile(targetPath, data, 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", targetRel, err)
+	}
+	return nil
+}
+
+const emptyActiveTasksLeanSource = `import MCPAIHelperProject.ProjectState
+
+namespace MCPAIHelperProject
+namespace ActiveTasks
+
+def activeArtifacts : List Artifact :=
+  []
+
+def activeRelations : List ArtifactRelation :=
+  []
+
+end ActiveTasks
+end MCPAIHelperProject
+`
 
 func validateLeanRegistryBuild(ctx context.Context, repoPath string, commands *command.Runner, phase string) error {
 	buildResult, buildErr := lake.Build(ctx, repoPath, lake.CommandRunner{Commands: commands, TimeoutSeconds: 20})
@@ -249,6 +335,9 @@ func upsertTask(ctx context.Context, req tasks.AddRequest, commands *command.Run
 	if strings.TrimSpace(req.Title) == "" {
 		return leanMutationResult{}, errors.New("title is required")
 	}
+	if err := ensureLeanTaskRegistryBootstrap(ctx, req.RepoPath, commands); err != nil {
+		return leanMutationResult{}, err
+	}
 	envelope, err := callLeanTaskMutation(ctx, req.RepoPath, commands, "MCPAIHelperProject.TaskRegistryExport.taskUpsertApply", "task.upsert.apply", leanTaskUpsertParams(req))
 	if err != nil {
 		return leanMutationResult{}, err
@@ -269,6 +358,9 @@ func upsertTask(ctx context.Context, req tasks.AddRequest, commands *command.Run
 }
 
 func batchUpsertTasks(ctx context.Context, req tasks.BatchUpsertRequest, commands *command.Runner, _ *tasks.Store) (leanBatchMutationResult, error) {
+	if err := ensureLeanTaskRegistryBootstrap(ctx, req.RepoPath, commands); err != nil {
+		return leanBatchMutationResult{}, err
+	}
 	items := make([]leanTaskUpsertRPCRequest, 0, len(req.Tasks))
 	for _, item := range req.Tasks {
 		items = append(items, leanTaskUpsertParams(item))
