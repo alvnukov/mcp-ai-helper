@@ -106,13 +106,13 @@ func registerPlanningTools(srv *server.MCPServer, deps *Server) {
 		basemcp.WithString("repo_path", basemcp.Required()),
 		basemcp.WithString("id", basemcp.Required()),
 		basemcp.WithString("current_model_level"),
-	), func(_ context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
 		var args taskPacketRequest
 		if err := bind(req, &args); err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
-		_, _, _, _, store := deps.loadDeps()
-		task, err := store.Get(tasks.GetRequest{RepoPath: args.RepoPath, ID: args.ID})
+		_, _, commands, _, store := deps.loadDeps()
+		task, _, err := readTask(ctx, args.RepoPath, args.ID, commands, store)
 		if err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
