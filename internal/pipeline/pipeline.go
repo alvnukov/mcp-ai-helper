@@ -18,7 +18,6 @@ import (
 	"github.com/zol/mcp-ai-helper/internal/evidence"
 	"github.com/zol/mcp-ai-helper/internal/fileops"
 	"github.com/zol/mcp-ai-helper/internal/gitops"
-	"github.com/zol/mcp-ai-helper/internal/project"
 	"github.com/zol/mcp-ai-helper/internal/provider"
 	"github.com/zol/mcp-ai-helper/internal/tasks"
 )
@@ -28,7 +27,6 @@ type Runner struct {
 	cfg         *config.Config
 	commands    *command.Runner
 	chatClient  provider.ChatClient
-	tasks       *tasks.Store
 	taskBackend TaskBackend
 }
 
@@ -38,28 +36,6 @@ type TaskBackend interface {
 	List(ctx context.Context, repoPath string) ([]tasks.Task, error)
 	SetStatus(ctx context.Context, req tasks.StatusRequest) (tasks.Task, error)
 	BatchUpsert(ctx context.Context, req tasks.BatchUpsertRequest) (tasks.BatchUpsertResult, error)
-}
-
-type legacyTaskBackend struct {
-	store *tasks.Store
-}
-
-func (b legacyTaskBackend) Get(_ context.Context, repoPath string, id string) (tasks.Task, error) {
-	return b.store.Get(tasks.GetRequest{RepoPath: repoPath, ID: id})
-}
-
-func (b legacyTaskBackend) List(_ context.Context, repoPath string) ([]tasks.Task, error) {
-	return b.store.List(tasks.ListRequest{RepoPath: repoPath})
-}
-
-func (b legacyTaskBackend) SetStatus(_ context.Context, req tasks.StatusRequest) (tasks.Task, error) {
-	return b.store.SetStatus(req)
-}
-
-func (b legacyTaskBackend) BatchUpsert(_ context.Context, req tasks.BatchUpsertRequest) (tasks.BatchUpsertResult, error) {
-	result, err := b.store.BatchUpsert(req)
-	result.Source = "legacy_registry"
-	return result, err
 }
 
 // Request describes the legacy command-analysis pipeline input.
@@ -190,15 +166,32 @@ func NewRunner(cfg *config.Config, chatClient provider.ChatClient) *Runner {
 
 // NewRunnerWithTaskBackend creates a workflow runner with an explicit task backend.
 func NewRunnerWithTaskBackend(cfg *config.Config, chatClient provider.ChatClient, taskBackend TaskBackend) *Runner {
-	projectStore, err := project.NewStore(cfg.CommandPolicy.LogDir)
-	if err != nil {
-		projectStore, _ = project.NewStore(".mcp-ai-helper")
+	return &Runner{cfg: cfg, commands: command.NewRunner(cfg.CommandPolicy), chatClient: chatClient, taskBackend: taskBackend}
+}
+
+func (r *Runner) requireTaskBackend() TaskBackend {
+	if r.taskBackend != nil {
+		return r.taskBackend
 	}
-	store := tasks.NewStore(projectStore)
-	if taskBackend == nil {
-		taskBackend = legacyTaskBackend{store: store}
-	}
-	return &Runner{cfg: cfg, commands: command.NewRunner(cfg.CommandPolicy), chatClient: chatClient, tasks: store, taskBackend: taskBackend}
+	return missingTaskBackend{}
+}
+
+type missingTaskBackend struct{}
+
+func (missingTaskBackend) Get(context.Context, string, string) (tasks.Task, error) {
+	return tasks.Task{}, errors.New("task backend is required; legacy task file store is disabled")
+}
+
+func (missingTaskBackend) List(context.Context, string) ([]tasks.Task, error) {
+	return nil, errors.New("task backend is required; legacy task file store is disabled")
+}
+
+func (missingTaskBackend) SetStatus(context.Context, tasks.StatusRequest) (tasks.Task, error) {
+	return tasks.Task{}, errors.New("task backend is required; legacy task file store is disabled")
+}
+
+func (missingTaskBackend) BatchUpsert(context.Context, tasks.BatchUpsertRequest) (tasks.BatchUpsertResult, error) {
+	return tasks.BatchUpsertResult{}, errors.New("task backend is required; legacy task file store is disabled")
 }
 
 // RunWorkflow executes either the stable steps DSL or the legacy edit/check/commit workflow.
@@ -653,7 +646,7 @@ func (r *Runner) executeWorkflowStep(ctx context.Context, repoPath string, step 
 			return WorkflowStepResult{}, err
 		}
 		args.RepoPath = repoPath
-		taskResult, err := r.taskBackend.BatchUpsert(ctx, args)
+		taskResult, err := r.requireTaskBackend().BatchUpsert(ctx, args)
 		if err != nil {
 			return WorkflowStepResult{}, err
 		}
@@ -702,7 +695,7 @@ func (r *Runner) transitionTasks(ctx context.Context, repoPath string, req Workf
 		if taskID == "" {
 			return nil, errors.New("task id is empty")
 		}
-		task, err := r.taskBackend.Get(ctx, repoPath, taskID)
+		task, err := r.requireTaskBackend().Get(ctx, repoPath, taskID)
 		if err != nil {
 			return nil, err
 		}
@@ -717,7 +710,7 @@ func (r *Runner) transitionTasks(ctx context.Context, repoPath string, req Workf
 
 	updated := make([]tasks.Task, 0, len(current))
 	for _, task := range current {
-		item, err := r.taskBackend.SetStatus(ctx, tasks.StatusRequest{RepoPath: repoPath, ID: task.ID, Status: to})
+		item, err := r.requireTaskBackend().SetStatus(ctx, tasks.StatusRequest{RepoPath: repoPath, ID: task.ID, Status: to})
 		if err != nil {
 			return nil, err
 		}
@@ -727,7 +720,7 @@ func (r *Runner) transitionTasks(ctx context.Context, repoPath string, req Workf
 }
 
 func (r *Runner) validateTaskGraph(ctx context.Context, repoPath string) error {
-	items, err := r.taskBackend.List(ctx, repoPath)
+	items, err := r.requireTaskBackend().List(ctx, repoPath)
 	if err != nil {
 		return err
 	}
@@ -919,7 +912,10 @@ func (r *Runner) evalTaskCondition(repoPath string, fields []string) bool {
 	if len(path) != 2 || path[1] != "status" {
 		return false
 	}
-	task, err := r.tasks.Get(tasks.GetRequest{RepoPath: repoPath, ID: path[0]})
+	if r.taskBackend == nil {
+		return false
+	}
+	task, err := r.taskBackend.Get(context.Background(), repoPath, path[0])
 	return err == nil && compareString(task.Status, fields[1], fields[2])
 }
 
@@ -1037,7 +1033,7 @@ func (r *Runner) updateTaskStatus(ctx context.Context, taskID string, status str
 	if !r.cfg.LayerEnabled("tasks") {
 		return fmt.Errorf("task layer is disabled")
 	}
-	_, err := r.taskBackend.SetStatus(ctx, tasks.StatusRequest{
+	_, err := r.requireTaskBackend().SetStatus(ctx, tasks.StatusRequest{
 		RepoPath: repoPath,
 		ID:       taskID,
 		Status:   status,

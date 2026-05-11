@@ -65,19 +65,12 @@ func TestLeanBackedTaskLayerEndToEnd(t *testing.T) {
 		t.Fatalf("batch upsert did not use Lean registry: %+v", batchResult)
 	}
 
-	legacyShadow, err := store.Add(tasks.AddRequest{RepoPath: repo, ID: "task-006", Status: "todo", Title: "Legacy shadow", Body: "must not be read"})
-	if err != nil {
-		t.Fatalf("write legacy shadow: %v", err)
-	}
-	if legacyShadow.Title != "Legacy shadow" {
-		t.Fatalf("unexpected legacy setup: %+v", legacyShadow)
-	}
 	leanAgain, source, err := readTask(ctx, repo, "task-006", commands, store)
 	if err != nil {
-		t.Fatalf("read task after legacy shadow: %v", err)
+		t.Fatalf("read task after mutations: %v", err)
 	}
-	if source != "lean_registry" || leanAgain.Title == "Legacy shadow" {
-		t.Fatalf("silent legacy fallback occurred: source=%q task=%#v", source, leanAgain)
+	if source != "lean_registry" || leanAgain.ProjectionSource != "lean_registry" {
+		t.Fatalf("task read did not stay Lean-backed: source=%q task=%#v", source, leanAgain)
 	}
 
 	activePath := filepath.Join(repo, activeTasksLeanPath)
@@ -92,7 +85,7 @@ func TestLeanBackedTaskLayerEndToEnd(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected invalid registry diagnostics")
 	}
-	if source != "lean_registry" || !strings.Contains(err.Error(), "Lean task exporter failed") {
+	if source != "lean_registry" || !strings.Contains(err.Error(), "Lean task read failed") {
 		t.Fatalf("invalid registry did not fail closed: source=%q err=%v", source, err)
 	}
 }

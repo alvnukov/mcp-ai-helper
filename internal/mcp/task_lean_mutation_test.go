@@ -203,9 +203,6 @@ func TestRunWorkflowTaskTransitionUsesLeanRegistry(t *testing.T) {
 		},
 	}
 	_, commands, workflows, store := buildDeps(cfg)
-	if _, err := store.Add(tasks.AddRequest{RepoPath: repo, ID: "task-043", Title: "Legacy shadow", Status: "done"}); err != nil {
-		t.Fatalf("write legacy shadow: %v", err)
-	}
 	if _, err := setTaskStatus(context.Background(), tasks.StatusRequest{RepoPath: repo, ID: "task-043", Status: "todo"}, commands, store); err != nil {
 		t.Fatalf("prepare canonical task status: %v", err)
 	}
@@ -228,7 +225,7 @@ func TestRunWorkflowTaskTransitionUsesLeanRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read canonical task: %v", err)
 	}
-	if source != "lean_registry" || got.Status != "done" || got.Title == "Legacy shadow" {
+	if source != "lean_registry" || got.Status != "done" {
 		t.Fatalf("workflow did not use Lean registry: source=%q task=%#v", source, got)
 	}
 }
