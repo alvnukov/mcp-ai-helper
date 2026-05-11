@@ -17,13 +17,15 @@ import (
 type configReloadFunc func(path string) (*config.Config, error)
 
 type configPathRequest struct {
-	Path string `json:"path"`
+	Path     string `json:"path"`
+	RepoPath string `json:"repo_path"`
 }
 
 type configReplaceRequest struct {
 	Path       string `json:"path"`
 	ConfigYAML string `json:"config_yaml"`
 	Reload     *bool  `json:"reload"`
+	RepoPath   string `json:"repo_path"`
 }
 
 func registerConfigTools(srv *server.MCPServer, deps *Server, reload configReloadFunc) {
@@ -34,8 +36,9 @@ func registerConfigTools(srv *server.MCPServer, deps *Server, reload configReloa
 	})
 
 	srv.AddTool(basemcp.NewTool("config_read",
-		basemcp.WithDescription("Return the active sanitized config, or validate/read another config path without exposing literal api_key values."),
+		basemcp.WithDescription("Return the active sanitized config, or validate/read another config path without exposing literal api_key values. Pass repo_path to merge repo-local .mcp-ai-helper.yaml."),
 		basemcp.WithString("path", basemcp.Description("Optional config path. Empty means active in-memory config.")),
+		basemcp.WithString("repo_path", basemcp.Description("Optional repo root to load and merge .mcp-ai-helper.yaml.")),
 	), func(_ context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
 		var args configPathRequest
 		if err := bind(req, &args); err != nil {
@@ -43,7 +46,18 @@ func registerConfigTools(srv *server.MCPServer, deps *Server, reload configReloa
 		}
 		if strings.TrimSpace(args.Path) == "" {
 			cfg, _, _, _, _ := deps.loadDeps()
-			return structured(map[string]any{"config": cfg, "config_path": cfg.SourcePath, "source": "memory"})
+			result := map[string]any{"config": cfg, "config_path": cfg.SourcePath, "source": "memory"}
+			if strings.TrimSpace(args.RepoPath) != "" {
+				repoCfg, err := config.LoadRepoConfig(args.RepoPath)
+				if err != nil {
+					return basemcp.NewToolResultError(err.Error()), nil
+				}
+				if repoCfg != nil {
+					result["repo_config"] = repoCfg
+					result["repo_config_path"] = repoCfg.SourcePath
+				}
+			}
+			return structured(result)
 		}
 		loaded, err := config.Load(args.Path)
 		if err != nil {
@@ -53,9 +67,10 @@ func registerConfigTools(srv *server.MCPServer, deps *Server, reload configReloa
 	})
 
 	srv.AddTool(basemcp.NewTool("config_replace",
-		basemcp.WithDescription("Validate and atomically replace the complete YAML config. Reloads the running helper by default, without restarting Codex."),
+		basemcp.WithDescription("Validate and atomically replace the complete YAML config. Reloads the running helper by default, without restarting Codex. Cannot write repo-local .mcp-ai-helper.yaml files."),
 		basemcp.WithString("config_yaml", basemcp.Required(), basemcp.Description("Complete YAML config document.")),
 		basemcp.WithString("path", basemcp.Description("Optional config path. Empty means the active config path.")),
+		basemcp.WithString("repo_path", basemcp.Description("Repository root from the calling LLM. Used to detect repo-local config writes.")),
 		basemcp.WithBoolean("reload", basemcp.Description("Reload runtime after writing. Defaults to true.")),
 	), func(_ context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
 		var args configReplaceRequest
@@ -64,6 +79,12 @@ func registerConfigTools(srv *server.MCPServer, deps *Server, reload configReloa
 		}
 		cfg, _, _, _, _ := deps.loadDeps()
 		path := effectiveConfigPath(args.Path, cfg.SourcePath)
+
+		// Repo-local configs are user-editable only.
+		if config.IsRepoConfigPath(path) {
+			return basemcp.NewToolResultError("repo config (.mcp-ai-helper.yaml) is user-editable only; use config_read with repo_path to inspect it"), nil
+		}
+
 		loaded, err := writeValidatedConfig(path, args.ConfigYAML)
 		if err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
