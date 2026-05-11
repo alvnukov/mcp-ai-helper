@@ -256,7 +256,7 @@ func TestConfigToolsRegistered(t *testing.T) {
 	cfg := &config.Config{AssistantGuidance: config.DefaultAssistantGuidance()}
 	srv := New(cfg)
 	tools := srv.ListTools()
-	for _, name := range []string{"config_schema", "config_read", "config_replace", "config_reload"} {
+	for _, name := range []string{"config_schema", "config_read", "config_replace", "config_reload", "feature_list", "feature_get", "feature_enable", "feature_disable", "feature_reset"} {
 		if _, ok := tools[name]; !ok {
 			t.Fatalf("%s tool is not registered", name)
 		}

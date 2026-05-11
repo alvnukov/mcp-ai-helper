@@ -66,13 +66,39 @@ type ToolPermissions struct {
 }
 
 // RepoConfig is a repo-local optional config loaded from .mcp-ai-helper.yaml.
-// Only the user may edit this file; config_replace refuses to write it.
+// config_replace refuses to write this file; feature tools may update only the features section.
 type RepoConfig struct {
 	SourcePath    string          `yaml:"-" json:"repo_config_path"`
 	Permissions   RepoPermissions `yaml:"permissions" json:"permissions"`
 	CommandPolicy *struct {
 		AllowedCWDs []string `yaml:"allowed_cwds" json:"allowed_cwds"`
 	} `yaml:"command_policy" json:"command_policy"`
+	Features FeatureState `yaml:"features" json:"features"`
+}
+
+// FeatureState stores explicit feature overrides and a compact audit trail.
+type FeatureState struct {
+	Overrides map[string]FeatureOverride `yaml:"overrides" json:"overrides"`
+	Audit     []FeatureAuditEntry        `yaml:"audit" json:"audit,omitempty"`
+}
+
+// FeatureOverride stores one explicit feature value.
+type FeatureOverride struct {
+	Enabled   bool   `yaml:"enabled" json:"enabled"`
+	Reason    string `yaml:"reason,omitempty" json:"reason,omitempty"`
+	UpdatedAt string `yaml:"updated_at,omitempty" json:"updated_at,omitempty"`
+}
+
+// FeatureAuditEntry records one feature override mutation.
+type FeatureAuditEntry struct {
+	Timestamp       string `yaml:"timestamp" json:"timestamp"`
+	Scope           string `yaml:"scope" json:"scope"`
+	FeatureID       string `yaml:"feature_id" json:"feature_id"`
+	PreviousEnabled bool   `yaml:"previous_enabled" json:"previous_enabled"`
+	PreviousSource  string `yaml:"previous_source" json:"previous_source"`
+	NewEnabled      bool   `yaml:"new_enabled" json:"new_enabled"`
+	NewSource       string `yaml:"new_source" json:"new_source"`
+	Reason          string `yaml:"reason,omitempty" json:"reason,omitempty"`
 }
 
 // LayerPolicy controls optional server capability layers.

@@ -66,8 +66,10 @@ func Schema() map[string]any {
 			{Path: "command_policy.log_compress", Type: "bool", Default: "true", Description: "Allows old command records to be compressed by retention jobs."},
 			{Path: "pipeline_policy.max_return_chars", Type: "int", Default: "4000", Description: "Maximum compact result size returned from pipelines."},
 			{Path: "pipeline_policy.require_evidence_for_analysis", Type: "bool", Default: "true", Description: "Requires model conclusions to cite extracted evidence lines."},
+			{Path: "features.overrides.<id>.enabled", Type: "bool", Description: "Feature override value. Global overrides live in helper-owned feature state; repo-local overrides live in .mcp-ai-helper.yaml and take precedence over global overrides."},
+			{Path: "features.audit", Type: "[]record", Description: "Compact helper-owned audit trail for feature changes: scope, previous value/source, new value/source, timestamp, and optional reason."},
 			{Path: "permissions.tools.deny", Type: "[]string", Description: "Repo-local only (.mcp-ai-helper.yaml). MCP tool names denied for LLM in this repo. User-editable; config_replace refuses to write repo configs."},
-			{Path: "repo_config", Type: "file", Default: ".mcp-ai-helper.yaml (optional)", Description: "Per-repository user-owned config merged on top of global config. Place in repo root. LLM can read via config_read with repo_path; LLM cannot modify."},
+			{Path: "repo_config", Type: "file", Default: ".mcp-ai-helper.yaml (optional)", Description: "Per-repository config merged on top of global config. Feature tools may create/update only the features section and ensure this file is gitignored; config_replace refuses to write repo configs."},
 		},
 	}
 }
