@@ -24,18 +24,20 @@ type leanTaskListPayload struct {
 }
 
 type leanTaskProjection struct {
-	ID           string   `json:"id"`
-	TaskType     string   `json:"task_type"`
-	Branch       string   `json:"branch"`
-	WorktreePath string   `json:"worktree_path"`
-	Status       string   `json:"status"`
-	Title        string   `json:"title"`
-	Body         string   `json:"body"`
-	Priority     string   `json:"priority"`
-	ModelLevel   string   `json:"model_level"`
-	Tags         []string `json:"tags"`
-	CreatedAt    string   `json:"created_at"`
-	UpdatedAt    string   `json:"updated_at"`
+	ID                 string   `json:"id"`
+	TaskType           string   `json:"task_type"`
+	Branch             string   `json:"branch"`
+	WorktreePath       string   `json:"worktree_path"`
+	Status             string   `json:"status"`
+	Title              string   `json:"title"`
+	Body               string   `json:"body"`
+	Priority           string   `json:"priority"`
+	ModelLevel         string   `json:"model_level"`
+	Tags               []string `json:"tags"`
+	AcceptanceCriteria []string `json:"acceptance_criteria"`
+	VerificationPlan   []string `json:"verification_plan"`
+	CreatedAt          string   `json:"created_at"`
+	UpdatedAt          string   `json:"updated_at"`
 }
 
 var ErrNoLakeWorkspace = errors.New("no Lake workspace detected; run lake_init to bootstrap a Lean project")
@@ -73,42 +75,6 @@ func readTask(ctx context.Context, repoPath string, id string, commands *command
 	return leanTask, "lean_registry", nil
 }
 
-func readLeanTaskList(ctx context.Context, repoPath string, commands *command.Runner, args []string) ([]tasks.Task, bool, error) {
-	result, usedLean, err := runLeanTaskExporter(ctx, repoPath, commands, args)
-	if err != nil || !usedLean {
-		return nil, usedLean, err
-	}
-	var payload leanTaskListPayload
-	if err := json.Unmarshal([]byte(strings.Join(result.Output, "\n")), &payload); err != nil {
-		return nil, true, fmt.Errorf("decode Lean task export: %w", err)
-	}
-	out := make([]tasks.Task, 0, len(payload.Tasks))
-	for _, item := range payload.Tasks {
-		task, err := item.toTask()
-		if err != nil {
-			return nil, true, err
-		}
-		out = append(out, tasks.WithWorktreeContext(repoPath, task))
-	}
-	return out, true, nil
-}
-
-func readLeanTask(ctx context.Context, repoPath string, id string, commands *command.Runner) (tasks.Task, bool, error) {
-	result, usedLean, err := runLeanTaskExporter(ctx, repoPath, commands, []string{"--get", id})
-	if err != nil || !usedLean {
-		return tasks.Task{}, usedLean, err
-	}
-	var payload leanTaskProjection
-	if err := json.Unmarshal([]byte(strings.Join(result.Output, "\n")), &payload); err != nil {
-		return tasks.Task{}, true, fmt.Errorf("decode Lean task export: %w", err)
-	}
-	task, err := payload.toTask()
-	if err != nil {
-		return tasks.Task{}, true, err
-	}
-	return tasks.WithWorktreeContext(repoPath, task), true, nil
-}
-
 func leanTaskExporterConfigured(repoPath string) (bool, error) {
 	ws, err := lake.ResolveWorkspace(repoPath)
 	if err != nil {
@@ -131,36 +97,108 @@ func leanTaskExporterConfigured(repoPath string) (bool, error) {
 	return true, nil
 }
 
-func runLeanTaskExporter(ctx context.Context, repoPath string, commands *command.Runner, args []string) (lake.CommandResult, bool, error) {
+func readLeanTaskList(ctx context.Context, repoPath string, commands *command.Runner, args []string) ([]tasks.Task, bool, error) {
 	configured, err := leanTaskExporterConfigured(repoPath)
 	if err != nil {
-		return lake.CommandResult{}, true, err
+		return nil, true, err
 	}
 	if !configured {
-		return lake.CommandResult{}, false, nil
+		return nil, false, nil
 	}
-
-	result, err := lake.RunExe(ctx, repoPath, leanTaskRegistryExporter, args, lake.CommandRunner{Commands: commands, TimeoutSeconds: 20})
+	if commands != nil {
+		if err := validateLeanRegistryBuild(ctx, repoPath, commands, "before read"); err != nil {
+			lake.ResetServerRPC(repoPath)
+			return nil, true, fmt.Errorf("Lean task read failed: %w", err)
+		}
+	}
+	active, err := leanTaskListMode(args)
 	if err != nil {
-		return lake.CommandResult{}, false, err
+		return nil, true, err
 	}
-	if !result.WorkspaceDetected {
-		return result, false, nil
+	envelope, err := callLeanTaskRead(ctx, repoPath, "MCPAIHelperProject.TaskRegistryExport.taskList", "task.list", map[string]bool{"active": active})
+	if err != nil {
+		return nil, true, err
 	}
-	if result.ExitCode != 0 {
-		diagnostic := strings.TrimSpace(strings.Join(result.Diagnostics, "\n"))
-		if diagnostic == "" {
-			diagnostic = result.Blocker
+	var payload leanTaskListPayload
+	if err := json.Unmarshal(envelope.Data, &payload); err != nil {
+		return nil, true, fmt.Errorf("decode Lean task list RPC: %w", err)
+	}
+	out := make([]tasks.Task, 0, len(payload.Tasks))
+	for _, item := range payload.Tasks {
+		task, err := item.toTask()
+		if err != nil {
+			return nil, true, err
 		}
-		if diagnostic == "" {
-			diagnostic = "Lean task exporter failed"
+		out = append(out, tasks.WithWorktreeContext(repoPath, task))
+	}
+	return out, true, nil
+}
+
+func readLeanTask(ctx context.Context, repoPath string, id string, commands *command.Runner) (tasks.Task, bool, error) {
+	configured, err := leanTaskExporterConfigured(repoPath)
+	if err != nil {
+		return tasks.Task{}, true, err
+	}
+	if !configured {
+		return tasks.Task{}, false, nil
+	}
+	if commands != nil {
+		if err := validateLeanRegistryBuild(ctx, repoPath, commands, "before read"); err != nil {
+			lake.ResetServerRPC(repoPath)
+			return tasks.Task{}, true, fmt.Errorf("Lean task read failed: %w", err)
 		}
-		return result, true, fmt.Errorf("Lean task exporter failed: %s", diagnostic)
 	}
-	if len(result.Output) == 0 {
-		return result, true, fmt.Errorf("Lean task exporter produced no JSON output")
+	envelope, err := callLeanTaskRead(ctx, repoPath, "MCPAIHelperProject.TaskRegistryExport.taskGet", "task.get", map[string]string{"id": id})
+	if err != nil {
+		return tasks.Task{}, true, err
 	}
-	return result, true, nil
+	var payload leanTaskProjection
+	if err := json.Unmarshal(envelope.Data, &payload); err != nil {
+		return tasks.Task{}, true, fmt.Errorf("decode Lean task get RPC: %w", err)
+	}
+	task, err := payload.toTask()
+	if err != nil {
+		return tasks.Task{}, true, err
+	}
+	return tasks.WithWorktreeContext(repoPath, task), true, nil
+}
+
+func leanTaskListMode(args []string) (bool, error) {
+	if len(args) != 1 {
+		return false, fmt.Errorf("unsupported Lean task list args: %v", args)
+	}
+	switch args[0] {
+	case "--list-active":
+		return true, nil
+	case "--list-all":
+		return false, nil
+	default:
+		return false, fmt.Errorf("unsupported Lean task list arg: %s", args[0])
+	}
+}
+
+func callLeanTaskRead(ctx context.Context, repoPath string, method string, operation string, params any) (leanRegistryEnvelope, error) {
+	result, err := lake.CallServerRPC(ctx, repoPath, lake.RPCRequest{SourceFile: "MCPAIHelperProject/TaskRegistryExport.lean", Method: method, Params: params, TimeoutSeconds: 20})
+	if err != nil {
+		return leanRegistryEnvelope{}, err
+	}
+	if result.Blocker != "" {
+		return leanRegistryEnvelope{}, fmt.Errorf("Lean task read blocker: %s", result.Blocker)
+	}
+	var envelope leanRegistryEnvelope
+	if err := json.Unmarshal(result.Result, &envelope); err != nil {
+		return leanRegistryEnvelope{}, fmt.Errorf("decode Lean task read envelope: %w", err)
+	}
+	if envelope.SchemaVersion != 1 {
+		return leanRegistryEnvelope{}, fmt.Errorf("unsupported Lean task read schema_version: %d", envelope.SchemaVersion)
+	}
+	if envelope.Operation != operation {
+		return leanRegistryEnvelope{}, fmt.Errorf("unexpected Lean task read operation: %q", envelope.Operation)
+	}
+	if !envelope.OK {
+		return leanRegistryEnvelope{}, fmt.Errorf("Lean task read rejected: %s", leanRegistryDiagnosticsMessage(envelope.Diagnostics))
+	}
+	return envelope, nil
 }
 
 func (p leanTaskProjection) toTask() (tasks.Task, error) {
@@ -180,19 +218,21 @@ func (p leanTaskProjection) toTask() (tasks.Task, error) {
 		}
 	}
 	return tasks.Task{
-		ID:               p.ID,
-		TaskType:         p.TaskType,
-		Branch:           p.Branch,
-		WorktreePath:     p.WorktreePath,
-		Status:           p.Status,
-		Title:            p.Title,
-		Body:             p.Body,
-		Priority:         p.Priority,
-		ModelLevel:       modelLevel,
-		Tags:             p.Tags,
-		ProjectionSource: "lean_registry",
-		CreatedAt:        createdAt,
-		UpdatedAt:        updatedAt,
+		ID:                 p.ID,
+		TaskType:           p.TaskType,
+		Branch:             p.Branch,
+		WorktreePath:       p.WorktreePath,
+		Status:             p.Status,
+		Title:              p.Title,
+		Body:               p.Body,
+		Priority:           p.Priority,
+		ModelLevel:         modelLevel,
+		Tags:               p.Tags,
+		AcceptanceCriteria: p.AcceptanceCriteria,
+		VerificationPlan:   p.VerificationPlan,
+		ProjectionSource:   "lean_registry",
+		CreatedAt:          createdAt,
+		UpdatedAt:          updatedAt,
 	}, nil
 }
 

@@ -304,7 +304,7 @@ func runTaskRegistryExporter(t *testing.T, args ...string) CommandResult {
 		Commands: command.NewRunner(config.CommandPolicy{
 			AllowedCWDs:           []string{repoRoot},
 			DefaultTimeoutSeconds: 20,
-			MaxOutputBytes:        20000,
+			MaxOutputBytes:        200000,
 			MaxLines:              80,
 		}),
 		TimeoutSeconds: 20,
