@@ -13,9 +13,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"syscall"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/zol/mcp-ai-helper/internal/config"
@@ -190,7 +190,7 @@ func (r *Runner) RunFilteredInRepo(ctx context.Context, cmd string, repoPath str
 	if strings.TrimSpace(repoPath) == "" {
 		return Result{}, errors.New("repo_path is required")
 	}
-	repo, err := r.safeCWD(repoPath)
+	repo, err := resolveDir(repoPath)
 	if err != nil {
 		return Result{}, err
 	}
@@ -218,11 +218,11 @@ func (r *Runner) CleanupHistory() error {
 	return r.history.Cleanup()
 }
 
-func (r *Runner) safeCWD(cwd string) (string, error) {
-	if cwd == "" {
-		cwd = "."
+func resolveDir(path string) (string, error) {
+	if strings.TrimSpace(path) == "" {
+		path = "."
 	}
-	abs, err := filepath.Abs(cwd)
+	abs, err := filepath.Abs(path)
 	if err != nil {
 		return "", err
 	}
@@ -232,6 +232,14 @@ func (r *Runner) safeCWD(cwd string) (string, error) {
 	}
 	if !info.IsDir() {
 		return "", fmt.Errorf("cwd %q is not a directory", abs)
+	}
+	return abs, nil
+}
+
+func (r *Runner) safeCWD(cwd string) (string, error) {
+	abs, err := resolveDir(cwd)
+	if err != nil {
+		return "", err
 	}
 	for _, allowed := range r.policy.AllowedCWDs {
 		var allowedAbs string
