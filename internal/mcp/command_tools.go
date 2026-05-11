@@ -26,7 +26,10 @@ func registerCommandTools(srv *server.MCPServer, deps *Server) {
 		if err := bind(req, &args); err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
-		_, _, cmds, _, _ := deps.loadDeps()
+		cmds, err := deps.commandRunnerForRepo(args.RepoPath, "collect_command_output")
+		if err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
 		result, err := cmds.RunFilteredInRepo(ctx, args.Command, args.RepoPath, args.CWD, args.TimeoutSeconds, args.Filter)
 		if err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil

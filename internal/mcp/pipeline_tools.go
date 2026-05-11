@@ -96,7 +96,10 @@ func registerPipelineTools(srv *server.MCPServer, deps *Server) {
 		if err := bind(req, &args); err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
-		_, _, _, pipes, _ := deps.loadDeps()
+		pipes, err := deps.pipelineRunnerForRepo(args.RepoPath, "run_pipeline")
+		if err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
 		result, err := pipes.Run(ctx, args)
 		if err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
@@ -179,7 +182,10 @@ func registerPipelineTools(srv *server.MCPServer, deps *Server) {
 			}
 			return structured(preview)
 		}
-		_, _, _, pipes, _ := deps.loadDeps()
+		pipes, err := deps.pipelineRunnerForRepo(args.RepoPath, "run_workflow")
+		if err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
 		result, err := pipes.RunWorkflow(ctx, args.WorkflowRequest)
 		if err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil

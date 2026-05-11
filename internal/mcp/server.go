@@ -101,6 +101,45 @@ func buildDeps(cfg *config.Config) (provider.ChatClient, *command.Runner, *pipel
 	return chat, cmds, pipes, store
 }
 
+func (s *Server) commandRunnerForRepo(repoPath string, toolName string) (*command.Runner, error) {
+	cfg, _, cmds, _, _ := s.loadDeps()
+	repoCfg, err := config.LoadRepoConfig(repoPath)
+	if err != nil {
+		return nil, err
+	}
+	if repoCfg == nil {
+		return cmds, nil
+	}
+	if repoCfg.ToolDenied(toolName) {
+		return nil, fmt.Errorf("tool %q is denied by repo-local config", toolName)
+	}
+	merged, err := config.MergeRepoConfig(cfg, repoCfg, repoPath)
+	if err != nil {
+		return nil, err
+	}
+	return command.NewRunner(merged.CommandPolicy), nil
+}
+
+func (s *Server) pipelineRunnerForRepo(repoPath string, toolName string) (*pipeline.Runner, error) {
+	cfg, chat, _, pipes, store := s.loadDeps()
+	repoCfg, err := config.LoadRepoConfig(repoPath)
+	if err != nil {
+		return nil, err
+	}
+	if repoCfg == nil {
+		return pipes, nil
+	}
+	if repoCfg.ToolDenied(toolName) {
+		return nil, fmt.Errorf("tool %q is denied by repo-local config", toolName)
+	}
+	merged, err := config.MergeRepoConfig(cfg, repoCfg, repoPath)
+	if err != nil {
+		return nil, err
+	}
+	cmds := command.NewRunner(merged.CommandPolicy)
+	return pipeline.NewRunnerWithTaskBackend(merged, chat, leanTaskBackend{commands: cmds, store: store}), nil
+}
+
 type leanTaskBackend struct {
 	commands *command.Runner
 	store    *tasks.Store

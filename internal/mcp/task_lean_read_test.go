@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -67,7 +68,7 @@ func TestReadCurrentTasksRequiresLeanRegistry(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected missing Lean registry error")
 	}
-	if source != "lean_registry" || !strings.Contains(err.Error(), "Lean task registry is required") {
+	if source != "lean_registry" || !errors.Is(err, ErrNoLakeWorkspace) {
 		t.Fatalf("unexpected source=%q err=%v", source, err)
 	}
 }

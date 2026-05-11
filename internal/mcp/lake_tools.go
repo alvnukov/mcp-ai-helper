@@ -48,7 +48,10 @@ func registerLakeTools(srv *server.MCPServer, deps *Server) {
 		if err := bind(req, &args); err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
-		_, _, commands, _, _ := deps.loadDeps()
+		commands, err := deps.commandRunnerForRepo(args.RepoPath, "lake_smoke")
+		if err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
 		result, err := runLakeSmoke(ctx, args, commands)
 		if err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
@@ -64,7 +67,10 @@ func registerLakeTools(srv *server.MCPServer, deps *Server) {
 		if err := bind(req, &args); err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
-		_, _, commands, _, _ := deps.loadDeps()
+		commands, err := deps.commandRunnerForRepo(args.RepoPath, "lake_init")
+		if err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
 		result, err := runLakeInit(ctx, args, commands)
 		if err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
@@ -96,10 +102,11 @@ func runLakeInit(ctx context.Context, req lakeInitRequest, commands *command.Run
 
 	toolchainPath := filepath.Join(absPath, "lean-toolchain")
 	lakefilePath := filepath.Join(absPath, "lakefile.lean")
+	lakefileTomlPath := filepath.Join(absPath, "lakefile.toml")
 	mainPath := filepath.Join(absPath, "Bootstrap.lean")
 
-	// Idempotent: if workspace already exists, verify and return
-	if fileExists(toolchainPath) && fileExists(lakefilePath) {
+	// Idempotent: if workspace already exists, verify and return.
+	if fileExists(toolchainPath) && (fileExists(lakefilePath) || fileExists(lakefileTomlPath)) {
 		runner := lake.CommandRunner{Commands: commands, TimeoutSeconds: 30}
 		buildResult, err := lake.Build(ctx, absPath, runner)
 		passed := err == nil && buildResult.ExitCode == 0
@@ -125,8 +132,8 @@ func runLakeInit(ctx context.Context, req lakeInitRequest, commands *command.Run
 		}
 	}
 
-	// Write lakefile.lean
-	if !fileExists(lakefilePath) {
+	// Write lakefile.lean only when no Lake file exists.
+	if !fileExists(lakefilePath) && !fileExists(lakefileTomlPath) {
 		content := `import Lake
 open Lake DSL
 

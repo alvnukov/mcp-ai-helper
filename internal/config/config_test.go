@@ -148,6 +148,51 @@ func TestDefaultConfigPathUsesHomeHelperDir(t *testing.T) {
 	}
 }
 
+func TestLoadRepoConfigAndMergePolicy(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repo, repoConfigFile), []byte(`permissions:
+  tools:
+    deny: [collect_command_output]
+command_policy:
+  allowed_cwds: [safe]
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(repo, "safe"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	repoCfg, err := LoadRepoConfig(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repoCfg == nil || !repoCfg.ToolDenied("collect_command_output") {
+		t.Fatalf("repo permissions were not loaded: %#v", repoCfg)
+	}
+	base := &Config{CommandPolicy: CommandPolicy{AllowedCWDs: []string{"."}, DefaultTimeoutSeconds: 20}}
+	merged, err := MergeRepoConfig(base, repoCfg, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(repo, "safe")
+	if len(merged.CommandPolicy.AllowedCWDs) != 1 || merged.CommandPolicy.AllowedCWDs[0] != want {
+		t.Fatalf("allowed_cwds = %#v, want %q", merged.CommandPolicy.AllowedCWDs, want)
+	}
+	if base.CommandPolicy.AllowedCWDs[0] != "." {
+		t.Fatalf("base config mutated: %#v", base.CommandPolicy.AllowedCWDs)
+	}
+}
+
+func TestMergeRepoConfigRejectsEscapingAllowedCWD(t *testing.T) {
+	repo := t.TempDir()
+	repoCfg := &RepoConfig{CommandPolicy: &struct {
+		AllowedCWDs []string `yaml:"allowed_cwds" json:"allowed_cwds"`
+	}{AllowedCWDs: []string{".."}}}
+	_, err := MergeRepoConfig(&Config{}, repoCfg, repo)
+	if err == nil || !strings.Contains(err.Error(), "escapes repo_path") {
+		t.Fatalf("expected escape error, got %v", err)
+	}
+}
+
 func TestSchemaDocumentsModelDrivenConfig(t *testing.T) {
 	schema := Schema()
 	fields, ok := schema["fields"].([]FieldDoc)
