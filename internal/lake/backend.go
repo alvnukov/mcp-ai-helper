@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zol/mcp-ai-helper/internal/command"
@@ -139,8 +140,43 @@ func RunExe(ctx context.Context, repoPath string, exeName string, exeArgs []stri
 	return runner.Run(ctx, ws.Dir, args)
 }
 
-// CallServerRPC starts a bounded transient lake serve process and calls one Lean RPC method.
+var defaultServerManager = newServerManager()
+
+type serverManager struct {
+	mu      sync.Mutex
+	servers map[string]*serverProcess
+}
+
+type serverProcess struct {
+	mu             sync.Mutex
+	cmd            *exec.Cmd
+	stdin          io.WriteCloser
+	reader         *bufio.Reader
+	stderr         *serverLimitBuffer
+	waitDone       chan struct{}
+	nextID         int
+	openedVersions map[string]int
+}
+
+func newServerManager() *serverManager {
+	return &serverManager{servers: map[string]*serverProcess{}}
+}
+
+// CallServerRPC calls one Lean RPC method through a shared per-workspace lake serve process.
 func CallServerRPC(ctx context.Context, repoPath string, req RPCRequest) (RPCResult, error) {
+	return defaultServerManager.CallRPC(ctx, repoPath, req)
+}
+
+// ResetServerRPC drops the shared lake serve process for a workspace after an RPC mutates imported Lean files.
+func ResetServerRPC(repoPath string) {
+	ws, err := ResolveWorkspace(repoPath)
+	if err != nil {
+		return
+	}
+	defaultServerManager.reset(ws.Dir)
+}
+
+func (m *serverManager) CallRPC(ctx context.Context, repoPath string, req RPCRequest) (RPCResult, error) {
 	ws, err := ResolveWorkspace(repoPath)
 	if err != nil {
 		return RPCResult{WorkspaceDetected: false, Blocker: err.Error()}, nil
@@ -149,7 +185,7 @@ func CallServerRPC(ctx context.Context, repoPath string, req RPCRequest) (RPCRes
 	if sourceBlocker != "" {
 		return RPCResult{WorkspaceDetected: true, WorkspaceDir: ws.Dir, Blocker: sourceBlocker}, nil
 	}
-	// #nosec G304 -- sourceAbs from resolveRPCSource, validated workspace path
+	// #nosec G304 -- sourceAbs from resolveRPCSource, validated workspace path.
 	source, err := os.ReadFile(sourceAbs)
 	if err != nil {
 		return RPCResult{WorkspaceDetected: true, WorkspaceDir: ws.Dir, Blocker: "Lean RPC source is not accessible: " + sourceRel}, nil
@@ -165,52 +201,127 @@ func CallServerRPC(ctx context.Context, repoPath string, req RPCRequest) (RPCRes
 	runCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	defer cancel()
 
+	server, err := m.server(runCtx, ws)
+	if err != nil {
+		return RPCResult{}, err
+	}
+	result, err := server.call(runCtx, ws, sourceAbs, string(source), method, req.Params)
+	if err != nil {
+		m.drop(ws.Dir, server)
+		if ctxErr := runCtx.Err(); ctxErr != nil {
+			err = ctxErr
+		}
+		return serverRPCBlocker(ws, method, server.stderr, err), nil
+	}
+	return result, nil
+}
+
+func (m *serverManager) server(ctx context.Context, ws Workspace) (*serverProcess, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if server := m.servers[ws.Dir]; server != nil {
+		return server, nil
+	}
+	server, err := startServerProcess(ctx, ws)
+	if err != nil {
+		return nil, err
+	}
+	m.servers[ws.Dir] = server
+	return server, nil
+}
+
+func (m *serverManager) drop(workspaceDir string, server *serverProcess) {
+	m.mu.Lock()
+	if current := m.servers[workspaceDir]; current == server {
+		delete(m.servers, workspaceDir)
+	}
+	m.mu.Unlock()
+	server.terminate()
+}
+
+func (m *serverManager) reset(workspaceDir string) {
+	m.mu.Lock()
+	server := m.servers[workspaceDir]
+	delete(m.servers, workspaceDir)
+	m.mu.Unlock()
+	if server != nil {
+		server.terminate()
+	}
+}
+
+func startServerProcess(ctx context.Context, ws Workspace) (*serverProcess, error) {
 	// #nosec G204 -- lake serve is the fixed Lean server executable for a validated Lake workspace.
-	cmd := exec.CommandContext(runCtx, "lake", "serve")
+	cmd := exec.Command("lake", "serve")
 	cmd.Dir = ws.Dir
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		return RPCResult{}, fmt.Errorf("open lake serve stdin: %w", err)
+		return nil, fmt.Errorf("open lake serve stdin: %w", err)
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return RPCResult{}, fmt.Errorf("open lake serve stdout: %w", err)
+		return nil, fmt.Errorf("open lake serve stdout: %w", err)
 	}
 	stderr := newServerLimitBuffer(40000)
 	cmd.Stderr = stderr
 	if err := cmd.Start(); err != nil {
-		return RPCResult{}, fmt.Errorf("start lake serve: %w", err)
+		return nil, fmt.Errorf("start lake serve: %w", err)
 	}
-	defer func() {
-		_ = stdin.Close()
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
+	server := &serverProcess{
+		cmd:            cmd,
+		stdin:          stdin,
+		reader:         bufio.NewReader(stdout),
+		stderr:         stderr,
+		waitDone:       make(chan struct{}),
+		nextID:         1,
+		openedVersions: map[string]int{},
+	}
+	go func() {
 		_ = cmd.Wait()
+		close(server.waitDone)
 	}()
+	if err := server.initialize(ctx, ws); err != nil {
+		server.terminate()
+		return nil, err
+	}
+	return server, nil
+}
 
-	repoURI := serverFileURI(ws.Dir)
+func (p *serverProcess) initialize(ctx context.Context, ws Workspace) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	stop := context.AfterFunc(ctx, p.terminate)
+	defer stop()
+
+	id := p.nextRequestID()
+	if err := writeServerLSPRequest(p.stdin, id, "initialize", map[string]any{"processId": nil, "rootUri": serverFileURI(ws.Dir), "capabilities": map[string]any{}}); err != nil {
+		return err
+	}
+	if _, err := readServerLSPResponseBody(p.reader, p.stdin, id); err != nil {
+		return err
+	}
+	return writeServerLSPNotification(p.stdin, "initialized", map[string]any{})
+}
+
+func (p *serverProcess) call(ctx context.Context, ws Workspace, sourceAbs string, sourceText string, method string, params any) (RPCResult, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	stop := context.AfterFunc(ctx, p.terminate)
+	defer stop()
+	if err := ctx.Err(); err != nil {
+		return RPCResult{}, err
+	}
+
 	sourceURI := serverFileURI(sourceAbs)
-	reader := bufio.NewReader(stdout)
-	if err := writeServerLSPRequest(stdin, 1, "initialize", map[string]any{"processId": nil, "rootUri": repoURI, "capabilities": map[string]any{}}); err != nil {
+	if err := p.syncDocument(sourceURI, sourceText); err != nil {
 		return RPCResult{}, err
 	}
-	if _, err := readServerLSPResponseBody(reader, stdin, 1); err != nil {
-		return serverRPCBlocker(ws, method, stderr, err), nil
-	}
-	if err := writeServerLSPNotification(stdin, "initialized", map[string]any{}); err != nil {
+	connectID := p.nextRequestID()
+	if err := writeServerLSPRequest(p.stdin, connectID, "$/lean/rpc/connect", map[string]any{"uri": sourceURI}); err != nil {
 		return RPCResult{}, err
 	}
-	sourceText := string(source)
-	if err := writeServerLSPNotification(stdin, "textDocument/didOpen", map[string]any{"textDocument": map[string]any{"uri": sourceURI, "languageId": "lean", "version": 1, "text": sourceText}}); err != nil {
-		return RPCResult{}, err
-	}
-	if err := writeServerLSPRequest(stdin, 2, "$/lean/rpc/connect", map[string]any{"uri": sourceURI}); err != nil {
-		return RPCResult{}, err
-	}
-	connectBody, err := readServerLSPResponseBody(reader, stdin, 2)
+	connectBody, err := readServerLSPResponseBody(p.reader, p.stdin, connectID)
 	if err != nil {
-		return serverRPCBlocker(ws, method, stderr, err), nil
+		return RPCResult{}, err
 	}
 	var connect struct {
 		Result struct {
@@ -218,40 +329,75 @@ func CallServerRPC(ctx context.Context, repoPath string, req RPCRequest) (RPCRes
 		} `json:"result"`
 	}
 	if err := json.Unmarshal(connectBody, &connect); err != nil {
-		return serverRPCBlocker(ws, method, stderr, fmt.Errorf("decode rpc connect response: %w", err)), nil
+		return RPCResult{}, fmt.Errorf("decode rpc connect response: %w", err)
 	}
 	if connect.Result.SessionID == "" {
-		return serverRPCBlocker(ws, method, stderr, errors.New("empty Lean RPC session id")), nil
+		return RPCResult{}, errors.New("empty Lean RPC session id")
 	}
 
 	line := strings.Count(sourceText, "\n")
 	if strings.HasSuffix(sourceText, "\n") && line > 0 {
 		line--
 	}
-	if err := writeServerLSPRequest(stdin, 3, "$/lean/rpc/call", map[string]any{
+	callID := p.nextRequestID()
+	if err := writeServerLSPRequest(p.stdin, callID, "$/lean/rpc/call", map[string]any{
 		"textDocument": map[string]any{"uri": sourceURI},
 		"position":     map[string]any{"line": line, "character": 0},
 		"sessionId":    connect.Result.SessionID,
 		"method":       method,
-		"params":       req.Params,
+		"params":       params,
 	}); err != nil {
 		return RPCResult{}, err
 	}
-	callBody, err := readServerLSPResponseBody(reader, stdin, 3)
+	callBody, err := readServerLSPResponseBody(p.reader, p.stdin, callID)
 	if err != nil {
-		return serverRPCBlocker(ws, method, stderr, err), nil
+		return RPCResult{}, err
 	}
 	var call struct {
 		Result json.RawMessage `json:"result"`
 	}
 	if err := json.Unmarshal(callBody, &call); err != nil {
-		return serverRPCBlocker(ws, method, stderr, fmt.Errorf("decode rpc call response: %w", err)), nil
+		return RPCResult{}, fmt.Errorf("decode rpc call response: %w", err)
 	}
 	if len(call.Result) == 0 {
-		return serverRPCBlocker(ws, method, stderr, errors.New("Lean RPC call returned no result")), nil
+		return RPCResult{}, errors.New("Lean RPC call returned no result")
 	}
-	_ = writeServerLSPNotification(stdin, "$/lean/rpc/release", map[string]any{"uri": sourceURI, "sessionId": connect.Result.SessionID, "refs": []any{}})
-	return RPCResult{WorkspaceDetected: true, WorkspaceDir: ws.Dir, Method: method, Result: append(json.RawMessage(nil), call.Result...), Diagnostics: serverDiagnostics(stderr)}, nil
+	_ = writeServerLSPNotification(p.stdin, "$/lean/rpc/release", map[string]any{"uri": sourceURI, "sessionId": connect.Result.SessionID, "refs": []any{}})
+	return RPCResult{WorkspaceDetected: true, WorkspaceDir: ws.Dir, Method: method, Result: append(json.RawMessage(nil), call.Result...), Diagnostics: serverDiagnostics(p.stderr)}, nil
+}
+
+func (p *serverProcess) syncDocument(sourceURI string, sourceText string) error {
+	version := p.openedVersions[sourceURI] + 1
+	if version == 1 {
+		if err := writeServerLSPNotification(p.stdin, "textDocument/didOpen", map[string]any{"textDocument": map[string]any{"uri": sourceURI, "languageId": "lean", "version": version, "text": sourceText}}); err != nil {
+			return err
+		}
+	} else {
+		if err := writeServerLSPNotification(p.stdin, "textDocument/didChange", map[string]any{"textDocument": map[string]any{"uri": sourceURI, "version": version}, "contentChanges": []map[string]string{{"text": sourceText}}}); err != nil {
+			return err
+		}
+	}
+	p.openedVersions[sourceURI] = version
+	return nil
+}
+
+func (p *serverProcess) nextRequestID() int {
+	id := p.nextID
+	p.nextID++
+	return id
+}
+
+func (p *serverProcess) terminate() {
+	if p.stdin != nil {
+		_ = p.stdin.Close()
+	}
+	if p.cmd != nil && p.cmd.Process != nil {
+		_ = p.cmd.Process.Kill()
+	}
+	select {
+	case <-p.waitDone:
+	case <-time.After(2 * time.Second):
+	}
 }
 
 func (r CommandRunner) Run(ctx context.Context, workspaceDir string, args []string) (CommandResult, error) {

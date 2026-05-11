@@ -13,6 +13,98 @@ import (
 	"github.com/zol/mcp-ai-helper/internal/config"
 )
 
+type memoryTaskBackend struct {
+	items map[string]tasks.Task
+}
+
+func newMemoryTaskBackend() *memoryTaskBackend {
+	return &memoryTaskBackend{items: map[string]tasks.Task{}}
+}
+
+func (b *memoryTaskBackend) Add(req tasks.AddRequest) (tasks.Task, error) {
+	id := strings.TrimSpace(req.ID)
+	if id == "" {
+		id = strings.ToLower(strings.ReplaceAll(strings.TrimSpace(req.Title), " ", "-"))
+	}
+	status := strings.TrimSpace(req.Status)
+	if status == "" {
+		status = "todo"
+	}
+	modelLevel, err := tasks.NormalizeModelLevel(req.ModelLevel)
+	if err != nil {
+		return tasks.Task{}, err
+	}
+	task := tasks.Task{ID: id, TaskType: req.TaskType, Branch: req.Branch, WorktreePath: req.WorktreePath, ParentID: req.ParentID, Status: status, Title: req.Title, Body: req.Body, Priority: req.Priority, ModelLevel: modelLevel, Tags: append([]string(nil), req.Tags...), AcceptanceCriteria: append([]string(nil), req.AcceptanceCriteria...), VerificationPlan: append([]string(nil), req.VerificationPlan...)}
+	if err := tasks.NormalizeWorktreeFields(&task); err != nil {
+		return tasks.Task{}, err
+	}
+	b.items[task.ID] = task
+	return task, nil
+}
+
+func (b *memoryTaskBackend) Get(_ context.Context, _ string, id string) (tasks.Task, error) {
+	item, ok := b.items[id]
+	if !ok {
+		return tasks.Task{}, os.ErrNotExist
+	}
+	return item, nil
+}
+
+func (b *memoryTaskBackend) List(context.Context, string) ([]tasks.Task, error) {
+	items := make([]tasks.Task, 0, len(b.items))
+	for _, item := range b.items {
+		items = append(items, item)
+	}
+	return items, nil
+}
+
+func (b *memoryTaskBackend) setStatus(_ context.Context, req tasks.StatusRequest) (tasks.Task, error) {
+	item, ok := b.items[req.ID]
+	if !ok {
+		return tasks.Task{}, os.ErrNotExist
+	}
+	item.Status = req.Status
+	b.items[req.ID] = item
+	return item, nil
+}
+
+func (b *memoryTaskBackend) BatchUpsert(_ context.Context, req tasks.BatchUpsertRequest) (tasks.BatchUpsertResult, error) {
+	result := tasks.BatchUpsertResult{Source: "test_memory"}
+	seen := map[string]struct{}{}
+	for _, item := range req.Tasks {
+		created, err := b.Add(item)
+		if err != nil {
+			return tasks.BatchUpsertResult{}, err
+		}
+		seen[created.ID] = struct{}{}
+		result.Upserted = append(result.Upserted, created)
+	}
+	if req.CloseMissing {
+		missingStatus := req.MissingStatus
+		if missingStatus == "" {
+			missingStatus = "done"
+		}
+		for id, item := range b.items {
+			if _, ok := seen[id]; ok || item.Status == "done" {
+				continue
+			}
+			item.Status = missingStatus
+			b.items[id] = item
+			result.Closed = append(result.Closed, item)
+		}
+	}
+	return result, nil
+}
+
+func (b *memoryTaskBackend) SetStatus(ctx context.Context, req tasks.StatusRequest) (tasks.Task, error) {
+	return b.setStatus(ctx, req)
+}
+
+func newTaskTestRunner(cfg *config.Config) (*Runner, *memoryTaskBackend) {
+	backend := newMemoryTaskBackend()
+	return NewRunnerWithTaskBackend(cfg, nil, backend), backend
+}
+
 func TestPipelineReturnsGroundedHandoff(t *testing.T) {
 	dir := t.TempDir()
 	runner := NewRunner(testConfig(dir), nil)
@@ -237,7 +329,7 @@ func TestRunWorkflowStepsExplicitDependsOn(t *testing.T) {
 
 func TestRunWorkflowStepsTaskBatchUpsert(t *testing.T) {
 	dir := t.TempDir()
-	runner := NewRunner(testConfig(dir), nil)
+	runner, _ := newTaskTestRunner(testConfig(dir))
 	result, err := runner.RunWorkflow(t.Context(), WorkflowRequest{
 		RepoPath: dir,
 		Steps: []WorkflowStep{{
@@ -265,8 +357,7 @@ func TestRunWorkflowStepsTaskBatchUpsert(t *testing.T) {
 
 func TestRunWorkflowStepsTaskTransition(t *testing.T) {
 	dir := t.TempDir()
-	runner := NewRunner(testConfig(dir), nil)
-	store := runner.tasks
+	runner, store := newTaskTestRunner(testConfig(dir))
 	created, err := store.Add(tasks.AddRequest{RepoPath: dir, ID: "transition-api", Title: "Transition API", Status: "todo"})
 	if err != nil {
 		t.Fatal(err)
@@ -286,7 +377,7 @@ func TestRunWorkflowStepsTaskTransition(t *testing.T) {
 	if result.Status != "ok" {
 		t.Fatalf("status = %q, reason = %q", result.Status, result.Reason)
 	}
-	got, err := store.Get(tasks.GetRequest{RepoPath: dir, ID: created.ID})
+	got, err := store.Get(context.Background(), dir, created.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,8 +388,8 @@ func TestRunWorkflowStepsTaskTransition(t *testing.T) {
 
 func TestRunWorkflowStepsTaskTransitionRejectsFromMismatch(t *testing.T) {
 	dir := t.TempDir()
-	runner := NewRunner(testConfig(dir), nil)
-	created, err := runner.tasks.Add(tasks.AddRequest{RepoPath: dir, ID: "transition-api", Title: "Transition API", Status: "todo"})
+	runner, store := newTaskTestRunner(testConfig(dir))
+	created, err := store.Add(tasks.AddRequest{RepoPath: dir, ID: "transition-api", Title: "Transition API", Status: "todo"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -317,7 +408,7 @@ func TestRunWorkflowStepsTaskTransitionRejectsFromMismatch(t *testing.T) {
 	if result.Status != "failed" {
 		t.Fatalf("status = %q, want failed", result.Status)
 	}
-	got, err := runner.tasks.Get(tasks.GetRequest{RepoPath: dir, ID: created.ID})
+	got, err := store.Get(context.Background(), dir, created.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -328,8 +419,8 @@ func TestRunWorkflowStepsTaskTransitionRejectsFromMismatch(t *testing.T) {
 
 func TestRunWorkflowStepsTaskTransitionRejectsClosingGoal(t *testing.T) {
 	dir := t.TempDir()
-	runner := NewRunner(testConfig(dir), nil)
-	created, err := runner.tasks.Add(tasks.AddRequest{RepoPath: dir, ID: "goal-main", Title: "Goal", Status: "in_progress"})
+	runner, store := newTaskTestRunner(testConfig(dir))
+	created, err := store.Add(tasks.AddRequest{RepoPath: dir, ID: "goal-main", Title: "Goal", Status: "in_progress"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -431,8 +522,8 @@ func TestRunWorkflowStepsBranchOnFileAndTaskState(t *testing.T) {
 	if err := os.WriteFile(target, []byte("old\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	runner := NewRunner(testConfig(dir), nil)
-	created, err := runner.tasks.Add(tasks.AddRequest{RepoPath: dir, ID: "condition-task", Title: "Condition task", Status: "todo"})
+	runner, store := newTaskTestRunner(testConfig(dir))
+	created, err := store.Add(tasks.AddRequest{RepoPath: dir, ID: "condition-task", Title: "Condition task", Status: "todo"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -451,7 +542,7 @@ func TestRunWorkflowStepsBranchOnFileAndTaskState(t *testing.T) {
 	if result.Status != "ok" {
 		t.Fatalf("status = %q, reason = %q", result.Status, result.Reason)
 	}
-	got, err := runner.tasks.Get(tasks.GetRequest{RepoPath: dir, ID: created.ID})
+	got, err := store.Get(context.Background(), dir, created.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -519,8 +610,7 @@ func TestRunPipelineUpdatesCurrentTaskStatus(t *testing.T) {
 	t.Parallel()
 
 	repoPath := t.TempDir()
-	runner := NewRunner(testConfig(repoPath), nil)
-	store := runner.tasks
+	runner, store := newTaskTestRunner(testConfig(repoPath))
 
 	created, err := store.Add(tasks.AddRequest{
 		RepoPath: repoPath,
@@ -545,7 +635,7 @@ func TestRunPipelineUpdatesCurrentTaskStatus(t *testing.T) {
 		t.Fatalf("exit code = %d", result.Command.ExitCode)
 	}
 
-	got, err := store.Get(tasks.GetRequest{RepoPath: repoPath, ID: created.ID})
+	got, err := store.Get(context.Background(), repoPath, created.ID)
 	if err != nil {
 		t.Fatalf("get task: %v", err)
 	}
@@ -558,8 +648,8 @@ func TestRunPipelineBlocksTaskStatusWhenCommandFails(t *testing.T) {
 	t.Parallel()
 
 	repoPath := t.TempDir()
-	runner := NewRunner(testConfig(repoPath), nil)
-	created, err := runner.tasks.Add(tasks.AddRequest{
+	runner, store := newTaskTestRunner(testConfig(repoPath))
+	created, err := store.Add(tasks.AddRequest{
 		RepoPath: repoPath,
 		ID:       "task-pipeline-failed-status",
 		Title:    "pipeline failed status",
@@ -583,7 +673,7 @@ func TestRunPipelineBlocksTaskStatusWhenCommandFails(t *testing.T) {
 		t.Fatalf("exit code = %d, want 7", result.Command.ExitCode)
 	}
 
-	got, err := runner.tasks.Get(tasks.GetRequest{RepoPath: repoPath, ID: created.ID})
+	got, err := store.Get(context.Background(), repoPath, created.ID)
 	if err != nil {
 		t.Fatalf("get task: %v", err)
 	}
@@ -596,8 +686,8 @@ func TestRunPipelineBlocksTaskStatusWhenEvidenceInvalid(t *testing.T) {
 	t.Parallel()
 
 	repoPath := t.TempDir()
-	runner := NewRunner(testConfig(repoPath), nil)
-	created, err := runner.tasks.Add(tasks.AddRequest{
+	runner, store := newTaskTestRunner(testConfig(repoPath))
+	created, err := store.Add(tasks.AddRequest{
 		RepoPath: repoPath,
 		ID:       "task-pipeline-invalid-evidence",
 		Title:    "pipeline invalid evidence",
@@ -621,7 +711,7 @@ func TestRunPipelineBlocksTaskStatusWhenEvidenceInvalid(t *testing.T) {
 		t.Fatalf("status = %q, want INSUFFICIENT_DATA", result.Status)
 	}
 
-	got, err := runner.tasks.Get(tasks.GetRequest{RepoPath: repoPath, ID: created.ID})
+	got, err := store.Get(context.Background(), repoPath, created.ID)
 	if err != nil {
 		t.Fatalf("get task: %v", err)
 	}
@@ -634,8 +724,8 @@ func TestRunWorkflowBlocksTaskStatusWhenStepSkipped(t *testing.T) {
 	t.Parallel()
 
 	repoPath := t.TempDir()
-	runner := NewRunner(testConfig(repoPath), nil)
-	created, err := runner.tasks.Add(tasks.AddRequest{
+	runner, store := newTaskTestRunner(testConfig(repoPath))
+	created, err := store.Add(tasks.AddRequest{
 		RepoPath: repoPath,
 		ID:       "task-workflow-skipped-step",
 		Title:    "workflow skipped step",
@@ -665,7 +755,7 @@ func TestRunWorkflowBlocksTaskStatusWhenStepSkipped(t *testing.T) {
 		t.Fatalf("step results = %#v", result.StepResults)
 	}
 
-	got, err := runner.tasks.Get(tasks.GetRequest{RepoPath: repoPath, ID: created.ID})
+	got, err := store.Get(context.Background(), repoPath, created.ID)
 	if err != nil {
 		t.Fatalf("get task: %v", err)
 	}
@@ -678,8 +768,8 @@ func TestRunWorkflowBlocksTaskStatusWhenCommitSkipped(t *testing.T) {
 	t.Parallel()
 
 	repoPath := t.TempDir()
-	runner := NewRunner(testConfig(repoPath), nil)
-	created, err := runner.tasks.Add(tasks.AddRequest{
+	runner, store := newTaskTestRunner(testConfig(repoPath))
+	created, err := store.Add(tasks.AddRequest{
 		RepoPath: repoPath,
 		ID:       "task-workflow-skipped-commit",
 		Title:    "workflow skipped commit",
@@ -704,7 +794,7 @@ func TestRunWorkflowBlocksTaskStatusWhenCommitSkipped(t *testing.T) {
 		t.Fatalf("commit result = %#v, want skipped", result.CommitResult)
 	}
 
-	got, err := runner.tasks.Get(tasks.GetRequest{RepoPath: repoPath, ID: created.ID})
+	got, err := store.Get(context.Background(), repoPath, created.ID)
 	if err != nil {
 		t.Fatalf("get task: %v", err)
 	}

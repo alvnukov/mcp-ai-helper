@@ -112,6 +112,9 @@ func setTaskStatus(ctx context.Context, req tasks.StatusRequest, commands *comma
 }
 
 func ensureLeanTaskRegistryBootstrap(ctx context.Context, repoPath string, commands *command.Runner) error {
+	if commands == nil {
+		return errors.New("Lake workspace blocker: command runner is required for Lean task registry bootstrap")
+	}
 	absPath, err := filepath.Abs(strings.TrimSpace(repoPath))
 	if err != nil {
 		return fmt.Errorf("resolve repo_path for Lean task registry bootstrap: %w", err)
@@ -211,7 +214,7 @@ func validateLeanRegistryBuild(ctx context.Context, repoPath string, commands *c
 
 func callLeanTaskMutation(ctx context.Context, repoPath string, commands *command.Runner, method string, operation string, params any) (leanRegistryEnvelope, error) {
 	if commands != nil {
-		if err := validateLeanRegistryBuild(ctx, repoPath, commands, "before mutation"); err != nil {
+		if err := validateLeanRegistryBuild(ctx, repoPath, commands, leanMutationPreflightPhase(operation)); err != nil {
 			return leanRegistryEnvelope{}, err
 		}
 	}
@@ -219,6 +222,7 @@ func callLeanTaskMutation(ctx context.Context, repoPath string, commands *comman
 	if err != nil {
 		return leanRegistryEnvelope{}, err
 	}
+	lake.ResetServerRPC(repoPath)
 	if result.Blocker != "" {
 		return leanRegistryEnvelope{}, fmt.Errorf("Lean task mutation blocker: %s", result.Blocker)
 	}
@@ -239,6 +243,21 @@ func callLeanTaskMutation(ctx context.Context, repoPath string, commands *comman
 		return leanRegistryEnvelope{}, errors.New("Lean task mutation envelope did not report checked validation")
 	}
 	return envelope, nil
+}
+
+func leanMutationPreflightPhase(operation string) string {
+	switch operation {
+	case "task.transition.apply":
+		return "before transition"
+	case "task.upsert.apply":
+		return "before upsert"
+	case "task.batch_upsert.apply":
+		return "before batch upsert"
+	case "task.delete.apply":
+		return "before delete"
+	default:
+		return "before mutation"
+	}
 }
 
 func applyLeanTaskTransition(ctx context.Context, repoPath string, req tasks.StatusRequest, commands *command.Runner) (leanTaskTransitionApplyPayload, leanRegistryEnvelope, error) {
@@ -263,6 +282,7 @@ func writeLeanActiveTasksSource(ctx context.Context, repoPath string, source str
 	if err != nil {
 		return err
 	}
+	lake.ResetServerRPC(repoPath)
 	if result.Blocker != "" {
 		return fmt.Errorf("Lean active tasks rollback blocker: %s", result.Blocker)
 	}
