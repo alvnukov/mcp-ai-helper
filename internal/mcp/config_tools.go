@@ -53,8 +53,14 @@ func registerConfigTools(srv *server.MCPServer, deps *Server, reload configReloa
 					return basemcp.NewToolResultError(err.Error()), nil
 				}
 				if repoCfg != nil {
+					merged, err := config.MergeRepoConfig(cfg, repoCfg, args.RepoPath)
+					if err != nil {
+						return basemcp.NewToolResultError(err.Error()), nil
+					}
+					result["config"] = merged
 					result["repo_config"] = repoCfg
 					result["repo_config_path"] = repoCfg.SourcePath
+					result["source"] = "memory+repo"
 				}
 			}
 			return structured(result)

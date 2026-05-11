@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"syscall"
 	"sort"
 	"strings"
 	"time"
@@ -104,6 +105,14 @@ func (r *Runner) runFiltered(
 	// #nosec G204 -- command execution is this package's explicit MCP capability and is constrained by cwd, timeout, and output policy.
 	command := exec.CommandContext(runCtx, shellBin(), shellArgs(cmd)...)
 	command.Dir = runCWD
+	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// Kill process group on context cancellation so no orphans survive.
+	stop := context.AfterFunc(runCtx, func() {
+		if command.Process != nil {
+			_ = syscall.Kill(-command.Process.Pid, syscall.SIGKILL)
+		}
+	})
+	defer stop()
 	command.Stdout = stdout
 	command.Stderr = stderr
 

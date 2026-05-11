@@ -311,6 +311,78 @@ func LoadRepoConfig(repoPath string) (*RepoConfig, error) {
 	return &cfg, nil
 }
 
+// ToolDenied reports whether the repo-local policy denies a tool name exactly.
+func (c *RepoConfig) ToolDenied(toolName string) bool {
+	if c == nil {
+		return false
+	}
+	want := strings.TrimSpace(toolName)
+	if want == "" {
+		return false
+	}
+	for _, denied := range c.Permissions.Tools.Deny {
+		if strings.TrimSpace(denied) == want {
+			return true
+		}
+	}
+	return false
+}
+
+// MergeRepoConfig overlays the supported user-owned repo-local policy on top of the global config.
+func MergeRepoConfig(base *Config, repoCfg *RepoConfig, repoPath string) (*Config, error) {
+	if base == nil {
+		return nil, errors.New("base config is required")
+	}
+	merged := *base
+	if repoCfg == nil || repoCfg.CommandPolicy == nil || len(repoCfg.CommandPolicy.AllowedCWDs) == 0 {
+		return &merged, nil
+	}
+	allowed, err := resolveRepoAllowedCWDs(repoPath, repoCfg.CommandPolicy.AllowedCWDs)
+	if err != nil {
+		return nil, err
+	}
+	merged.CommandPolicy = base.CommandPolicy
+	merged.CommandPolicy.AllowedCWDs = allowed
+	return &merged, nil
+}
+
+func resolveRepoAllowedCWDs(repoPath string, values []string) ([]string, error) {
+	repo, err := filepath.Abs(strings.TrimSpace(repoPath))
+	if err != nil {
+		return nil, fmt.Errorf("resolve repo_path: %w", err)
+	}
+	if repo == "" {
+		return nil, errors.New("repo_path is required for repo-local allowed_cwds")
+	}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		candidate := trimmed
+		if !filepath.IsAbs(candidate) {
+			candidate = filepath.Join(repo, candidate)
+		}
+		abs, err := filepath.Abs(candidate)
+		if err != nil {
+			return nil, fmt.Errorf("resolve allowed_cwds entry %q: %w", trimmed, err)
+		}
+		if !insideDir(repo, abs) {
+			return nil, fmt.Errorf("repo-local allowed_cwds entry %q escapes repo_path", trimmed)
+		}
+		out = append(out, abs)
+	}
+	if len(out) == 0 {
+		return nil, errors.New("repo-local allowed_cwds must contain at least one non-empty path")
+	}
+	return out, nil
+}
+
+func insideDir(root string, child string) bool {
+	return child == root || strings.HasPrefix(child, root+string(os.PathSeparator))
+}
+
 // IsRepoConfigPath returns true when path points to a repo-local config file.
 func IsRepoConfigPath(path string) bool {
 	return filepath.Base(path) == repoConfigFile

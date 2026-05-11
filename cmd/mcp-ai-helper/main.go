@@ -31,6 +31,7 @@ func main() {
 		signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 		<-sig
 		signal.Stop(sig)
+		fmt.Fprintf(os.Stderr, "mcp-ai-helper: received signal, shutting down\n")
 		os.Exit(0)
 	}()
 

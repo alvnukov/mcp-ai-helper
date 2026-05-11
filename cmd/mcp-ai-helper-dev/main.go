@@ -11,8 +11,10 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/zol/mcp-ai-helper/internal/config"
@@ -69,6 +71,14 @@ func main() {
 	if err := manager.start(); err != nil {
 		log.Printf("initial child start failed: %v", err)
 	}
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		manager.stop()
+		os.Exit(0)
+	}()
 
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
@@ -183,6 +193,7 @@ func (m *childManager) start() error {
 	// #nosec G204 -- internal binary restart with trusted config path
 	cmd := exec.Command(m.binaryPath, "--config", m.configPath)
 	cmd.Dir = m.repoRoot
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return err
@@ -248,7 +259,7 @@ func (m *childManager) stop() {
 		_ = stdin.Close()
 	}
 	if cmd != nil && cmd.Process != nil {
-		_ = cmd.Process.Kill()
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
 }
 
