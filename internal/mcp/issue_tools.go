@@ -8,7 +8,6 @@ import (
 	basemcp "github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
-	"github.com/zol/mcp-ai-helper/internal/command"
 	"github.com/zol/mcp-ai-helper/internal/tasks"
 )
 
@@ -48,8 +47,8 @@ func registerIssueTools(srv *server.MCPServer, deps *Server) {
 		if err := bind(request, &args); err != nil {
 			return nil, err
 		}
-		_, _, commands, _, store := deps.loadDeps()
-		result, err := addIssue(ctx, args, commands, store)
+		backend := deps.loadTaskBackend()
+		result, err := addIssue(ctx, args, backend)
 		if err != nil {
 			return nil, err
 		}
@@ -66,8 +65,8 @@ func registerIssueTools(srv *server.MCPServer, deps *Server) {
 		if err := bind(request, &args); err != nil {
 			return nil, err
 		}
-		_, _, commands, _, store := deps.loadDeps()
-		result, err := listIssues(ctx, args, commands, store)
+		backend := deps.loadTaskBackend()
+		result, err := listIssues(ctx, args, backend)
 		if err != nil {
 			return nil, err
 		}
@@ -83,8 +82,8 @@ func registerIssueTools(srv *server.MCPServer, deps *Server) {
 		if err := bind(request, &args); err != nil {
 			return nil, err
 		}
-		_, _, commands, _, store := deps.loadDeps()
-		result, err := acceptIssue(ctx, args, commands, store)
+		backend := deps.loadTaskBackend()
+		result, err := acceptIssue(ctx, args, backend)
 		if err != nil {
 			return nil, err
 		}
@@ -92,13 +91,13 @@ func registerIssueTools(srv *server.MCPServer, deps *Server) {
 	})
 }
 
-func addIssue(ctx context.Context, req issueAddRequest, commands *command.Runner, store *tasks.Store) (tasks.Task, error) {
+func addIssue(ctx context.Context, req issueAddRequest, backend taskBackend) (tasks.Task, error) {
 	body := strings.TrimSpace(req.Body)
 	if strings.TrimSpace(req.SourceRepoPath) != "" {
 		body = strings.TrimSpace(body + "\n\nsource_repo_path: " + req.SourceRepoPath)
 	}
 	tags := append([]string{"issue", "feedback"}, req.Tags...)
-	result, err := upsertTask(ctx, tasks.AddRequest{
+	result, err := backend.Upsert(ctx, tasks.AddRequest{
 		RepoPath: req.RepoPath,
 		ID:       req.ID,
 		Status:   "todo",
@@ -106,11 +105,11 @@ func addIssue(ctx context.Context, req issueAddRequest, commands *command.Runner
 		Body:     body,
 		Priority: req.Priority,
 		Tags:     uniqueStrings(tags),
-	}, commands, store)
+	})
 	return result.Task, err
 }
 
-func listIssues(ctx context.Context, req issueListRequest, commands *command.Runner, store *tasks.Store) ([]tasks.Task, error) {
+func listIssues(ctx context.Context, req issueListRequest, backend taskBackend) ([]tasks.Task, error) {
 	status := req.Status
 	if status == "" {
 		status = "todo"
@@ -118,9 +117,9 @@ func listIssues(ctx context.Context, req issueListRequest, commands *command.Run
 	var listed []tasks.Task
 	var err error
 	if status == "done" {
-		listed, _, err = readAllTasks(ctx, req.RepoPath, commands, store)
+		listed, _, err = backend.ListAll(ctx, req.RepoPath)
 	} else {
-		listed, _, err = readCurrentTasks(ctx, req.RepoPath, commands, store)
+		listed, _, err = backend.ListCurrent(ctx, req.RepoPath)
 	}
 	if err != nil {
 		return nil, err
@@ -134,7 +133,7 @@ func listIssues(ctx context.Context, req issueListRequest, commands *command.Run
 	return issues, nil
 }
 
-func acceptIssue(ctx context.Context, req issueAcceptRequest, commands *command.Runner, store *tasks.Store) (tasks.Task, error) {
-	result, err := setTaskStatus(ctx, tasks.StatusRequest{RepoPath: req.RepoPath, ID: req.ID, Status: "in_progress"}, commands, store)
+func acceptIssue(ctx context.Context, req issueAcceptRequest, backend taskBackend) (tasks.Task, error) {
+	result, err := backend.SetStatus(ctx, tasks.StatusRequest{RepoPath: req.RepoPath, ID: req.ID, Status: "in_progress"})
 	return result.Task, err
 }

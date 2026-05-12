@@ -107,7 +107,7 @@ func TestTaskUIRejectsStaleEdits(t *testing.T) {
 func TestTaskUIStartServesInProcessHTTP(t *testing.T) {
 	cfg := &config.Config{}
 	deps := &Server{cfg: cfg}
-	deps.chat, deps.commands, deps.pipelines, deps.taskStore = buildDeps(cfg)
+	deps.chat, deps.commands, deps.pipelines, deps.taskStore, deps.taskBackend = buildDeps(cfg)
 
 	result, err := deps.startTaskUI(context.Background(), "/repo", "127.0.0.1:0")
 	if err != nil {
@@ -150,7 +150,7 @@ func TestTaskUIStartServesInProcessHTTP(t *testing.T) {
 func TestTaskUIStartRejectsNonLoopbackAddr(t *testing.T) {
 	cfg := &config.Config{}
 	deps := &Server{cfg: cfg}
-	deps.chat, deps.commands, deps.pipelines, deps.taskStore = buildDeps(cfg)
+	deps.chat, deps.commands, deps.pipelines, deps.taskStore, deps.taskBackend = buildDeps(cfg)
 	if _, err := deps.startTaskUI(context.Background(), "/repo", "0.0.0.0:0"); err == nil {
 		t.Fatal("expected non-loopback bind to be rejected")
 	}

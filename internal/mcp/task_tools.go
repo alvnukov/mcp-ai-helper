@@ -30,8 +30,8 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 		if err := bind(req, &args); err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
-		_, _, commands, _, store := deps.loadDeps()
-		result, err := upsertTask(ctx, args, commands, store)
+		backend := deps.loadTaskBackend()
+		result, err := backend.Upsert(ctx, args)
 		if err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
@@ -47,8 +47,8 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 		if err := bind(req, &args); err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
-		_, _, commands, _, store := deps.loadDeps()
-		list, source, err := readAllTasks(ctx, args.RepoPath, commands, store)
+		backend := deps.loadTaskBackend()
+		list, source, err := backend.ListAll(ctx, args.RepoPath)
 		if err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
@@ -64,8 +64,8 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 		if err := bind(req, &args); err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
-		_, _, commands, _, store := deps.loadDeps()
-		list, source, err := readAllTasks(ctx, args.RepoPath, commands, store)
+		backend := deps.loadTaskBackend()
+		list, source, err := backend.ListAll(ctx, args.RepoPath)
 		if err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
@@ -90,12 +90,12 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 		if err := bind(req, &args); err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
-		_, _, commands, _, store := deps.loadDeps()
-		existing, _, err := readTask(ctx, args.RepoPath, args.ID, commands, store)
+		backend := deps.loadTaskBackend()
+		existing, _, err := backend.Get(ctx, args.RepoPath, args.ID)
 		if err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
-		result, err := upsertTask(ctx, mergeTaskUpdate(existing, args), commands, store)
+		result, err := backend.Upsert(ctx, mergeTaskUpdate(existing, args))
 		if err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
@@ -111,8 +111,8 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 		if err := bind(req, &args); err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
-		_, _, commands, _, store := deps.loadDeps()
-		result, err := setTaskStatus(ctx, args, commands, store)
+		backend := deps.loadTaskBackend()
+		result, err := backend.SetStatus(ctx, args)
 		if err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
@@ -130,8 +130,8 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 		if err := bind(req, &args); err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
-		_, _, commands, _, store := deps.loadDeps()
-		result, err := batchUpsertTasks(ctx, args, commands, store)
+		backend := deps.loadTaskBackend()
+		result, err := backend.BatchUpsert(ctx, args)
 		if err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
@@ -156,8 +156,8 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 		if err := bind(req, &args); err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
-		_, _, commands, _, store := deps.loadDeps()
-		result, err := upsertTask(ctx, args, commands, store)
+		backend := deps.loadTaskBackend()
+		result, err := backend.Upsert(ctx, args)
 		if err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
@@ -171,8 +171,8 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 		if err := bind(req, &args); err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
-		_, _, commands, _, store := deps.loadDeps()
-		list, source, err := readCurrentTasks(ctx, args.RepoPath, commands, store)
+		backend := deps.loadTaskBackend()
+		list, source, err := backend.ListCurrent(ctx, args.RepoPath)
 		if err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
@@ -186,8 +186,8 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 		if err := bind(req, &args); err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
-		_, _, commands, _, store := deps.loadDeps()
-		list, _, err := readAllTasks(ctx, args.RepoPath, commands, store)
+		backend := deps.loadTaskBackend()
+		list, _, err := backend.ListAll(ctx, args.RepoPath)
 		if err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
@@ -202,8 +202,8 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 		if err := bind(req, &args); err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
-		_, _, commands, _, store := deps.loadDeps()
-		task, _, err := readTask(ctx, args.RepoPath, args.ID, commands, store)
+		backend := deps.loadTaskBackend()
+		task, _, err := backend.Get(ctx, args.RepoPath, args.ID)
 		if err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
@@ -218,8 +218,8 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 		if err := bind(req, &args); err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
-		_, _, commands, _, store := deps.loadDeps()
-		result, err := deleteTask(ctx, args, commands, store)
+		backend := deps.loadTaskBackend()
+		result, err := backend.Delete(ctx, args)
 		if err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
