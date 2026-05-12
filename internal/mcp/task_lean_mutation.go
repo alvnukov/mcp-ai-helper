@@ -142,6 +142,12 @@ func ensureLeanTaskRegistryBootstrap(ctx context.Context, repoPath string, comma
 		"MCPAIHelperProject/TaskRegistryExport.lean": "MCPAIHelperProject/TaskRegistryExport.lean",
 	}
 	for targetRel, sourceRel := range copies {
+		if targetRel == "MCPAIHelperProject/TaskRegistryExport.lean" && fileExists(filepath.Join(absPath, filepath.FromSlash(targetRel))) && !leanTaskExporterCurrent(absPath) {
+			if err := copyBootstrapTemplate(absPath, sourceRel, targetRel); err != nil {
+				return err
+			}
+			continue
+		}
 		if err := copyBootstrapTemplateIfMissing(absPath, sourceRel, targetRel); err != nil {
 			return err
 		}
@@ -165,7 +171,29 @@ func leanTaskRegistryBootstrapComplete(repoPath string) bool {
 		fileExists(filepath.Join(repoPath, "MCPAIHelperProject/ProjectState.lean")) &&
 		fileExists(filepath.Join(repoPath, "MCPAIHelperProject/ActiveTasks.lean")) &&
 		fileExists(filepath.Join(repoPath, "MCPAIHelperProject/Registry.lean")) &&
-		fileExists(filepath.Join(repoPath, "MCPAIHelperProject/TaskRegistryExport.lean"))
+		leanTaskExporterCurrent(repoPath)
+}
+
+func leanTaskExporterCurrent(repoPath string) bool {
+	data, err := os.ReadFile(filepath.Join(repoPath, "MCPAIHelperProject", "TaskRegistryExport.lean"))
+	if err != nil {
+		return false
+	}
+	source := string(data)
+	for _, marker := range []string{
+		"def taskList ",
+		"def taskGet ",
+		"def taskTransitionApply ",
+		"def taskUpsertApply ",
+		"def taskBatchUpsertApply ",
+		"def taskDeleteApply ",
+		"def activeTasksWrite ",
+	} {
+		if !strings.Contains(source, marker) {
+			return false
+		}
+	}
+	return true
 }
 
 func copyBootstrapTemplateIfMissing(targetRoot string, sourceRel string, targetRel string) error {
@@ -173,6 +201,11 @@ func copyBootstrapTemplateIfMissing(targetRoot string, sourceRel string, targetR
 	if fileExists(targetPath) {
 		return nil
 	}
+	return copyBootstrapTemplate(targetRoot, sourceRel, targetRel)
+}
+
+func copyBootstrapTemplate(targetRoot string, sourceRel string, targetRel string) error {
+	targetPath := filepath.Join(targetRoot, filepath.FromSlash(targetRel))
 	data, err := taskRegistryBootstrapTemplates.ReadFile("task_registry_templates/" + sourceRel)
 	if err != nil {
 		return fmt.Errorf("read embedded task registry bootstrap template %s: %w", sourceRel, err)
