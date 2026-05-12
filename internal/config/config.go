@@ -322,7 +322,7 @@ func LoadRepoConfig(repoPath string) (*RepoConfig, error) {
 		return nil, nil
 	}
 	path := filepath.Join(repoPath, repoConfigFile)
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path is repo-local helper config under the caller-selected repo.
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
