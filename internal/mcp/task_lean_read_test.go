@@ -2,7 +2,6 @@ package mcp
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -62,56 +61,37 @@ func TestReadTaskExporterFailureDoesNotFallbackToLegacy(t *testing.T) {
 	}
 }
 
-func TestReadCurrentTasksRequiresLeanRegistry(t *testing.T) {
+func TestReadCurrentTasksBootstrapsEmptyRepo(t *testing.T) {
 	repo := t.TempDir()
-	_, source, err := readCurrentTasks(context.Background(), repo, nil, legacyStoreForTest(t))
-	if err == nil {
-		t.Fatal("expected missing Lean registry error")
+	list, source, err := readCurrentTasks(context.Background(), repo, commandRunnerForRepo(repo), legacyStoreForTest(t))
+	if err != nil {
+		t.Fatalf("readCurrentTasks returned error: %v", err)
 	}
-	if source != "lean_registry" || !errors.Is(err, ErrNoLakeWorkspace) {
-		t.Fatalf("unexpected source=%q err=%v", source, err)
+	if source != "lean_registry" || len(list) != 0 {
+		t.Fatalf("unexpected source/list: source=%q list=%#v", source, list)
+	}
+	for _, path := range []string{"lean-toolchain", "lakefile.lean", "MCPAIHelperProject/ActiveTasks.lean", "MCPAIHelperProject/TaskRegistryExport.lean"} {
+		if _, err := os.Stat(filepath.Join(repo, path)); err != nil {
+			t.Fatalf("bootstrap did not create %s: %v", path, err)
+		}
 	}
 }
 
-func TestReadCurrentTasksReportsMissingLeanTaskExporter(t *testing.T) {
-	repo := t.TempDir()
-	if err := os.WriteFile(filepath.Join(repo, "lean-toolchain"), []byte("leanprover/lean4:v4.22.0\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(repo, "lakefile.toml"), []byte("name = \"missing-exporter\"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(repo, "MCPAIHelperProject"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(repo, "MCPAIHelperProject", "ActiveTasks.lean"), []byte("import MCPAIHelperProject.Registry\n"), 0o600); err != nil {
+func TestReadCurrentTasksRepairsMissingLeanTaskExporter(t *testing.T) {
+	repo := copyLeanRepoFixture(t)
+	if err := os.Remove(filepath.Join(repo, "MCPAIHelperProject", "TaskRegistryExport.lean")); err != nil {
 		t.Fatal(err)
 	}
 
 	_, source, err := readCurrentTasks(context.Background(), repo, commandRunnerForRepo(repo), legacyStoreForTest(t))
-	if err == nil {
-		t.Fatal("expected missing Lean task exporter error")
+	if err != nil {
+		t.Fatalf("readCurrentTasks returned error: %v", err)
 	}
-	if source != "lean_registry" || !errors.Is(err, ErrLeanTaskExporterMissing) {
-		t.Fatalf("unexpected source=%q err=%v", source, err)
+	if source != "lean_registry" {
+		t.Fatalf("source=%q, want lean_registry", source)
 	}
-	if !strings.Contains(err.Error(), "MCPAIHelperProject/TaskRegistryExport.lean") || strings.Contains(err.Error(), "unknown executable") {
-		t.Fatalf("missing exporter diagnostic is not actionable: %v", err)
-	}
-}
-
-func TestLeanTaskExporterRepairPayload(t *testing.T) {
-	payload := leanTaskExporterRepairPayload(ErrLeanTaskExporterMissing)
-	if payload["source"] != "lean_registry" || payload["repair_required"] != true || payload["action"] != "repair_lean_task_registry_exporter" {
-		t.Fatalf("unexpected repair payload: %#v", payload)
-	}
-	missingFiles, ok := payload["missing_files"].([]string)
-	if !ok || len(missingFiles) != 1 || missingFiles[0] != "MCPAIHelperProject/TaskRegistryExport.lean" {
-		t.Fatalf("unexpected missing_files: %#v", payload["missing_files"])
-	}
-	verification, ok := payload["verification"].([]string)
-	if !ok || len(verification) != 3 || verification[2] != "task_current" {
-		t.Fatalf("unexpected verification steps: %#v", payload["verification"])
+	if _, err := os.Stat(filepath.Join(repo, "MCPAIHelperProject", "TaskRegistryExport.lean")); err != nil {
+		t.Fatalf("exporter was not repaired: %v", err)
 	}
 }
 

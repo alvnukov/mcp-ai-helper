@@ -96,6 +96,9 @@ func setTaskStatus(ctx context.Context, req tasks.StatusRequest, commands *comma
 	if strings.TrimSpace(req.Status) == "" {
 		return leanMutationResult{}, errors.New("status is required")
 	}
+	if err := ensureLeanTaskRegistryBootstrap(ctx, req.RepoPath, commands); err != nil {
+		return leanMutationResult{}, err
+	}
 	payload, envelope, err := applyLeanTaskTransition(ctx, req.RepoPath, req, commands)
 	if err != nil {
 		return leanMutationResult{}, err
@@ -125,9 +128,13 @@ func ensureLeanTaskRegistryBootstrap(ctx context.Context, repoPath string, comma
 	if leanTaskRegistryBootstrapComplete(absPath) {
 		return nil
 	}
+	if !fileExists(filepath.Join(absPath, "lakefile.lean")) && !fileExists(filepath.Join(absPath, "lakefile.toml")) {
+		if err := copyBootstrapTemplateIfMissing(absPath, "lakefile.lean", "lakefile.lean"); err != nil {
+			return err
+		}
+	}
 	copies := map[string]string{
 		"lean-toolchain":                             "lean-toolchain",
-		"lakefile.lean":                              "lakefile.lean",
 		"MCPAIHelperProject.lean":                    "MCPAIHelperProject.lean",
 		"MCPAIHelperProject/ProjectState.lean":       "MCPAIHelperProject/ProjectState.lean",
 		"MCPAIHelperProject/Samples.lean":            "MCPAIHelperProject/Samples.lean",
@@ -411,6 +418,9 @@ func batchUpsertTasks(ctx context.Context, req tasks.BatchUpsertRequest, command
 func deleteTask(ctx context.Context, req tasks.DeleteRequest, commands *command.Runner, _ *tasks.Store) (leanMutationResult, error) {
 	if strings.TrimSpace(req.ID) == "" {
 		return leanMutationResult{}, errors.New("id is required")
+	}
+	if err := ensureLeanTaskRegistryBootstrap(ctx, req.RepoPath, commands); err != nil {
+		return leanMutationResult{}, err
 	}
 	envelope, err := callLeanTaskMutation(ctx, req.RepoPath, commands, "MCPAIHelperProject.TaskRegistryExport.taskDeleteApply", "task.delete.apply", leanTaskDeleteRPCRequest{ID: req.ID})
 	if err != nil {

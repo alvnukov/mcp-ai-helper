@@ -98,6 +98,9 @@ func leanTaskExporterConfigured(repoPath string) (bool, error) {
 }
 
 func readLeanTaskList(ctx context.Context, repoPath string, commands *command.Runner, args []string) ([]tasks.Task, bool, error) {
+	if err := ensureLeanTaskRegistryBootstrap(ctx, repoPath, commands); err != nil {
+		return nil, true, err
+	}
 	configured, err := leanTaskExporterConfigured(repoPath)
 	if err != nil {
 		return nil, true, err
@@ -135,6 +138,9 @@ func readLeanTaskList(ctx context.Context, repoPath string, commands *command.Ru
 }
 
 func readLeanTask(ctx context.Context, repoPath string, id string, commands *command.Runner) (tasks.Task, bool, error) {
+	if err := ensureLeanTaskRegistryBootstrap(ctx, repoPath, commands); err != nil {
+		return tasks.Task{}, true, err
+	}
 	configured, err := leanTaskExporterConfigured(repoPath)
 	if err != nil {
 		return tasks.Task{}, true, err

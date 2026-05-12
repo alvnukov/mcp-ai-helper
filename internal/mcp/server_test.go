@@ -179,6 +179,45 @@ func TestRunPipelineSchemaIncludesTaskStatusFields(t *testing.T) {
 	}
 }
 
+func TestTaskBatchUpsertSchemaAdvertisesTaskObjects(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{AssistantGuidance: config.DefaultAssistantGuidance()}
+	srv := New(cfg)
+	tool, ok := srv.ListTools()["task_batch_upsert"]
+	if !ok {
+		t.Fatal("task_batch_upsert tool is not registered")
+	}
+
+	schemaBytes, err := json.Marshal(tool.Tool.InputSchema)
+	if err != nil {
+		t.Fatalf("marshal schema: %v", err)
+	}
+	var inputSchema map[string]any
+	if err := json.Unmarshal(schemaBytes, &inputSchema); err != nil {
+		t.Fatalf("unmarshal schema: %v", err)
+	}
+	properties, ok := inputSchema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("task_batch_upsert schema properties missing: %s", string(schemaBytes))
+	}
+	tasksSchema, ok := properties["tasks"].(map[string]any)
+	if !ok {
+		t.Fatalf("tasks schema missing: %s", string(schemaBytes))
+	}
+	items, ok := tasksSchema["items"].(map[string]any)
+	if !ok {
+		t.Fatalf("tasks item schema missing: %s", string(schemaBytes))
+	}
+	if got := items["type"]; got != "object" {
+		t.Fatalf("task_batch_upsert.tasks must advertise object items, got %v: %s", got, string(schemaBytes))
+	}
+	itemProperties, ok := items["properties"].(map[string]any)
+	if !ok || itemProperties["id"] == nil || itemProperties["title"] == nil || itemProperties["acceptance_criteria"] == nil {
+		t.Fatalf("tasks item schema does not expose task fields: %s", string(schemaBytes))
+	}
+}
+
 func TestIssueToolsRegistered(t *testing.T) {
 	t.Parallel()
 
