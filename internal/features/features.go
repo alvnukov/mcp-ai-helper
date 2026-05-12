@@ -360,5 +360,5 @@ func ensureRepoConfigIgnored(repoPath string) error {
 		text += "\n"
 	}
 	text += repoGitignoreEntry + "\n"
-	return os.WriteFile(path, []byte(text), 0o644) // #nosec G306 -- .gitignore is intentionally repo-readable.
+	return os.WriteFile(path, []byte(text), 0o644) // #nosec G306,G703 -- .gitignore is intentionally repo-readable under the caller-selected repo.
 }

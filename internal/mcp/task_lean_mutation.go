@@ -122,7 +122,7 @@ func ensureLeanTaskRegistryBootstrap(ctx context.Context, repoPath string, comma
 	if err != nil {
 		return fmt.Errorf("resolve repo_path for Lean task registry bootstrap: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Join(absPath, "MCPAIHelperProject"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(absPath, "MCPAIHelperProject"), 0o755); err != nil { // #nosec G301 -- Lean source directory is intentionally repo-readable.
 		return fmt.Errorf("create Lean task registry directory: %w", err)
 	}
 	if leanTaskRegistryBootstrapComplete(absPath) {
@@ -154,7 +154,7 @@ func ensureLeanTaskRegistryBootstrap(ctx context.Context, repoPath string, comma
 	}
 	activePath := filepath.Join(absPath, activeTasksLeanPath)
 	if !fileExists(activePath) {
-		if err := os.WriteFile(activePath, []byte(emptyActiveTasksLeanSource), 0o644); err != nil {
+		if err := os.WriteFile(activePath, []byte(emptyActiveTasksLeanSource), 0o644); err != nil { // #nosec G306 -- Lean task source is intentionally repo-readable.
 			return fmt.Errorf("write %s: %w", activeTasksLeanPath, err)
 		}
 	}
@@ -175,7 +175,7 @@ func leanTaskRegistryBootstrapComplete(repoPath string) bool {
 }
 
 func leanTaskExporterCurrent(repoPath string) bool {
-	data, err := os.ReadFile(filepath.Join(repoPath, "MCPAIHelperProject", "TaskRegistryExport.lean"))
+	data, err := os.ReadFile(filepath.Join(repoPath, "MCPAIHelperProject", "TaskRegistryExport.lean")) // #nosec G304 -- path is inside the caller-selected local repo task registry.
 	if err != nil {
 		return false
 	}
@@ -210,10 +210,10 @@ func copyBootstrapTemplate(targetRoot string, sourceRel string, targetRel string
 	if err != nil {
 		return fmt.Errorf("read embedded task registry bootstrap template %s: %w", sourceRel, err)
 	}
-	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil { // #nosec G301 -- Lean source directories are intentionally repo-readable.
 		return fmt.Errorf("create parent for %s: %w", targetRel, err)
 	}
-	if err := os.WriteFile(targetPath, data, 0o644); err != nil {
+	if err := os.WriteFile(targetPath, data, 0o644); err != nil { // #nosec G306 -- Lean source files are intentionally repo-readable.
 		return fmt.Errorf("write %s: %w", targetRel, err)
 	}
 	return nil

@@ -127,7 +127,7 @@ func runLakeInit(ctx context.Context, req lakeInitRequest, commands *command.Run
 
 	// Write lean-toolchain
 	if !fileExists(toolchainPath) {
-		if err := os.WriteFile(toolchainPath, []byte(toolchain+"\n"), 0644); err != nil {
+		if err := os.WriteFile(toolchainPath, []byte(toolchain+"\n"), 0644); err != nil { // #nosec G306 -- Lean workspace source files are intentionally repo-readable.
 			return lakeInitResult{Blocker: fmt.Sprintf("write lean-toolchain: %v", err)}, nil
 		}
 	}
@@ -142,7 +142,7 @@ package bootstrap
 @[default_target]
 lean_lib Bootstrap
 `
-		if err := os.WriteFile(lakefilePath, []byte(content), 0644); err != nil {
+		if err := os.WriteFile(lakefilePath, []byte(content), 0644); err != nil { // #nosec G306 -- Lean workspace source files are intentionally repo-readable.
 			return lakeInitResult{Blocker: fmt.Sprintf("write lakefile.lean: %v", err)}, nil
 		}
 	}
@@ -151,7 +151,7 @@ lean_lib Bootstrap
 	if !fileExists(mainPath) {
 		content := `def hello := "world"
 `
-		if err := os.WriteFile(mainPath, []byte(content), 0644); err != nil {
+		if err := os.WriteFile(mainPath, []byte(content), 0644); err != nil { // #nosec G306 -- Lean workspace source files are intentionally repo-readable.
 			return lakeInitResult{Blocker: fmt.Sprintf("write Bootstrap.lean: %v", err)}, nil
 		}
 	}
