@@ -2,7 +2,6 @@ package mcp
 
 import (
 	"context"
-	"errors"
 	"strings"
 
 	basemcp "github.com/mark3labs/mcp-go/mcp"
@@ -13,7 +12,7 @@ import (
 
 func registerTaskTools(srv *server.MCPServer, deps *Server) {
 	srv.AddTool(basemcp.NewTool("task_add",
-		basemcp.WithDescription("Create or replace a per-repository task file in Lean format."),
+		basemcp.WithDescription("Create or replace a per-repository task in the helper-owned Lean registry."),
 		basemcp.WithString("repo_path", basemcp.Required()),
 		basemcp.WithString("title", basemcp.Required()),
 		basemcp.WithString("body"),
@@ -51,9 +50,6 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 		_, _, commands, _, store := deps.loadDeps()
 		list, source, err := readAllTasks(ctx, args.RepoPath, commands, store)
 		if err != nil {
-			if errors.Is(err, ErrNoLakeWorkspace) {
-				return structured(map[string]any{"tasks": []tasks.Task{}, "source": "none", "init_required": true, "suggestion": "No Lake/Lean workspace detected. Run lake_init to bootstrap a minimal Lean project."})
-			}
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
 		return structured(map[string]any{"tasks": filterTasks(list, args), "source": source})
@@ -71,9 +67,6 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 		_, _, commands, _, store := deps.loadDeps()
 		list, source, err := readAllTasks(ctx, args.RepoPath, commands, store)
 		if err != nil {
-			if errors.Is(err, ErrNoLakeWorkspace) {
-				return structured(map[string]any{"tasks": []tasks.Task{}, "source": "none", "init_required": true, "suggestion": "No Lake/Lean workspace detected. Run lake_init to bootstrap a minimal Lean project."})
-			}
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
 		return structured(map[string]any{"tasks": filterTasks(list, args), "source": source})
@@ -100,9 +93,6 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 		_, _, commands, _, store := deps.loadDeps()
 		existing, _, err := readTask(ctx, args.RepoPath, args.ID, commands, store)
 		if err != nil {
-			if errors.Is(err, ErrNoLakeWorkspace) {
-				return structured(map[string]any{"source": "none", "init_required": true, "suggestion": "No Lake/Lean workspace detected. Run lake_init to bootstrap a minimal Lean project."})
-			}
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
 		result, err := upsertTask(ctx, mergeTaskUpdate(existing, args), commands, store)
@@ -124,9 +114,6 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 		_, _, commands, _, store := deps.loadDeps()
 		result, err := setTaskStatus(ctx, args, commands, store)
 		if err != nil {
-			if errors.Is(err, ErrNoLakeWorkspace) {
-				return structured(map[string]any{"source": "none", "init_required": true, "suggestion": "No Lake/Lean workspace detected. Run lake_init to bootstrap a minimal Lean project."})
-			}
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
 		return structured(result)
@@ -134,7 +121,7 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 	srv.AddTool(basemcp.NewTool("task_batch_upsert",
 		basemcp.WithDescription("Synchronize many per-repository tasks in one call and optionally close active tasks omitted from the batch."),
 		basemcp.WithString("repo_path", basemcp.Required()),
-		basemcp.WithArray("tasks", basemcp.Required()),
+		basemcp.WithArray("tasks", basemcp.Required(), basemcp.Items(taskUpsertItemSchema())),
 		basemcp.WithBoolean("close_missing"),
 		basemcp.WithString("missing_status"),
 		basemcp.WithArray("active_statuses"),
@@ -187,9 +174,6 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 		_, _, commands, _, store := deps.loadDeps()
 		list, source, err := readCurrentTasks(ctx, args.RepoPath, commands, store)
 		if err != nil {
-			if setup, ok := taskReadSetupPayload(err); ok {
-				return structured(setup)
-			}
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
 		return structured(map[string]any{"tasks": list, "source": source})
@@ -205,9 +189,6 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 		_, _, commands, _, store := deps.loadDeps()
 		list, _, err := readAllTasks(ctx, args.RepoPath, commands, store)
 		if err != nil {
-			if errors.Is(err, ErrNoLakeWorkspace) {
-				return structured(map[string]any{"tasks": []tasks.Task{}, "source": "none", "init_required": true, "suggestion": "No Lake/Lean workspace detected. Run lake_init to bootstrap a minimal Lean project."})
-			}
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
 		return structured(buildTaskTree(list))
@@ -224,9 +205,6 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 		_, _, commands, _, store := deps.loadDeps()
 		task, _, err := readTask(ctx, args.RepoPath, args.ID, commands, store)
 		if err != nil {
-			if errors.Is(err, ErrNoLakeWorkspace) {
-				return structured(map[string]any{"source": "none", "init_required": true, "suggestion": "No Lake/Lean workspace detected. Run lake_init to bootstrap a minimal Lean project."})
-			}
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
 		return structured(task)
@@ -249,27 +227,26 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 	})
 }
 
-func taskReadSetupPayload(err error) (map[string]any, bool) {
-	if errors.Is(err, ErrNoLakeWorkspace) {
-		return map[string]any{"tasks": []tasks.Task{}, "source": "none", "init_required": true, "suggestion": "No Lake/Lean workspace detected. Run lake_init to bootstrap a minimal Lean project."}, true
-	}
-	if errors.Is(err, ErrLeanTaskExporterMissing) {
-		return leanTaskExporterRepairPayload(err), true
-	}
-	return nil, false
-}
-
-func leanTaskExporterRepairPayload(err error) map[string]any {
+func taskUpsertItemSchema() map[string]any {
+	stringArray := map[string]any{"type": "array", "items": map[string]any{"type": "string"}}
 	return map[string]any{
-		"tasks":           []tasks.Task{},
-		"source":          "lean_registry",
-		"repair_required": true,
-		"action":          "repair_lean_task_registry_exporter",
-		"error":           err.Error(),
-		"missing_files":   []string{"MCPAIHelperProject/TaskRegistryExport.lean"},
-		"lake_config":     "Declare a task_registry_export executable that uses MCPAIHelperProject.TaskRegistryExport as its root module.",
-		"verification":    []string{"lake build", "lake exe task_registry_export --list-active", "task_current"},
-		"suggestion":      "Run server_setup_guidance and apply the Lean task registry exporter repair steps before continuing the mandatory task workflow.",
+		"type": "object",
+		"properties": map[string]any{
+			"id":                  map[string]any{"type": "string", "description": "Stable task id."},
+			"title":               map[string]any{"type": "string"},
+			"status":              map[string]any{"type": "string", "description": "todo, in_progress, blocked, or done."},
+			"body":                map[string]any{"type": "string"},
+			"priority":            map[string]any{"type": "string"},
+			"model_level":         map[string]any{"type": "string"},
+			"task_type":           map[string]any{"type": "string"},
+			"branch":              map[string]any{"type": "string"},
+			"worktree_path":       map[string]any{"type": "string"},
+			"parent_id":           map[string]any{"type": "string"},
+			"tags":                stringArray,
+			"acceptance_criteria": stringArray,
+			"verification_plan":   stringArray,
+		},
+		"required": []string{"id", "title"},
 	}
 }
 

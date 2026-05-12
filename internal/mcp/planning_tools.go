@@ -2,7 +2,6 @@ package mcp
 
 import (
 	"context"
-	"errors"
 	"strings"
 
 	basemcp "github.com/mark3labs/mcp-go/mcp"
@@ -115,9 +114,6 @@ func registerPlanningTools(srv *server.MCPServer, deps *Server) {
 		_, _, commands, _, store := deps.loadDeps()
 		task, _, err := readTask(ctx, args.RepoPath, args.ID, commands, store)
 		if err != nil {
-			if errors.Is(err, ErrNoLakeWorkspace) {
-				return structured(map[string]any{"source": "none", "init_required": true, "suggestion": "No Lake/Lean workspace detected. Run lake_init to bootstrap a minimal Lean project."})
-			}
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
 		return structured(buildTaskPacket(task, args.CurrentModelLevel, reasoningPatternsEnabled))
@@ -136,9 +132,6 @@ func registerPlanningTools(srv *server.MCPServer, deps *Server) {
 		_, _, commands, _, store := deps.loadDeps()
 		list, _, err := readAllTasks(ctx, args.RepoPath, commands, store)
 		if err != nil {
-			if errors.Is(err, ErrNoLakeWorkspace) {
-				return structured(map[string]any{"mode": "blocked", "action": "init_required", "planning_only": true, "init_required": true, "suggestion": "No Lake/Lean workspace detected. Run lake_init to bootstrap a minimal Lean project."})
-			}
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
 		return structured(planTaskExecution(list, args))
