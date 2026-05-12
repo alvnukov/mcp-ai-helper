@@ -95,6 +95,37 @@ func TestReadCurrentTasksRepairsMissingLeanTaskExporter(t *testing.T) {
 	}
 }
 
+func TestReadCurrentTasksRepairsStaleLeanTaskExporter(t *testing.T) {
+	repo := copyLeanRepoFixture(t)
+	exporterPath := filepath.Join(repo, "MCPAIHelperProject", "TaskRegistryExport.lean")
+	data, err := os.ReadFile(exporterPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := strings.Replace(string(data), "def taskList ", "def legacyTaskList ", 1)
+	if stale == string(data) {
+		t.Fatal("test fixture did not contain taskList RPC")
+	}
+	if err := os.WriteFile(exporterPath, []byte(stale), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, source, err := readCurrentTasks(context.Background(), repo, commandRunnerForRepo(repo), legacyStoreForTest(t))
+	if err != nil {
+		t.Fatalf("readCurrentTasks returned error: %v", err)
+	}
+	if source != "lean_registry" {
+		t.Fatalf("source=%q, want lean_registry", source)
+	}
+	repaired, err := os.ReadFile(exporterPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(repaired), "def taskList ") {
+		t.Fatal("stale exporter was not repaired")
+	}
+}
+
 func commandRunnerForRepo(repoRoot string) *command.Runner {
 	return command.NewRunner(config.CommandPolicy{AllowedCWDs: []string{repoRoot}, DefaultTimeoutSeconds: 20, MaxOutputBytes: 20000, MaxLines: 80})
 }
