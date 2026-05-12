@@ -233,8 +233,7 @@ func TestIssueToolsRegistered(t *testing.T) {
 
 func TestIssueLifecycleUsesLeanRegistry(t *testing.T) {
 	repoPath := copyLeanRepoFixture(t)
-	commands := commandRunnerForRepo(repoPath)
-	store := legacyStoreForTest(t)
+	backend := newLakeTaskBackend(commandRunnerForRepo(repoPath), legacyStoreForTest(t))
 
 	created, err := addIssue(context.Background(), issueAddRequest{
 		RepoPath:       repoPath,
@@ -244,7 +243,7 @@ func TestIssueLifecycleUsesLeanRegistry(t *testing.T) {
 		Body:           "record this for later",
 		Priority:       "high",
 		Tags:           []string{"routing"},
-	}, commands, store)
+	}, backend)
 	if err != nil {
 		t.Fatalf("add issue: %v", err)
 	}
@@ -255,7 +254,7 @@ func TestIssueLifecycleUsesLeanRegistry(t *testing.T) {
 		t.Fatalf("body does not preserve source repo: %q", created.Body)
 	}
 
-	listed, err := listIssues(context.Background(), issueListRequest{RepoPath: repoPath, Query: "feedback routing"}, commands, store)
+	listed, err := listIssues(context.Background(), issueListRequest{RepoPath: repoPath, Query: "feedback routing"}, backend)
 	if err != nil {
 		t.Fatalf("list issues: %v", err)
 	}
@@ -263,7 +262,7 @@ func TestIssueLifecycleUsesLeanRegistry(t *testing.T) {
 		t.Fatalf("listed issues = %#v", listed)
 	}
 
-	accepted, err := acceptIssue(context.Background(), issueAcceptRequest{RepoPath: repoPath, ID: created.ID}, commands, store)
+	accepted, err := acceptIssue(context.Background(), issueAcceptRequest{RepoPath: repoPath, ID: created.ID}, backend)
 	if err != nil {
 		t.Fatalf("accept issue: %v", err)
 	}

@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zol/mcp-ai-helper/internal/command"
 	"github.com/zol/mcp-ai-helper/internal/tasks"
 )
 
@@ -20,49 +19,28 @@ type taskUIBackend interface {
 	SetStatus(context.Context, tasks.StatusRequest) (leanMutationResult, error)
 }
 
-type leanTaskUIBackend struct {
-	commands *command.Runner
-	store    *tasks.Store
-}
-
-func (b leanTaskUIBackend) List(ctx context.Context, repoPath string) ([]tasks.Task, string, error) {
-	return readAllTasks(ctx, repoPath, b.commands, b.store)
-}
-
-func (b leanTaskUIBackend) Get(ctx context.Context, repoPath string, id string) (tasks.Task, string, error) {
-	return readTask(ctx, repoPath, id, b.commands, b.store)
-}
-
-func (b leanTaskUIBackend) Upsert(ctx context.Context, req tasks.AddRequest) (leanMutationResult, error) {
-	return upsertTask(ctx, req, b.commands, b.store)
-}
-
-func (b leanTaskUIBackend) SetStatus(ctx context.Context, req tasks.StatusRequest) (leanMutationResult, error) {
-	return setTaskStatus(ctx, req, b.commands, b.store)
-}
-
 type serverTaskUIBackend struct {
 	deps *Server
 }
 
 func (b serverTaskUIBackend) List(ctx context.Context, repoPath string) ([]tasks.Task, string, error) {
-	_, _, commands, _, store := b.deps.loadDeps()
-	return readAllTasks(ctx, repoPath, commands, store)
+	backend := b.deps.loadTaskBackend()
+	return backend.ListAll(ctx, repoPath)
 }
 
 func (b serverTaskUIBackend) Get(ctx context.Context, repoPath string, id string) (tasks.Task, string, error) {
-	_, _, commands, _, store := b.deps.loadDeps()
-	return readTask(ctx, repoPath, id, commands, store)
+	backend := b.deps.loadTaskBackend()
+	return backend.Get(ctx, repoPath, id)
 }
 
 func (b serverTaskUIBackend) Upsert(ctx context.Context, req tasks.AddRequest) (leanMutationResult, error) {
-	_, _, commands, _, store := b.deps.loadDeps()
-	return upsertTask(ctx, req, commands, store)
+	backend := b.deps.loadTaskBackend()
+	return backend.Upsert(ctx, req)
 }
 
 func (b serverTaskUIBackend) SetStatus(ctx context.Context, req tasks.StatusRequest) (leanMutationResult, error) {
-	_, _, commands, _, store := b.deps.loadDeps()
-	return setTaskStatus(ctx, req, commands, store)
+	backend := b.deps.loadTaskBackend()
+	return backend.SetStatus(ctx, req)
 }
 
 func newServerTaskUIHandler(deps *Server) http.Handler {

@@ -202,7 +202,7 @@ func TestRunWorkflowTaskTransitionUsesLeanRegistry(t *testing.T) {
 			MaxLines:              80,
 		},
 	}
-	_, commands, workflows, store := buildDeps(cfg)
+	_, commands, workflows, store, _ := buildDeps(cfg)
 	if _, err := setTaskStatus(context.Background(), tasks.StatusRequest{RepoPath: repo, ID: "task-043", Status: "todo"}, commands, store); err != nil {
 		t.Fatalf("prepare canonical task status: %v", err)
 	}
@@ -242,7 +242,7 @@ func TestRunWorkflowCurrentTaskIDBlocksLeanTaskOnSkippedGate(t *testing.T) {
 			MaxLines:              80,
 		},
 	}
-	_, commands, workflows, store := buildDeps(cfg)
+	_, commands, workflows, store, _ := buildDeps(cfg)
 	if _, err := upsertTask(context.Background(), tasks.AddRequest{RepoPath: repo, ID: "task-999", Status: "todo", Title: "Skipped gate fixture"}, commands, store); err != nil {
 		t.Fatalf("create canonical task: %v", err)
 	}

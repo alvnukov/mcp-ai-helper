@@ -111,8 +111,8 @@ func registerPlanningTools(srv *server.MCPServer, deps *Server) {
 		if err := bind(req, &args); err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
-		_, _, commands, _, store := deps.loadDeps()
-		task, _, err := readTask(ctx, args.RepoPath, args.ID, commands, store)
+		backend := deps.loadTaskBackend()
+		task, _, err := backend.Get(ctx, args.RepoPath, args.ID)
 		if err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
@@ -129,8 +129,8 @@ func registerPlanningTools(srv *server.MCPServer, deps *Server) {
 		if err := bind(req, &args); err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
-		_, _, commands, _, store := deps.loadDeps()
-		list, _, err := readAllTasks(ctx, args.RepoPath, commands, store)
+		backend := deps.loadTaskBackend()
+		list, _, err := backend.ListAll(ctx, args.RepoPath)
 		if err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}

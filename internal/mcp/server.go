@@ -1,7 +1,6 @@
 package mcp
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -28,6 +27,7 @@ type Server struct {
 	commands            *command.Runner
 	pipelines           *pipeline.Runner
 	taskStore           *tasks.Store
+	taskBackend         taskBackend
 	secretMask          *security.Mask
 	jiraClient          *jira.Client
 	confluenceClient    *confluence.Client
@@ -89,7 +89,13 @@ func (s *Server) loadDeps() (*config.Config, provider.ChatClient, *command.Runne
 	return s.cfg, s.chat, s.commands, s.pipelines, s.taskStore
 }
 
-func buildDeps(cfg *config.Config) (provider.ChatClient, *command.Runner, *pipeline.Runner, *tasks.Store) {
+func (s *Server) loadTaskBackend() taskBackend {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.taskBackend
+}
+
+func buildDeps(cfg *config.Config) (provider.ChatClient, *command.Runner, *pipeline.Runner, *tasks.Store, taskBackend) {
 	chat := provider.NewClient(cfg.Providers)
 	cmds := command.NewRunner(cfg.CommandPolicy)
 	projectStore, err := project.NewStore(cfg.CommandPolicy.LogDir)
@@ -98,8 +104,9 @@ func buildDeps(cfg *config.Config) (provider.ChatClient, *command.Runner, *pipel
 		projectStore, _ = project.NewStore(".mcp-ai-helper")
 	}
 	store := tasks.NewStore(projectStore)
-	pipes := pipeline.NewRunnerWithTaskBackend(cfg, chat, leanTaskBackend{commands: cmds, store: store})
-	return chat, cmds, pipes, store
+	backend := newLakeTaskBackend(cmds, store)
+	pipes := pipeline.NewRunnerWithTaskBackend(cfg, chat, workflowTaskBackend{backend: backend})
+	return chat, cmds, pipes, store, backend
 }
 
 func (s *Server) commandRunnerForRepo(repoPath string, toolName string) (*command.Runner, error) {
@@ -138,32 +145,8 @@ func (s *Server) pipelineRunnerForRepo(repoPath string, toolName string) (*pipel
 		return nil, err
 	}
 	cmds := command.NewRunner(merged.CommandPolicy)
-	return pipeline.NewRunnerWithTaskBackend(merged, chat, leanTaskBackend{commands: cmds, store: store}), nil
-}
-
-type leanTaskBackend struct {
-	commands *command.Runner
-	store    *tasks.Store
-}
-
-func (b leanTaskBackend) Get(ctx context.Context, repoPath string, id string) (tasks.Task, error) {
-	task, _, err := readTask(ctx, repoPath, id, b.commands, b.store)
-	return task, err
-}
-
-func (b leanTaskBackend) List(ctx context.Context, repoPath string) ([]tasks.Task, error) {
-	items, _, err := readCurrentTasks(ctx, repoPath, b.commands, b.store)
-	return items, err
-}
-
-func (b leanTaskBackend) SetStatus(ctx context.Context, req tasks.StatusRequest) (tasks.Task, error) {
-	result, err := setTaskStatus(ctx, req, b.commands, b.store)
-	return result.Task, err
-}
-
-func (b leanTaskBackend) BatchUpsert(ctx context.Context, req tasks.BatchUpsertRequest) (tasks.BatchUpsertResult, error) {
-	result, err := batchUpsertTasks(ctx, req, b.commands, b.store)
-	return tasks.BatchUpsertResult{Upserted: result.Upserted, Closed: result.Closed, Source: result.Source, Validation: result.Validation}, err
+	backend := newLakeTaskBackend(cmds, store)
+	return pipeline.NewRunnerWithTaskBackend(merged, chat, workflowTaskBackend{backend: backend}), nil
 }
 
 // New constructs an MCP server with all configured helper tools.
@@ -177,7 +160,7 @@ func New(cfg *config.Config) *server.MCPServer {
 	)
 
 	deps := &Server{cfg: cfg, secretMask: buildSecretMask(cfg), jiraClient: buildJiraClient(cfg)}
-	deps.chat, deps.commands, deps.pipelines, deps.taskStore = buildDeps(cfg)
+	deps.chat, deps.commands, deps.pipelines, deps.taskStore, deps.taskBackend = buildDeps(cfg)
 
 	registerLanguageTools(srv)
 	registerFileTools(srv)
@@ -196,13 +179,14 @@ func New(cfg *config.Config) *server.MCPServer {
 			if err != nil {
 				return nil, err
 			}
-			chat, cmds, pipes, store := buildDeps(next)
+			chat, cmds, pipes, store, backend := buildDeps(next)
 			deps.mu.Lock()
 			deps.cfg = next
 			deps.chat = chat
 			deps.commands = cmds
 			deps.pipelines = pipes
 			deps.taskStore = store
+			deps.taskBackend = backend
 			deps.secretMask = buildSecretMask(next)
 			deps.jiraClient = buildJiraClient(next)
 			deps.confluenceClient, deps.confluenceClientErr = buildConfluenceClient(next)
