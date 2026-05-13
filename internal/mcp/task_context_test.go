@@ -211,6 +211,28 @@ func TestBuildTaskContext_WithChildren(t *testing.T) {
 	}
 }
 
+func TestBuildTaskContext_RootTaskDoesNotPullGlobalRootSiblings(t *testing.T) {
+	all := []tasks.Task{
+		makeCTask("selected", "todo", "Selected root task", ""),
+		makeCTask("done-root", "done", "Unrelated done root", ""),
+		makeCTask("blocked-root", "blocked", "Unrelated blocked root", ""),
+		makeCTask("child", "todo", "Selected child", "selected"),
+	}
+	ctx, err := BuildTaskContext(all, TaskContextRequest{RepoPath: "/test", TaskID: "selected"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(ctx.AlreadyDone) != 0 {
+		t.Fatalf("root siblings must not be already_done context: %v", ctx.AlreadyDone)
+	}
+	if len(ctx.Blockers) != 0 {
+		t.Fatalf("root siblings must not be blockers context: %v", ctx.Blockers)
+	}
+	if len(ctx.PlannedNext) != 1 || ctx.PlannedNext[0].ID != "child" {
+		t.Fatalf("expected only selected child in planned_next, got %v", ctx.PlannedNext)
+	}
+}
+
 func TestBuildTaskContext_Prerequisites(t *testing.T) {
 	// Parent chain has non-done ancestor = prerequisite
 	all := []tasks.Task{
