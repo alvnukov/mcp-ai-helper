@@ -9,7 +9,11 @@ import (
 	"strings"
 	"time"
 
+	"regexp"
+
 	"gopkg.in/yaml.v3"
+
+	"github.com/zol/mcp-ai-helper/internal/security"
 )
 
 const (
@@ -53,6 +57,44 @@ type Config struct {
 	CommandPolicy     CommandPolicy             `yaml:"command_policy" json:"command_policy"`
 	PipelinePolicy    PipelinePolicy            `yaml:"pipeline_policy" json:"pipeline_policy"`
 	Integrations      IntegrationsConfig        `yaml:"integrations" json:"integrations"`
+	Secrets           map[string]SecretConfig   `yaml:"secrets" json:"-"`
+}
+
+// SecretConfig holds a single named server-config secret. Never serialized to JSON.
+type SecretConfig struct {
+	Value   string `yaml:"value" json:"-"`
+	Enabled bool   `yaml:"enabled" json:"-"`
+}
+
+// validSecretHandle matches allowed secret handle names.
+var validSecretHandle = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,63}$`)
+
+// ResolveSecretEnv validates handles and returns env vars ("HELPER_SECRET_<NAME>=<value>")
+// and a Mask populated with resolved values. Returns error on first invalid/missing/disabled handle.
+func (c Config) ResolveSecretEnv(handles []string) ([]string, *security.Mask, error) {
+        if len(handles) == 0 {
+                return nil, nil, nil
+        }
+        envs := make([]string, 0, len(handles))
+        mask := security.NewMask()
+        for _, h := range handles {
+                if !validSecretHandle.MatchString(h) {
+                        return nil, nil, fmt.Errorf("invalid secret handle: %s", h)
+                }
+                s, ok := c.Secrets[h]
+                if !ok {
+                        return nil, nil, fmt.Errorf("secret handle not found: %s", h)
+                }
+                if !s.Enabled {
+                        return nil, nil, fmt.Errorf("secret is disabled: %s", h)
+                }
+                if len(s.Value) < 8 {
+                        return nil, nil, fmt.Errorf("secret value too short for handle: %s", h)
+                }
+                envs = append(envs, "HELPER_SECRET_"+h+"="+s.Value)
+                mask.AddNamed(h, s.Value)
+        }
+        return envs, mask, nil
 }
 
 // RepoPermissions defines per-repository LLM permissions set by the user in .mcp-ai-helper.yaml.

@@ -6,40 +6,49 @@ import (
 	"sync"
 )
 
+// namedSecret pairs a secret value with its handle name for precise masking.
+type namedSecret struct {
+	value string
+	name  string
+}
+
 // Mask holds sensitive strings that must be redacted from output.
 type Mask struct {
 	mu      sync.RWMutex
-	secrets []string
+	secrets []namedSecret
 }
 
-// NewMask creates a Mask from sensitive values.
-func NewMask(secrets ...string) *Mask {
-	m := &Mask{}
-	for _, s := range secrets {
-		if s != "" {
-			m.secrets = append(m.secrets, s)
-		}
-	}
-	return m
+// NewMask creates an empty Mask.
+func NewMask() *Mask {
+	return &Mask{}
 }
 
-// Add adds a secret value to the mask.
-func (m *Mask) Add(secret string) {
-	if secret == "" {
+// AddNamed adds a secret value with its handle name.
+func (m *Mask) AddNamed(name, value string) {
+	if value == "" {
 		return
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.secrets = append(m.secrets, secret)
+	m.secrets = append(m.secrets, namedSecret{value: value, name: name})
 }
 
-// Apply replaces all known secrets in s with ***.
+// Add adds a secret value with an empty name for backward compatibility.
+func (m *Mask) Add(value string) {
+	m.AddNamed("", value)
+}
+
+// Apply replaces all known secrets in s with their named mask token.
 func (m *Mask) Apply(s string) string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	for _, secret := range m.secrets {
-		if secret != "" && strings.Contains(s, secret) {
-			s = strings.ReplaceAll(s, secret, "***")
+	for _, sec := range m.secrets {
+		if sec.value != "" && strings.Contains(s, sec.value) {
+			repl := "***"
+			if sec.name != "" {
+				repl = "[HELPER_SECRET:" + sec.name + "]"
+			}
+			s = strings.ReplaceAll(s, sec.value, repl)
 		}
 	}
 	return s

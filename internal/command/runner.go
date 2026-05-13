@@ -20,7 +20,29 @@ import (
 
 	"github.com/zol/mcp-ai-helper/internal/config"
 	"github.com/zol/mcp-ai-helper/internal/evidence"
+	"github.com/zol/mcp-ai-helper/internal/security"
 )
+
+// Context keys for per-request secret injection.
+type contextKey string
+
+const (
+	secretEnvsKey contextKey = "secret_envs"
+	secretMaskKey contextKey = "secret_mask"
+)
+
+// ContextWithSecrets stores resolved secret env vars and mask in the context.
+func ContextWithSecrets(ctx context.Context, envs []string, mask *security.Mask) context.Context {
+	ctx = context.WithValue(ctx, secretEnvsKey, envs)
+	ctx = context.WithValue(ctx, secretMaskKey, mask)
+	return ctx
+}
+
+func secretsFromContext(ctx context.Context) ([]string, *security.Mask) {
+	envs, _ := ctx.Value(secretEnvsKey).([]string)
+	mask, _ := ctx.Value(secretMaskKey).(*security.Mask)
+	return envs, mask
+}
 
 // Runner executes shell commands under repository and output policies.
 type Runner struct {
@@ -106,6 +128,10 @@ func (r *Runner) runFiltered(
 	command := exec.CommandContext(runCtx, shellBin(), shellArgs(cmd)...)
 	command.Dir = runCWD
 	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	envs, cmdMask := secretsFromContext(ctx)
+	if len(envs) > 0 {
+		command.Env = append(os.Environ(), envs...)
+	}
 	// Kill process group on context cancellation so no orphans survive.
 	stop := context.AfterFunc(runCtx, func() {
 		if command.Process != nil {
@@ -135,6 +161,10 @@ func (r *Runner) runFiltered(
 
 	stdoutText := redact(stdout.String())
 	stderrText := redact(stderr.String())
+	if cmdMask != nil {
+		stdoutText = cmdMask.Apply(stdoutText)
+		stderrText = cmdMask.Apply(stderrText)
+	}
 	stdoutLines := normalizeLines(stdoutText)
 	stderrLines := normalizeLines(stderrText)
 	combined := append([]string{}, stdoutLines...)
@@ -165,9 +195,13 @@ func (r *Runner) runFiltered(
 	}); err != nil {
 		return Result{}, err
 	}
+	commandStr := cmd
+	if cmdMask != nil {
+		commandStr = cmdMask.Apply(commandStr)
+	}
 	return Result{
 		CommandID:     commandID,
-		Command:       cmd,
+		Command:       commandStr,
 		CWD:           runCWD,
 		ExitCode:      exitCode,
 		DurationMS:    duration.Milliseconds(),

@@ -859,3 +859,134 @@ func TestRunMarshalJSONKeepsDetailsWhenCompactDisabled(t *testing.T) {
 		t.Fatalf("non-compact json should retain details: %s", text)
 	}
 }
+
+func TestSecretInjectionEnvVarReachesCommand(t *testing.T) {
+	dir := t.TempDir()
+	cfg := testConfig(dir)
+	cfg.Secrets = map[string]config.SecretConfig{
+		"GH_TOKEN": {Value: "fake-gh-token-42a7b9c1d3e5f", Enabled: true},
+	}
+	runner := NewRunner(cfg, nil)
+	result, err := runner.RunWorkflow(t.Context(), WorkflowRequest{
+		RepoPath:      dir,
+		SecretHandles: []string{"GH_TOKEN"},
+		Checks: []WorkflowCommand{{
+			Command: "sh -c 'echo -n $HELPER_SECRET_GH_TOKEN'",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "ok" {
+		t.Fatalf("status = %q, reason = %q", result.Status, result.Reason)
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(encoded)
+	if strings.Contains(text, "fake-gh-token-42a7b9c1d3e5f") {
+		t.Error("T1-FAIL: raw secret leaked into model-facing output")
+	} else if strings.Contains(text, "[HELPER_SECRET:GH_TOKEN]") {
+		t.Log("T1-PASS: secret masked correctly in output")
+	} else {
+		t.Error("T1-FAIL: secret neither leaked nor masked — injection may have failed")
+	}
+}
+
+func TestSecretOutputRedactionEchoLeak(t *testing.T) {
+	dir := t.TempDir()
+	cfg := testConfig(dir)
+	cfg.Secrets = map[string]config.SecretConfig{
+		"NPM_TOKEN": {Value: "fake-npm-token-deadbeef12345678", Enabled: true},
+	}
+	runner := NewRunner(cfg, nil)
+	result, err := runner.RunWorkflow(t.Context(), WorkflowRequest{
+		RepoPath:      dir,
+		SecretHandles: []string{"NPM_TOKEN"},
+		Checks: []WorkflowCommand{{
+			Command: "sh -c 'echo $HELPER_SECRET_NPM_TOKEN'",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(encoded)
+	if strings.Contains(text, "fake-npm-token-deadbeef12345678") {
+		t.Error("T2-FAIL: raw secret leaked into model-facing output")
+	}
+	if !strings.Contains(text, "[HELPER_SECRET:NPM_TOKEN]") {
+		t.Error("T2-FAIL: masked token not found in output — redaction may have failed")
+	}
+}
+
+func TestSecretUnknownHandleFailsClosed(t *testing.T) {
+	dir := t.TempDir()
+	cfg := testConfig(dir)
+	cfg.Secrets = map[string]config.SecretConfig{}
+	runner := NewRunner(cfg, nil)
+	_, err := runner.RunWorkflow(t.Context(), WorkflowRequest{
+		RepoPath:      dir,
+		SecretHandles: []string{"NONEXISTENT"},
+		Checks: []WorkflowCommand{{
+			Command: "echo should-not-run",
+		}},
+	})
+	if err == nil {
+		t.Error("T5-FAIL: expected error for unknown handle, got nil")
+	} else if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("T5-FAIL: expected 'not found' error, got: %v", err)
+	}
+}
+
+func TestSecretConfigExcludedFromJSON(t *testing.T) {
+	cfg := testConfig(t.TempDir())
+	cfg.Secrets = map[string]config.SecretConfig{
+		"XYZ": {Value: "should-not-appear-0123456789ab", Enabled: true},
+	}
+	out, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(out)
+	if strings.Contains(text, "should-not-appear") {
+		t.Error("T9-FAIL: secret value appeared in config JSON")
+	}
+	if strings.Contains(text, "Secrets") || strings.Contains(text, "secrets") {
+		t.Error("T9-FAIL: Secrets field appeared in config JSON serialization")
+	}
+}
+
+func TestSecretNotLeakedInResultCommandField(t *testing.T) {
+	dir := t.TempDir()
+	cfg := testConfig(dir)
+	cfg.Secrets = map[string]config.SecretConfig{
+		"TOKEN": {Value: "secret-xyz-1111111111111111", Enabled: true},
+	}
+	runner := NewRunner(cfg, nil)
+	result, err := runner.RunWorkflow(t.Context(), WorkflowRequest{
+		RepoPath:      dir,
+		SecretHandles: []string{"TOKEN"},
+		Checks: []WorkflowCommand{{
+			Command: "sh -c 'echo $HELPER_SECRET_TOKEN; exit 0'",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(encoded)
+	if strings.Contains(text, "secret-xyz-1111111111111111") {
+		t.Error("T7-FAIL: raw secret value leaked in model-facing result")
+	}
+	if !strings.Contains(text, "[HELPER_SECRET:TOKEN]") {
+		t.Error("T7-FAIL: masked token not found in result — command field may leak or injection failed")
+	}
+}

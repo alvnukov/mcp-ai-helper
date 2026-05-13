@@ -52,6 +52,7 @@ type Request struct {
 	Task           string `json:"task"`
 	ModelID        string `json:"model_id"`
 	CompactOutput  *bool  `json:"compact_output,omitempty"`
+	SecretHandles  []string `json:"secret_handles,omitempty"`
 }
 
 // Result is the command-analysis pipeline output.
@@ -96,6 +97,7 @@ type WorkflowRequest struct {
 	Edits         []WorkflowEdit    `json:"edits"`
 	Checks        []WorkflowCommand `json:"checks"`
 	Commit        WorkflowCommit    `json:"commit"`
+	SecretHandles []string           `json:"secret_handles,omitempty"`
 }
 
 // WorkflowStep is one deterministic workflow DSL step.
@@ -211,6 +213,13 @@ func (r *Runner) RunWorkflow(ctx context.Context, req WorkflowRequest) (result W
 
 	if strings.TrimSpace(req.RepoPath) == "" {
 		return WorkflowResult{}, errors.New("repo_path is required")
+	}
+	if len(req.SecretHandles) > 0 {
+		envs, mask, err := r.cfg.ResolveSecretEnv(req.SecretHandles)
+		if err != nil {
+			return WorkflowResult{}, err
+		}
+		ctx = command.ContextWithSecrets(ctx, envs, mask)
 	}
 	if len(req.Steps) > 0 {
 		return r.runWorkflowSteps(ctx, req)
@@ -1087,6 +1096,13 @@ func workflowTaskCloseoutSucceeded(req WorkflowRequest, result WorkflowResult, e
 func (r *Runner) Run(ctx context.Context, req Request) (result Result, err error) {
 	if err := r.updateTaskStatus(ctx, req.CurrentTaskID, taskStatusOrDefault(req.TaskOnStart, "in_progress"), req.RepoPath); err != nil {
 		return Result{}, err
+	}
+	if len(req.SecretHandles) > 0 {
+		envs, mask, err := r.cfg.ResolveSecretEnv(req.SecretHandles)
+		if err != nil {
+			return Result{}, err
+		}
+		ctx = command.ContextWithSecrets(ctx, envs, mask)
 	}
 	defer func() {
 		finalStatus := taskStatusOrDefault(req.TaskOnSuccess, "done")
