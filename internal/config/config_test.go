@@ -258,6 +258,9 @@ func TestGuidanceDocumentsStrictRepoTaskWorkflow(t *testing.T) {
 		"first gather complete minimal sufficient context",
 		"After context gathering, stop and state the decision",
 		"selected tasks, why they fit the current model",
+		"task_graph for overview/dependencies",
+		"task_context for selected-task execution context",
+		"task_packet for readiness/owned_files/gates",
 		"one self-contained run_pipeline or run_workflow",
 		"Never set a task to done until its acceptance criteria, relevant gate, and required owned-files commit are actually closed",
 		"evidence-only analysis success",
@@ -273,7 +276,7 @@ func TestGuidanceDocumentsStrictRepoTaskWorkflow(t *testing.T) {
 		}
 	}
 	setup := SetupGuidance("")
-	for _, want := range []string{"batch task updates", "close_missing only intentionally", "because it can close omitted active tasks", "acceptance criteria, gates, and required owned-files commit pass", "no commit means the task is not done", "evidence-only analysis"} {
+	for _, want := range []string{"task_graph for dependency overview", "task_context for selected-task execution context", "task_packet for readiness/owned_files/gates", "batch task updates", "close_missing only intentionally", "because it can close omitted active tasks", "acceptance criteria, gates, and required owned-files commit pass", "no commit means the task is not done", "evidence-only analysis"} {
 		if !strings.Contains(setup["tasks"], want) {
 			t.Fatalf("setup guidance missing %q in %#v", want, setup)
 		}
