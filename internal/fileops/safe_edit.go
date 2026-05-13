@@ -356,6 +356,105 @@ func SearchFiles(root string, pattern string, maxMatches int) (SearchResult, err
 	return result, nil
 }
 
+// ReadFilesFileResult is a per-file result in batch reads.
+type ReadFilesFileResult struct {
+	Path          string     `json:"path,omitempty"`
+	RelativePath  string     `json:"relative_path,omitempty"`
+	Hash          string     `json:"hash,omitempty"`
+	Size          int        `json:"size"`
+	Exists        bool       `json:"exists"`
+	Lines         []FileLine `json:"lines,omitempty"`
+	Error         string     `json:"error,omitempty"`
+	Truncated     bool       `json:"truncated,omitempty"`
+	OmittedReason string     `json:"omitted_reason,omitempty"`
+}
+
+// ReadFilesResult holds the batch read result.
+type ReadFilesResult struct {
+	Files         []ReadFilesFileResult `json:"files"`
+	TotalFiles    int                   `json:"total_files"`
+	ReturnedFiles int                   `json:"returned_files"`
+	ReturnedBytes int                   `json:"returned_bytes"`
+	Truncated     bool                  `json:"truncated,omitempty"`
+}
+
+const (
+	maxReadFilesPaths      = 8
+	maxReadFileBytes       = 64 * 1024
+	maxReadFilesTotalBytes = 128 * 1024
+)
+
+// ReadFilesInRepo reads multiple repo-relative files with hard bounds.
+func ReadFilesInRepo(repoPath string, paths []string) (ReadFilesResult, error) {
+	if len(paths) == 0 {
+		return ReadFilesResult{}, errors.New("paths must not be empty")
+	}
+	if len(paths) > maxReadFilesPaths {
+		return ReadFilesResult{}, fmt.Errorf("too many paths: %d, max %d", len(paths), maxReadFilesPaths)
+	}
+
+	result := ReadFilesResult{
+		Files:      make([]ReadFilesFileResult, 0, len(paths)),
+		TotalFiles: len(paths),
+	}
+
+	var totalBytes int
+	truncated := false
+
+	for _, path := range paths {
+		fc, err := ReadFileContentInRepo(repoPath, path)
+		if err != nil {
+			result.Files = append(result.Files, ReadFilesFileResult{
+				RelativePath: filepath.ToSlash(filepath.Clean(path)),
+				Error:        err.Error(),
+			})
+			continue
+		}
+
+		fr := ReadFilesFileResult{
+			Path:         fc.Path,
+			RelativePath: fc.RelativePath,
+			Hash:         fc.Hash,
+			Size:         fc.Size,
+			Exists:       fc.Exists,
+		}
+
+		if !fc.Exists {
+			result.Files = append(result.Files, fr)
+			continue
+		}
+
+		if fc.Size > maxReadFileBytes {
+			fr.Truncated = true
+			fr.OmittedReason = fmt.Sprintf("file size %d exceeds per-file limit %d", fc.Size, maxReadFileBytes)
+			result.Files = append(result.Files, fr)
+			truncated = true
+			continue
+		}
+
+		if totalBytes+fc.Size > maxReadFilesTotalBytes {
+			fr.Truncated = true
+			fr.OmittedReason = fmt.Sprintf("adding %d bytes would exceed total limit %d", fc.Size, maxReadFilesTotalBytes)
+			result.Files = append(result.Files, fr)
+			truncated = true
+			continue
+		}
+
+		fr.Lines = fc.Lines
+		totalBytes += fc.Size
+		result.ReturnedFiles++
+		result.ReturnedBytes = totalBytes
+
+		result.Files = append(result.Files, fr)
+	}
+
+	if truncated {
+		result.Truncated = true
+	}
+
+	return result, nil
+}
+
 // SearchFilesInRepo runs a text search under a repo-relative directory.
 func SearchFilesInRepo(repoPath string, path string, pattern string, maxMatches int) (SearchResult, error) {
 	if strings.TrimSpace(path) == "" {
