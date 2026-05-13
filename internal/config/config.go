@@ -72,29 +72,66 @@ var validSecretHandle = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,63}$`)
 // ResolveSecretEnv validates handles and returns env vars ("HELPER_SECRET_<NAME>=<value>")
 // and a Mask populated with resolved values. Returns error on first invalid/missing/disabled handle.
 func (c Config) ResolveSecretEnv(handles []string) ([]string, *security.Mask, error) {
-        if len(handles) == 0 {
-                return nil, nil, nil
-        }
-        envs := make([]string, 0, len(handles))
-        mask := security.NewMask()
-        for _, h := range handles {
-                if !validSecretHandle.MatchString(h) {
-                        return nil, nil, fmt.Errorf("invalid secret handle: %s", h)
-                }
-                s, ok := c.Secrets[h]
-                if !ok {
-                        return nil, nil, fmt.Errorf("secret handle not found: %s", h)
-                }
-                if !s.Enabled {
-                        return nil, nil, fmt.Errorf("secret is disabled: %s", h)
-                }
-                if len(s.Value) < 8 {
-                        return nil, nil, fmt.Errorf("secret value too short for handle: %s", h)
-                }
-                envs = append(envs, "HELPER_SECRET_"+h+"="+s.Value)
-                mask.AddNamed(h, s.Value)
-        }
-        return envs, mask, nil
+	if len(handles) == 0 {
+		return nil, nil, nil
+	}
+	envs := make([]string, 0, len(handles))
+	mask := security.NewMask()
+	for _, h := range handles {
+		if !validSecretHandle.MatchString(h) {
+			return nil, nil, fmt.Errorf("invalid secret handle: %s", h)
+		}
+		s, ok := c.Secrets[h]
+		if !ok {
+			return nil, nil, fmt.Errorf("secret handle not found: %s", h)
+		}
+		if !s.Enabled {
+			return nil, nil, fmt.Errorf("secret is disabled: %s", h)
+		}
+		if len(s.Value) < 8 {
+			return nil, nil, fmt.Errorf("secret value too short for handle: %s", h)
+		}
+		envs = append(envs, "HELPER_SECRET_"+h+"="+s.Value)
+		mask.AddNamed(h, s.Value)
+	}
+	return envs, mask, nil
+}
+
+// SecretMask returns a redaction mask for all configured server-side secrets.
+func (c Config) SecretMask() *security.Mask {
+	mask := security.NewMask()
+	add := func(name string, value string) {
+		if len(value) < 8 {
+			return
+		}
+		if name == "" {
+			mask.Add(value)
+			return
+		}
+		mask.AddNamed(name, value)
+	}
+	for handle, secret := range c.Secrets {
+		add(handle, secret.Value)
+	}
+	if c.Integrations.Jira != nil {
+		add("", c.Integrations.Jira.APIKey)
+		if c.Integrations.Jira.APIKeyEnv != "" {
+			add("", os.Getenv(c.Integrations.Jira.APIKeyEnv))
+		}
+	}
+	if c.Integrations.Confluence != nil {
+		add("", c.Integrations.Confluence.APIKey)
+		if c.Integrations.Confluence.APIKeyEnv != "" {
+			add("", os.Getenv(c.Integrations.Confluence.APIKeyEnv))
+		}
+	}
+	for _, provider := range c.Providers {
+		add("", provider.APIKey)
+		if provider.APIKeyEnv != "" {
+			add("", os.Getenv(provider.APIKeyEnv))
+		}
+	}
+	return mask
 }
 
 // RepoPermissions defines per-repository LLM permissions set by the user in .mcp-ai-helper.yaml.

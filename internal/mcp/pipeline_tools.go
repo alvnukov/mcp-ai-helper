@@ -91,6 +91,7 @@ func registerPipelineTools(srv *server.MCPServer, deps *Server) {
 		basemcp.WithString("task_on_failure", basemcp.Description("Optional status for current_task_id after command failure, invalid evidence, or pipeline error; defaults to blocked.")),
 		basemcp.WithString("task"),
 		basemcp.WithBoolean("compact_output", basemcp.Description("Collapse successful command output. Defaults to true.")),
+		basemcp.WithArray("secret_handles", basemcp.Description("Optional server-config secret handles to inject into the command environment as HELPER_SECRET_<HANDLE>. Values are redacted from model-facing output."), basemcp.WithStringItems()),
 	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
 		var args pipeline.Request
 		if err := bind(req, &args); err != nil {
@@ -114,6 +115,7 @@ func registerPipelineTools(srv *server.MCPServer, deps *Server) {
 		basemcp.WithString("task_on_start", basemcp.Description("Optional status for current_task_id before executing steps; defaults to in_progress.")),
 		basemcp.WithString("task_on_success", basemcp.Description("Optional status for current_task_id after successful workflow; defaults to done.")),
 		basemcp.WithString("task_on_failure", basemcp.Description("Optional status for current_task_id after failed workflow; defaults to blocked.")),
+		basemcp.WithArray("secret_handles", basemcp.Description("Optional server-config secret handles to inject into command steps as HELPER_SECRET_<HANDLE>. Values are redacted from model-facing output."), basemcp.WithStringItems()),
 		basemcp.WithArray("steps",
 			basemcp.Description("Workflow steps: command, guarded_replace, task_batch_upsert, task_transition, git_commit_owned, git_prepare_task_worktree."),
 			basemcp.Items(map[string]any{

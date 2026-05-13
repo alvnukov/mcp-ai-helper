@@ -97,7 +97,7 @@ func (s *Server) loadTaskBackend() taskBackend {
 
 func buildDeps(cfg *config.Config) (provider.ChatClient, *command.Runner, *pipeline.Runner, *tasks.Store, taskBackend) {
 	chat := provider.NewClient(cfg.Providers)
-	cmds := command.NewRunner(cfg.CommandPolicy)
+	cmds := command.NewRunnerWithMask(cfg.CommandPolicy, cfg.SecretMask())
 	projectStore, err := project.NewStore(cfg.CommandPolicy.LogDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mcp-ai-helper: project store from %q: %v; falling back to .mcp-ai-helper\n", cfg.CommandPolicy.LogDir, err)
@@ -125,7 +125,7 @@ func (s *Server) commandRunnerForRepo(repoPath string, toolName string) (*comman
 	if err != nil {
 		return nil, err
 	}
-	return command.NewRunner(merged.CommandPolicy), nil
+	return command.NewRunnerWithMask(merged.CommandPolicy, merged.SecretMask()), nil
 }
 
 func (s *Server) pipelineRunnerForRepo(repoPath string, toolName string) (*pipeline.Runner, error) {
@@ -144,7 +144,7 @@ func (s *Server) pipelineRunnerForRepo(repoPath string, toolName string) (*pipel
 	if err != nil {
 		return nil, err
 	}
-	cmds := command.NewRunner(merged.CommandPolicy)
+	cmds := command.NewRunnerWithMask(merged.CommandPolicy, merged.SecretMask())
 	backend := newLakeTaskBackend(cmds, store)
 	return pipeline.NewRunnerWithTaskBackend(merged, chat, workflowTaskBackend{backend: backend}), nil
 }
@@ -229,40 +229,5 @@ func (s *Server) sanitize(msg string) string {
 }
 
 func buildSecretMask(cfg *config.Config) *security.Mask {
-	var secrets []string
-	if cfg.Integrations.Jira != nil {
-		if cfg.Integrations.Jira.APIKey != "" {
-			secrets = append(secrets, cfg.Integrations.Jira.APIKey)
-		}
-		if cfg.Integrations.Jira.APIKeyEnv != "" {
-			if v := os.Getenv(cfg.Integrations.Jira.APIKeyEnv); v != "" {
-				secrets = append(secrets, v)
-			}
-		}
-	}
-	if cfg.Integrations.Confluence != nil {
-		if cfg.Integrations.Confluence.APIKey != "" {
-			secrets = append(secrets, cfg.Integrations.Confluence.APIKey)
-		}
-		if cfg.Integrations.Confluence.APIKeyEnv != "" {
-			if v := os.Getenv(cfg.Integrations.Confluence.APIKeyEnv); v != "" {
-				secrets = append(secrets, v)
-			}
-		}
-	}
-	for _, p := range cfg.Providers {
-		if p.APIKey != "" {
-			secrets = append(secrets, p.APIKey)
-		}
-		if p.APIKeyEnv != "" {
-			if v := os.Getenv(p.APIKeyEnv); v != "" {
-				secrets = append(secrets, v)
-			}
-		}
-	}
-	mask := security.NewMask()
-	for _, s := range secrets {
-		mask.Add(s)
-	}
-	return mask
+	return cfg.SecretMask()
 }

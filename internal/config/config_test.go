@@ -205,6 +205,8 @@ func TestSchemaDocumentsModelDrivenConfig(t *testing.T) {
 		"models.<id>.system_prompt":                     false,
 		"command_policy.log_dir":                        false,
 		"pipeline_policy.require_evidence_for_analysis": false,
+		"secrets.<handle>.value":                        false,
+		"secrets.<handle>.enabled":                      false,
 		"features.overrides.<id>.enabled":               false,
 	}
 	for _, field := range fields {

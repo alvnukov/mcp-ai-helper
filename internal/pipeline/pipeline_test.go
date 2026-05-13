@@ -943,6 +943,64 @@ func TestSecretUnknownHandleFailsClosed(t *testing.T) {
 	}
 }
 
+func TestConfiguredSecretRedactedWithoutExplicitHandle(t *testing.T) {
+	dir := t.TempDir()
+	cfg := testConfig(dir)
+	cfg.Secrets = map[string]config.SecretConfig{
+		"GLOBAL_TOKEN": {Value: "global-secret-review-1234567890", Enabled: true},
+	}
+	runner := NewRunner(cfg, nil)
+	compact := false
+	result, err := runner.Run(t.Context(), Request{
+		RepoPath:      dir,
+		Command:       "printf 'global-secret-review-1234567890'",
+		CompactOutput: &compact,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(encoded)
+	if strings.Contains(text, "global-secret-review-1234567890") {
+		t.Fatalf("raw configured secret leaked without explicit handle: %s", text)
+	}
+	if !strings.Contains(text, "[HELPER_SECRET:GLOBAL_TOKEN]") {
+		t.Fatalf("configured secret was not masked with its handle: %s", text)
+	}
+}
+
+func TestRunPipelineSecretResolutionFailureMarksTaskBlocked(t *testing.T) {
+	dir := t.TempDir()
+	runner, backend := newTaskTestRunner(testConfig(dir))
+	if _, err := backend.Add(tasks.AddRequest{ID: "task-secret", Title: "Secret task", Status: "todo"}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := runner.Run(t.Context(), Request{
+		RepoPath:       dir,
+		CurrentTaskID:  "task-secret",
+		SecretHandles:  []string{"MISSING_SECRET"},
+		Command:        "echo should-not-run",
+		TaskOnFailure:  "blocked",
+		TaskOnSuccess:  "done",
+		TaskOnStart:    "in_progress",
+		CompactOutput:  nil,
+		TimeoutSeconds: 1,
+	})
+	if err == nil {
+		t.Fatal("expected missing secret handle error")
+	}
+	item, getErr := backend.Get(t.Context(), dir, "task-secret")
+	if getErr != nil {
+		t.Fatal(getErr)
+	}
+	if item.Status != "blocked" {
+		t.Fatalf("task status = %q, want blocked", item.Status)
+	}
+}
+
 func TestSecretConfigExcludedFromJSON(t *testing.T) {
 	cfg := testConfig(t.TempDir())
 	cfg.Secrets = map[string]config.SecretConfig{

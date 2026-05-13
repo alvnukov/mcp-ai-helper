@@ -66,6 +66,8 @@ func Schema() map[string]any {
 			{Path: "command_policy.log_compress", Type: "bool", Default: "true", Description: "Allows old command records to be compressed by retention jobs."},
 			{Path: "pipeline_policy.max_return_chars", Type: "int", Default: "4000", Description: "Maximum compact result size returned from pipelines."},
 			{Path: "pipeline_policy.require_evidence_for_analysis", Type: "bool", Default: "true", Description: "Requires model conclusions to cite extracted evidence lines."},
+			{Path: "secrets.<handle>.value", Type: "string", Description: "Server-side secret value. It is never serialized to model-facing config JSON; models may reference only the handle through secret_handles."},
+			{Path: "secrets.<handle>.enabled", Type: "bool", Default: "false", Description: "Enables a named secret handle for run_pipeline/run_workflow injection. Disabled or unknown handles fail closed before command execution."},
 			{Path: "features.overrides.<id>.enabled", Type: "bool", Description: "Feature override value. Global overrides live in helper-owned feature state; repo-local overrides live in .mcp-ai-helper.yaml and take precedence over global overrides."},
 			{Path: "features.audit", Type: "[]record", Description: "Compact helper-owned audit trail for feature changes: scope, previous value/source, new value/source, timestamp, and optional reason."},
 			{Path: "permissions.tools.deny", Type: "[]string", Description: "Repo-local only (.mcp-ai-helper.yaml). MCP tool names denied for LLM in this repo. User-editable; config_replace refuses to write repo configs."},
