@@ -187,8 +187,11 @@ func buildRelatedTasks(selected *tasks.Task, all []tasks.Task, taskMap map[strin
 		if t.ID == selected.ID {
 			continue
 		}
-		// Siblings or children
-		if t.ParentID == parentID || t.ParentID == selected.ID {
+		// Siblings or children. Root-level tasks have no useful sibling scope,
+		// so avoid treating the whole top-level backlog as selected-task context.
+		isSibling := parentID != "" && t.ParentID == parentID
+		isChild := t.ParentID == selected.ID
+		if isSibling || isChild {
 			switch t.Status {
 			case "done":
 				done = append(done, TaskContextItem{ID: t.ID, Title: t.Title, Status: t.Status})
