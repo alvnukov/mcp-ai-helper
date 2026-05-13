@@ -225,6 +225,31 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 		}
 		return structured(result)
 	})
+	srv.AddTool(basemcp.NewTool("task_graph",
+		basemcp.WithDescription("Return a bounded task graph with nodes and explicit parent-child edges from canonical task data. Includes provenance and truncation metadata. Use for overview and dependency inspection."),
+		basemcp.WithString("repo_path", basemcp.Required()),
+		basemcp.WithString("focus_task_id", basemcp.Description("Optional task id to center the graph on. Includes ancestors, children and siblings.")),
+		basemcp.WithNumber("max_nodes", basemcp.Description("Maximum nodes to return. Default 50.")),
+		basemcp.WithNumber("max_bytes", basemcp.Description("Maximum response bytes. Default 8192.")),
+	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+		var args TaskGraphRequest
+		if err := bind(req, &args); err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
+		if err := validateTaskGraphRequest(args); err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
+		backend := deps.loadTaskBackend()
+		list, _, err := backend.ListAll(ctx, args.RepoPath)
+		if err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
+		graph, err := BuildTaskGraph(list, args)
+		if err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
+		return structured(graph)
+	})
 }
 
 func taskUpsertItemSchema() map[string]any {
