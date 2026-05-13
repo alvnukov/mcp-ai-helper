@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -94,13 +95,19 @@ func buildFullGraph(all []tasks.Task, maxNodes, maxBytes int) (TaskGraph, error)
 		taskMap[t.ID] = t
 	}
 
-	truncated := false
+	truncatedByNodes := false
 	omittedNodes := 0
+	omittedEdges := 0
 
 	for _, t := range all {
 		if len(nodes) >= maxNodes {
 			omittedNodes++
-			truncated = true
+			if t.ParentID != "" {
+				if _, exists := taskMap[t.ParentID]; exists {
+					omittedEdges++
+				}
+			}
+			truncatedByNodes = true
 			continue
 		}
 		nodes = append(nodes, taskToNode(t))
@@ -135,13 +142,15 @@ func buildFullGraph(all []tasks.Task, maxNodes, maxBytes int) (TaskGraph, error)
 		},
 	}
 
-	if truncated {
+	if truncatedByNodes {
 		result.Truncated = &TaskGraphTruncation{
 			OmittedNodes: omittedNodes,
+			OmittedEdges: omittedEdges,
 			Reason:       fmt.Sprintf("max_nodes limit reached (%d)", maxNodes),
 		}
 	}
 
+	result = enforceMaxBytes(result, maxBytes, "")
 	return result, nil
 }
 
@@ -193,8 +202,13 @@ func buildFocusedGraph(all []tasks.Task, focusID string, maxNodes, maxBytes int)
 		}
 	}
 
+	// Build nodes: focus task always first, then remaining relevant tasks
 	nodes := make([]TaskGraphNode, 0)
+	nodes = append(nodes, taskToNode(*focusTask))
 	for _, t := range all {
+		if t.ID == focusTask.ID {
+			continue
+		}
 		if relevant[t.ID] {
 			if len(nodes) >= maxNodes {
 				break
@@ -218,7 +232,7 @@ func buildFocusedGraph(all []tasks.Task, focusID string, maxNodes, maxBytes int)
 		}
 	}
 
-	sort.Slice(nodes, func(i, j int) bool { return nodes[i].ID < nodes[j].ID })
+	sort.Slice(nodes[1:], func(i, j int) bool { return nodes[1+i].ID < nodes[1+j].ID })
 	sort.Slice(edges, func(i, j int) bool {
 		if edges[i].From != edges[j].From {
 			return edges[i].From < edges[j].From
@@ -245,6 +259,7 @@ func buildFocusedGraph(all []tasks.Task, focusID string, maxNodes, maxBytes int)
 		}
 	}
 
+	result = enforceMaxBytes(result, maxBytes, focusID)
 	return result, nil
 }
 
@@ -277,4 +292,67 @@ func validateTaskGraphRequest(req TaskGraphRequest) error {
 		return fmt.Errorf("max_bytes must be >= 0, got %d", req.MaxBytes)
 	}
 	return nil
+}
+
+// enforceMaxBytes reduces the graph if its JSON serialization exceeds maxBytes.
+// In focused mode, the focus task is never removed.
+func enforceMaxBytes(g TaskGraph, maxBytes int, protectID string) TaskGraph {
+	if maxBytes <= 0 {
+		return g
+	}
+	data, err := json.Marshal(g)
+	if err != nil || len(data) <= maxBytes {
+		return g
+	}
+
+	omittedByBytes := 0
+	omittedEdgesByBytes := 0
+	for len(g.Nodes) > 0 {
+		last := len(g.Nodes) - 1
+		if protectID != "" && g.Nodes[last].ID == protectID {
+			// Cannot remove focus task; swap with previous and remove that
+			if last == 0 {
+				break
+			}
+			g.Nodes[last-1], g.Nodes[last] = g.Nodes[last], g.Nodes[last-1]
+			last--
+		}
+		removedID := g.Nodes[last].ID
+		g.Nodes = g.Nodes[:last]
+		omittedByBytes++
+
+		// Remove edges referencing the removed node
+		filtered := make([]TaskGraphEdge, 0, len(g.Edges))
+		for _, e := range g.Edges {
+			if e.From == removedID || e.To == removedID {
+				omittedEdgesByBytes++
+				continue
+			}
+			filtered = append(filtered, e)
+		}
+		g.Edges = filtered
+
+		data, err = json.Marshal(g)
+		if err == nil && len(data) <= maxBytes {
+			break
+		}
+	}
+
+	// Merge with existing truncation
+	existingOmittedNodes := 0
+	existingOmittedEdges := 0
+	existingReason := ""
+	if g.Truncated != nil {
+		existingOmittedNodes = g.Truncated.OmittedNodes
+		existingOmittedEdges = g.Truncated.OmittedEdges
+		existingReason = g.Truncated.Reason + "; "
+	}
+	if omittedByBytes > 0 || omittedEdgesByBytes > 0 {
+		g.Truncated = &TaskGraphTruncation{
+			OmittedNodes: existingOmittedNodes + omittedByBytes,
+			OmittedEdges: existingOmittedEdges + omittedEdgesByBytes,
+			Reason:       existingReason + fmt.Sprintf("max_bytes limit reached (%d)", maxBytes),
+		}
+	}
+	return g
 }
