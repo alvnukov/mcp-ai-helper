@@ -14,7 +14,7 @@ import (
 )
 
 func TestReadCurrentTasksPrefersLeanExporter(t *testing.T) {
-	repoRoot := filepath.Clean("../..")
+	repoRoot := prepareReadTestRepo(t)
 	list, source, err := readCurrentTasks(context.Background(), repoRoot, commandRunnerForRepo(repoRoot), legacyStoreForTest(t))
 	if err != nil {
 		t.Fatalf("readCurrentTasks returned error: %v", err)
@@ -28,7 +28,7 @@ func TestReadCurrentTasksPrefersLeanExporter(t *testing.T) {
 }
 
 func TestReadTaskPrefersLeanExporter(t *testing.T) {
-	repoRoot := filepath.Clean("../..")
+	repoRoot := prepareReadTestRepo(t)
 	task, source, err := readTask(context.Background(), repoRoot, "task-006", commandRunnerForRepo(repoRoot), legacyStoreForTest(t))
 	if err != nil {
 		t.Fatalf("readTask returned error: %v", err)
@@ -152,8 +152,25 @@ func containsTaskWithSource(list []tasks.Task, id string, source string) bool {
 	return false
 }
 
+func prepareReadTestRepo(t *testing.T) string {
+	t.Helper()
+	repo := copyLeanRepoFixture(t)
+	path := filepath.Join(repo, "MCPAIHelperProject", "ActiveTasks.lean")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read ActiveTasks.lean fixture: %v", err)
+	}
+	source := string(data)
+	source = strings.Replace(source, "status := .blocked,", "status := .proposed,", 1)
+	source = strings.Replace(source, "modelLevel := some .high,\n", "", 1)
+	if err := os.WriteFile(path, []byte(source), 0o600); err != nil {
+		t.Fatalf("write ActiveTasks.lean fixture: %v", err)
+	}
+	return repo
+}
+
 func TestReadCurrentTasksReportsProjectionSource(t *testing.T) {
-	repoRoot := filepath.Clean("../..")
+	repoRoot := prepareReadTestRepo(t)
 	list, source, err := readCurrentTasks(context.Background(), repoRoot, commandRunnerForRepo(repoRoot), legacyStoreForTest(t))
 	if err != nil {
 		t.Fatalf("readCurrentTasks returned error: %v", err)
