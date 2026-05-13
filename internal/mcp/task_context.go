@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -117,6 +118,9 @@ func BuildTaskContext(all []tasks.Task, req TaskContextRequest) (TaskContext, er
 	done, planned, blockers := buildRelatedTasks(selected, all, taskMap)
 	boundaries, nonGoals := extractBoundaries(selected.Body)
 	warnings := buildWarnings(selected, taskMap, blockers)
+	if len(boundaries) == 0 && len(nonGoals) == 0 {
+		warnings = append(warnings, "execution boundaries and non-goals not found in task body; verify scope with task_get or parent task")
+	}
 
 	result := TaskContext{
 		Task:               taskToSelected(*selected),
@@ -132,7 +136,7 @@ func BuildTaskContext(all []tasks.Task, req TaskContextRequest) (TaskContext, er
 	}
 
 	result = applyContextLimits(result, grid, prereqs, maxNodes)
-	_ = maxBytes
+	result = enforceContextMaxBytes(result, maxBytes)
 
 	return result, nil
 }
@@ -227,19 +231,34 @@ func buildWarnings(selected *tasks.Task, taskMap map[string]tasks.Task, blockers
 
 func extractBoundaries(body string) ([]string, []string) {
 	var boundaries, nonGoals []string
-	in := false
+	var inScope, inOutOfScope bool
 	for _, line := range strings.Split(body, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
-			in = false
+			inScope = false
+			inOutOfScope = false
 			continue
 		}
-		if strings.HasPrefix(strings.ToLower(line), "out of scope") {
-			in = true
+		lower := strings.ToLower(line)
+		if strings.HasPrefix(lower, "required scope") || strings.HasPrefix(lower, "scope") && !strings.HasPrefix(lower, "out of scope") {
+			inScope = true
+			inOutOfScope = false
 			continue
 		}
-		if in && strings.HasPrefix(line, "-") {
-			item := strings.TrimPrefix(line, "-")
+		if strings.HasPrefix(lower, "out of scope") {
+			inOutOfScope = true
+			inScope = false
+			continue
+		}
+		if inScope && (strings.HasPrefix(line, "-") || strings.HasPrefix(line, "*")) {
+			item := strings.TrimLeft(line, "-* ")
+			item = strings.TrimSpace(item)
+			if item != "" {
+				boundaries = append(boundaries, item)
+			}
+		}
+		if inOutOfScope && (strings.HasPrefix(line, "-") || strings.HasPrefix(line, "*")) {
+			item := strings.TrimLeft(line, "-* ")
 			item = strings.TrimSpace(item)
 			if item != "" {
 				nonGoals = append(nonGoals, item)
@@ -317,6 +336,47 @@ func taskToSelected(t tasks.Task) TaskContextSelected {
 
 func sortContextItems(items []TaskContextItem) {
 	sort.Slice(items, func(i, j int) bool { return items[i].ID < items[j].ID })
+}
+
+func enforceContextMaxBytes(ctx TaskContext, maxBytes int) TaskContext {
+	if maxBytes <= 0 {
+		return ctx
+	}
+	// Trim one item at a time from non-essential sections until under limit
+	sections := []struct {
+		slice *[]string
+	}{
+		{&ctx.NonGoals},
+		{&ctx.Boundaries},
+		{&ctx.VerificationPlan},
+		{&ctx.AcceptanceCriteria},
+		{&ctx.Warnings},
+	}
+	for {
+		data, err := json.Marshal(ctx)
+		if err != nil || len(data) <= maxBytes {
+			if ctx.Truncated == nil && len(ctx.Warnings) < cap(ctx.Warnings) {
+				// We trimmed something
+			}
+			return ctx
+		}
+		trimmed := false
+		for _, sec := range sections {
+			if len(*sec.slice) > 0 {
+				*sec.slice = (*sec.slice)[:len(*sec.slice)-1]
+				trimmed = true
+				break
+			}
+		}
+		if !trimmed {
+			break
+		}
+	}
+	if ctx.Truncated == nil {
+		ctx.Truncated = &TaskContextTruncation{}
+	}
+	ctx.Truncated.Reason = fmt.Sprintf("max_bytes limit reached (%d)", maxBytes)
+	return ctx
 }
 
 // validateTaskContextRequest checks request arguments before context construction.
