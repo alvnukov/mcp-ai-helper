@@ -100,9 +100,12 @@ func (c *Client) SetIssueProperty(issueKey, propertyKey string, value interface{
 	if err != nil {
 		return fmt.Errorf("jira set property %s %s: %w", issueKey, propertyKey, err)
 	}
+	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("jira set property %s %s: HTTP %d (body read: %w)", issueKey, propertyKey, resp.StatusCode, err)
+		}
 		return fmt.Errorf("jira set property %s %s: HTTP %d: %s", issueKey, propertyKey, resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	return nil
@@ -119,9 +122,12 @@ func (c *Client) GetIssueProperty(issueKey, propertyKey string, v interface{}) e
 	if err != nil {
 		return fmt.Errorf("jira get property %s %s: %w", issueKey, propertyKey, err)
 	}
+	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("jira get property %s %s: HTTP %d (body read: %w)", issueKey, propertyKey, resp.StatusCode, err)
+		}
 		return fmt.Errorf("jira get property %s %s: HTTP %d: %s", issueKey, propertyKey, resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	return nil
