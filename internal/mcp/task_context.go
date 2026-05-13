@@ -93,6 +93,10 @@ func BuildTaskContext(all []tasks.Task, req TaskContextRequest) (TaskContext, er
 		taskMap[all[i].ID] = all[i]
 	}
 
+	if strings.TrimSpace(req.TaskID) == "" {
+		return TaskContext{}, fmt.Errorf("task_id is required; use task_current to list available tasks")
+	}
+
 	var selected *tasks.Task
 	for i := range all {
 		if all[i].ID == req.TaskID {
@@ -106,6 +110,9 @@ func BuildTaskContext(all []tasks.Task, req TaskContextRequest) (TaskContext, er
 	}
 
 	grid := buildGoalChain(selected, taskMap)
+	if len(grid) == 0 {
+		grid = []TaskContextItem{{ID: selected.ID, Title: selected.Title, Status: selected.Status}}
+	}
 	prereqs := buildPrerequisites(selected, taskMap)
 	done, planned, blockers := buildRelatedTasks(selected, all, taskMap)
 	boundaries, nonGoals := extractBoundaries(selected.Body)

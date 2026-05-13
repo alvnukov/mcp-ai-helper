@@ -1,11 +1,11 @@
 package mcp
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 
-	"github.com/zol/mcp-ai-helper/internal/tasks")
+	"github.com/zol/mcp-ai-helper/internal/tasks"
+)
 
 func makeCTask(id, status, title, parentID string, tags ...string) tasks.Task {
 	return tasks.Task{
