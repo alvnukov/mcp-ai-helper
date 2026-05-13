@@ -2,12 +2,14 @@ package security
 
 import "testing"
 
-func TestMask_Apply(t *testing.T) {
-	m := NewMask("secret-token-123", "another-secret")
+func TestMask_ApplyNamed(t *testing.T) {
+	m := NewMask()
+	m.AddNamed("TOKEN", "secret-token-123")
+	m.AddNamed("OTHER", "another-secret")
 	tests := []struct{ input, expected string }{
-		{"error: secret-token-123 failed", "error: *** failed"},
+		{"error: secret-token-123 failed", "error: [HELPER_SECRET:TOKEN] failed"},
 		{"no secrets here", "no secrets here"},
-		{"both secret-token-123 and another-secret", "both *** and ***"},
+		{"both secret-token-123 and another-secret", "both [HELPER_SECRET:TOKEN] and [HELPER_SECRET:OTHER]"},
 	}
 	for _, tt := range tests {
 		got := m.Apply(tt.input)
@@ -17,11 +19,11 @@ func TestMask_Apply(t *testing.T) {
 	}
 }
 
-func TestMask_Add(t *testing.T) {
+func TestMask_AddNamed(t *testing.T) {
 	m := NewMask()
-	m.Add("new-secret")
+	m.AddNamed("NEW", "new-secret")
 	got := m.Apply("error: new-secret")
-	if got != "error: ***" {
+	if got != "error: [HELPER_SECRET:NEW]" {
 		t.Errorf("got %q", got)
 	}
 }

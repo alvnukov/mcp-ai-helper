@@ -260,5 +260,9 @@ func buildSecretMask(cfg *config.Config) *security.Mask {
 			}
 		}
 	}
-	return security.NewMask(secrets...)
+	mask := security.NewMask()
+	for _, s := range secrets {
+		mask.Add(s)
+	}
+	return mask
 }
