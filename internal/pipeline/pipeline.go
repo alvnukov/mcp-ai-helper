@@ -40,18 +40,18 @@ type TaskBackend interface {
 
 // Request describes the legacy command-analysis pipeline input.
 type Request struct {
-	CurrentTaskID  string `json:"current_task_id,omitempty"`
-	TaskOnStart    string `json:"task_on_start,omitempty"`
-	TaskOnSuccess  string `json:"task_on_success,omitempty"`
-	TaskOnFailure  string `json:"task_on_failure,omitempty"`
-	Command        string `json:"command"`
-	RepoPath       string `json:"repo_path"`
-	CWD            string `json:"cwd"`
-	TimeoutSeconds int    `json:"timeout_seconds"`
-	Analyze        bool   `json:"analyze"`
-	Task           string `json:"task"`
-	ModelID        string `json:"model_id"`
-	CompactOutput  *bool  `json:"compact_output,omitempty"`
+	CurrentTaskID  string   `json:"current_task_id,omitempty"`
+	TaskOnStart    string   `json:"task_on_start,omitempty"`
+	TaskOnSuccess  string   `json:"task_on_success,omitempty"`
+	TaskOnFailure  string   `json:"task_on_failure,omitempty"`
+	Command        string   `json:"command"`
+	RepoPath       string   `json:"repo_path"`
+	CWD            string   `json:"cwd"`
+	TimeoutSeconds int      `json:"timeout_seconds"`
+	Analyze        bool     `json:"analyze"`
+	Task           string   `json:"task"`
+	ModelID        string   `json:"model_id"`
+	CompactOutput  *bool    `json:"compact_output,omitempty"`
 	SecretHandles  []string `json:"secret_handles,omitempty"`
 }
 
@@ -97,7 +97,7 @@ type WorkflowRequest struct {
 	Edits         []WorkflowEdit    `json:"edits"`
 	Checks        []WorkflowCommand `json:"checks"`
 	Commit        WorkflowCommit    `json:"commit"`
-	SecretHandles []string           `json:"secret_handles,omitempty"`
+	SecretHandles []string          `json:"secret_handles,omitempty"`
 }
 
 // WorkflowStep is one deterministic workflow DSL step.
@@ -168,7 +168,7 @@ func NewRunner(cfg *config.Config, chatClient provider.ChatClient) *Runner {
 
 // NewRunnerWithTaskBackend creates a workflow runner with an explicit task backend.
 func NewRunnerWithTaskBackend(cfg *config.Config, chatClient provider.ChatClient, taskBackend TaskBackend) *Runner {
-	return &Runner{cfg: cfg, commands: command.NewRunner(cfg.CommandPolicy), chatClient: chatClient, taskBackend: taskBackend}
+	return &Runner{cfg: cfg, commands: command.NewRunnerWithMask(cfg.CommandPolicy, cfg.SecretMask()), chatClient: chatClient, taskBackend: taskBackend}
 }
 
 func (r *Runner) requireTaskBackend() TaskBackend {
@@ -1097,13 +1097,6 @@ func (r *Runner) Run(ctx context.Context, req Request) (result Result, err error
 	if err := r.updateTaskStatus(ctx, req.CurrentTaskID, taskStatusOrDefault(req.TaskOnStart, "in_progress"), req.RepoPath); err != nil {
 		return Result{}, err
 	}
-	if len(req.SecretHandles) > 0 {
-		envs, mask, err := r.cfg.ResolveSecretEnv(req.SecretHandles)
-		if err != nil {
-			return Result{}, err
-		}
-		ctx = command.ContextWithSecrets(ctx, envs, mask)
-	}
 	defer func() {
 		finalStatus := taskStatusOrDefault(req.TaskOnSuccess, "done")
 		if !pipelineTaskCloseoutSucceeded(result, err) {
@@ -1113,6 +1106,13 @@ func (r *Runner) Run(ctx context.Context, req Request) (result Result, err error
 			err = updateErr
 		}
 	}()
+	if len(req.SecretHandles) > 0 {
+		envs, mask, err := r.cfg.ResolveSecretEnv(req.SecretHandles)
+		if err != nil {
+			return Result{}, err
+		}
+		ctx = command.ContextWithSecrets(ctx, envs, mask)
+	}
 
 	cmdResult, err := r.commands.RunInRepo(ctx, req.Command, req.RepoPath, req.CWD, req.TimeoutSeconds)
 	if err != nil {

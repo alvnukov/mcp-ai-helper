@@ -46,8 +46,9 @@ func secretsFromContext(ctx context.Context) ([]string, *security.Mask) {
 
 // Runner executes shell commands under repository and output policies.
 type Runner struct {
-	policy  config.CommandPolicy
-	history *History
+	policy   config.CommandPolicy
+	history  *History
+	baseMask *security.Mask
 }
 
 // Result is the compact, redacted command execution record returned to callers.
@@ -81,14 +82,19 @@ type Filter struct {
 
 // NewRunner creates a command runner from policy limits.
 func NewRunner(policy config.CommandPolicy) *Runner {
+	return NewRunnerWithMask(policy, nil)
+}
+
+// NewRunnerWithMask creates a command runner that redacts configured secrets from all retained output.
+func NewRunnerWithMask(policy config.CommandPolicy, mask *security.Mask) *Runner {
 	if policy.LogEnabled != nil && !*policy.LogEnabled {
-		return &Runner{policy: policy, history: NewInMemoryHistory()}
+		return &Runner{policy: policy, history: NewInMemoryHistory(), baseMask: mask}
 	}
 	history, err := NewHistory(HistoryPolicy{Dir: policy.LogDir, RetentionDays: policy.LogRetentionDays, MaxRecords: policy.LogMaxRecords, Compress: policy.LogCompress})
 	if err != nil {
 		history = NewInMemoryHistory()
 	}
-	return &Runner{policy: policy, history: history}
+	return &Runner{policy: policy, history: history, baseMask: mask}
 }
 
 // Run executes cmd in cwd after validating cwd against the configured allowlist.
@@ -161,6 +167,10 @@ func (r *Runner) runFiltered(
 
 	stdoutText := redact(stdout.String())
 	stderrText := redact(stderr.String())
+	if r.baseMask != nil {
+		stdoutText = r.baseMask.Apply(stdoutText)
+		stderrText = r.baseMask.Apply(stderrText)
+	}
 	if cmdMask != nil {
 		stdoutText = cmdMask.Apply(stdoutText)
 		stderrText = cmdMask.Apply(stderrText)
@@ -196,6 +206,9 @@ func (r *Runner) runFiltered(
 		return Result{}, err
 	}
 	commandStr := cmd
+	if r.baseMask != nil {
+		commandStr = r.baseMask.Apply(commandStr)
+	}
 	if cmdMask != nil {
 		commandStr = cmdMask.Apply(commandStr)
 	}

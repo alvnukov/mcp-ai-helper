@@ -129,7 +129,7 @@ func TestRunWorkflowSchemaIncludesWorkflowFields(t *testing.T) {
 		t.Fatalf("marshal schema: %v", err)
 	}
 	schema := string(schemaBytes)
-	for _, field := range []string{"steps", "owned_files", "commit_message", "current_task_id", "task_on_start", "task_on_success", "task_on_failure"} {
+	for _, field := range []string{"steps", "owned_files", "commit_message", "current_task_id", "task_on_start", "task_on_success", "task_on_failure", "secret_handles"} {
 		if !strings.Contains(schema, field) {
 			t.Fatalf("run_workflow schema does not contain %q: %s", field, schema)
 		}
