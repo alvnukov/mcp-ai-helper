@@ -91,6 +91,28 @@ func registerFileTools(srv *server.MCPServer) {
 		return structured(snapshot)
 	})
 
+	srv.AddTool(basemcp.NewTool("read_files",
+		basemcp.WithDescription("Read multiple small repo-relative files in one call. Bounded: max 8 paths, 64 KiB per file, 128 KiB total. Missing files reported per file and do not fail the whole call."),
+		basemcp.WithString("repo_path", basemcp.Required()),
+		basemcp.WithArray("paths", basemcp.Required(), basemcp.Description("Repo-relative file paths to read (max 8)."), basemcp.WithStringItems(), basemcp.MinItems(1), basemcp.MaxItems(8)),
+	), func(_ context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+		var args struct {
+			RepoPath string   `json:"repo_path"`
+			Paths    []string `json:"paths"`
+		}
+		if err := bind(req, &args); err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
+		if len(args.Paths) == 0 {
+			return basemcp.NewToolResultError("paths must not be empty"), nil
+		}
+		result, err := fileops.ReadFilesInRepo(args.RepoPath, args.Paths)
+		if err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
+		return structured(result)
+	})
+
 	srv.AddTool(basemcp.NewTool("apply_guarded_replace",
 		basemcp.WithDescription("Replace one unique text span only if the file hash still matches. Use old_b64/new_b64 for text with characters that are hard to escape in JSON (e.g. Go raw strings with backslashes)."),
 		basemcp.WithString("repo_path", basemcp.Required()),
