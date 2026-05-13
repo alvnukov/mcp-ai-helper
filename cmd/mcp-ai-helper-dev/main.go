@@ -174,6 +174,7 @@ func (m *childManager) build() error {
 
 func resolveGoBinary(repoRoot string) (string, error) {
 	modPath := filepath.Join(repoRoot, "go.mod")
+	// #nosec G304 -- modPath is repo-relative, reading go.mod is the intended behavior
 	data, err := os.ReadFile(modPath)
 	if err != nil {
 		return "go", nil
@@ -185,6 +186,7 @@ func resolveGoBinary(repoRoot string) (string, error) {
 			home, err := os.UserHomeDir()
 			if err == nil {
 				sdkPath := filepath.Join(home, "sdk", "go"+version, "bin", "go")
+				// #nosec G703 -- sdkPath is built from go version parsed from go.mod, not unsanitized user input
 				if _, err := os.Stat(sdkPath); err == nil {
 					return sdkPath, nil
 				}
