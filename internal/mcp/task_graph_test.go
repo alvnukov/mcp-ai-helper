@@ -417,3 +417,17 @@ func TestBuildTaskGraph_NoOmittedEdgesWithoutParents(t *testing.T) {
 		t.Errorf("OmittedEdges should be 0 when no tasks have parents, got %d", graph.Truncated.OmittedEdges)
 	}
 }
+
+func TestBuildTaskTree_NoGoalReturnsDiagnostic(t *testing.T) {
+	tree := buildTaskTree([]tasks.Task{makeTask("task-1", "todo", "No goal", "")})
+	if tree["goal"] != nil {
+		t.Fatalf("expected nil goal, got %#v", tree["goal"])
+	}
+	diagnostic, ok := tree["diagnostic"].(map[string]string)
+	if !ok {
+		t.Fatalf("expected diagnostic map, got %#v", tree["diagnostic"])
+	}
+	if diagnostic["code"] != "task_tree_no_goal_root" || diagnostic["next_call"] != "task_graph" {
+		t.Fatalf("unexpected diagnostic: %#v", diagnostic)
+	}
+}

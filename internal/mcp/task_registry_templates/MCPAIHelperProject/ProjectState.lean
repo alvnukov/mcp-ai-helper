@@ -55,6 +55,7 @@ deriving Repr, DecidableEq
 inductive RelationKind where
   | dependsOn
   | blocks
+  | parentChild
 deriving Repr, DecidableEq
 
 structure ArtifactRelation where
@@ -68,5 +69,8 @@ def dependency (source target : ArtifactId) : ArtifactRelation :=
 
 def blocking (source target : ArtifactId) : ArtifactRelation :=
   { source := source, target := target, kind := .blocks }
+
+def parentChild (parent child : ArtifactId) : ArtifactRelation :=
+  { source := parent, target := child, kind := .parentChild }
 
 end MCPAIHelperProject

@@ -58,6 +58,11 @@ def relationTargets (registry : Registry) (artifact : Artifact) (kind : Relation
     else
       none
 
+def parentID? (registry : Registry) (artifact : Artifact) : Option String :=
+  match registry.relations.find? (fun relation => relation.kind == .parentChild && relation.target.value == artifact.id.value) with
+  | some relation => some relation.source.value
+  | none => none
+
 def stringArrayJson (values : List String) : Json :=
   Json.arr (values.map Json.str).toArray
 
@@ -73,6 +78,7 @@ def artifactJson (registry : Registry) (artifact : Artifact) : Json :=
     ("task_type", Json.str artifact.taskType),
     ("branch", Json.str artifact.branch),
     ("worktree_path", Json.str artifact.worktreePath),
+    ("parent_id", Json.str (match parentID? registry artifact with | some parent => parent | none => "")),
     ("acceptance_criteria", stringArrayJson artifact.acceptanceCriteria),
     ("verification_plan", stringArrayJson artifact.verificationPlan),
     ("created_at", Json.str artifact.createdAt),
@@ -116,6 +122,7 @@ structure TaskUpsertRequest where
   task_type : String
   branch : String
   worktree_path : String
+  parent_id : String
   acceptance_criteria : List String
   verification_plan : List String
   deriving FromJson, ToJson
@@ -179,6 +186,7 @@ def modelLevelConstructor : ModelLevel -> String
 def relationKindConstructor : RelationKind -> String
   | .dependsOn => ".dependsOn"
   | .blocks => ".blocks"
+  | .parentChild => ".parentChild"
 
 def statusFromString? : String -> Option LifecycleStatus
   | "todo" => some .proposed
@@ -238,6 +246,19 @@ def renderRelationDefs (index : Nat) (relation : ArtifactRelation) : String :=
   "    target := { value := " ++ leanString relation.target.value ++ " },\n" ++
   "    kind := " ++ relationKindConstructor relation.kind ++ " }\n"
 
+def isParentRelationFor (id : String) (relation : ArtifactRelation) : Bool :=
+  relation.kind == .parentChild && relation.target.value == id
+
+def replaceParentRelation (relations : List ArtifactRelation) (artifact : Artifact) (parentID : String) : List ArtifactRelation :=
+  let withoutParent := relations.filter (fun relation => !(isParentRelationFor artifact.id.value relation))
+  if parentID == "" then
+    withoutParent
+  else
+    withoutParent ++ [{ source := { value := parentID }, target := artifact.id, kind := .parentChild }]
+
+def deleteRelationsForArtifact (relations : List ArtifactRelation) (id : String) : List ArtifactRelation :=
+  relations.filter (fun relation => relation.source.value != id && relation.target.value != id)
+
 def renderActiveTasksSource (artifacts : List Artifact) (relations : List ArtifactRelation) : String :=
   let indexed := List.zip (List.range artifacts.length) artifacts
   let relationIndexed := List.zip (List.range relations.length) relations
@@ -257,9 +278,9 @@ def renderActiveTasksSource (artifacts : List Artifact) (relations : List Artifa
   "end ActiveTasks\n" ++
   "end MCPAIHelperProject\n"
 
-def registryFromActiveArtifacts (artifacts : List Artifact) : Registry :=
+def registryFromActiveState (artifacts : List Artifact) (relations : List ArtifactRelation) : Registry :=
   { artifacts := Samples.verifiedArtifacts ++ artifacts,
-    relations := Samples.verifiedRelations ++ ActiveTasks.activeRelations }
+    relations := Samples.verifiedRelations ++ relations }
 
 def upsertArtifact : List Artifact -> Artifact -> List Artifact
   | [], artifact => [artifact]
@@ -394,7 +415,7 @@ def taskTransitionApply (req : TaskTransitionRequest) : RequestM (RequestTask Js
               let updated := { artifact with status := next }
               let artifacts := upsertArtifact ActiveTasks.activeArtifacts updated
               IO.FS.writeFile activeTasksLeanPath (renderActiveTasksSource artifacts ActiveTasks.activeRelations)
-              let registry := registryFromActiveArtifacts artifacts
+              let registry := registryFromActiveState artifacts ActiveTasks.activeRelations
               pure (registryOkEnvelopeWithChanges
                 "task.transition.apply"
                 (Json.mkObj [("task", artifactJson registry updated), ("previous_source", Json.str previous)])
@@ -414,8 +435,9 @@ def taskUpsertApply (req : TaskUpsertRequest) : RequestM (RequestTask Json) := d
           pure (registryErrorEnvelope "task.upsert.apply" "invalid_request" message)
       | Except.ok artifact =>
           let artifacts := upsertArtifact ActiveTasks.activeArtifacts artifact
-          IO.FS.writeFile activeTasksLeanPath (renderActiveTasksSource artifacts ActiveTasks.activeRelations)
-          let registry := registryFromActiveArtifacts artifacts
+          let relations := replaceParentRelation ActiveTasks.activeRelations artifact req.parent_id
+          IO.FS.writeFile activeTasksLeanPath (renderActiveTasksSource artifacts relations)
+          let registry := registryFromActiveState artifacts relations
           pure (registryOkEnvelopeWithChanges
             "task.upsert.apply"
             (Json.mkObj [("task", artifactJson registry artifact), ("previous_source", Json.str previous)])
@@ -457,8 +479,13 @@ def taskBatchUpsertApply (req : TaskBatchUpsertRequest) : RequestM (RequestTask 
             match closed.find? (fun closedArtifact => closedArtifact.id.value == artifact.id.value) with
             | some closedArtifact => closedArtifact
             | none => artifact
-          IO.FS.writeFile activeTasksLeanPath (renderActiveTasksSource finalArtifacts ActiveTasks.activeRelations)
-          let registry := registryFromActiveArtifacts finalArtifacts
+          let relationStep := fun (relations : List ArtifactRelation) (item : TaskUpsertRequest) =>
+            match state.snd.find? (fun artifact => artifact.id.value == taskIdFromRequest item) with
+            | some artifact => replaceParentRelation relations artifact item.parent_id
+            | none => relations
+          let finalRelations := req.tasks.foldl relationStep ActiveTasks.activeRelations
+          IO.FS.writeFile activeTasksLeanPath (renderActiveTasksSource finalArtifacts finalRelations)
+          let registry := registryFromActiveState finalArtifacts finalRelations
           pure (registryOkEnvelopeWithChanges
             "task.batch_upsert.apply"
             (Json.mkObj [
@@ -480,8 +507,9 @@ def taskDeleteApply (req : TaskDeleteRequest) : RequestM (RequestTask Json) := d
       | some artifact =>
           let previous ← IO.FS.readFile activeTasksLeanPath
           let artifacts := deleteArtifactById ActiveTasks.activeArtifacts req.id
-          IO.FS.writeFile activeTasksLeanPath (renderActiveTasksSource artifacts ActiveTasks.activeRelations)
-          let registry := registryFromActiveArtifacts artifacts
+          let relations := deleteRelationsForArtifact ActiveTasks.activeRelations req.id
+          IO.FS.writeFile activeTasksLeanPath (renderActiveTasksSource artifacts relations)
+          let registry := registryFromActiveState artifacts relations
           pure (registryOkEnvelopeWithChanges
             "task.delete.apply"
             (Json.mkObj [("task", artifactJson registry artifact), ("previous_source", Json.str previous)])
