@@ -315,7 +315,6 @@ func runTaskRegistryExporter(t *testing.T, repoRoot string, args ...string) Comm
 	return result
 }
 
-
 func prepareLakeTestRepo(t *testing.T) string {
 	t.Helper()
 	repo := t.TempDir()
