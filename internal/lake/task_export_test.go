@@ -21,7 +21,7 @@ import (
 )
 
 func TestTaskRegistryExporterGetTaskThroughLakeExe(t *testing.T) {
-	result := runTaskRegistryExporter(t, "--get", "task-034")
+	result := runTaskRegistryExporter(t, filepath.Clean("../.."), "--get", "task-034")
 	if result.ExitCode != 0 {
 		t.Fatalf("expected exporter success, got %+v", result)
 	}
@@ -147,7 +147,7 @@ func TestTaskRegistryGetThroughLakeServeRPC(t *testing.T) {
 }
 
 func TestTaskRegistryExporterListActiveThroughLakeExe(t *testing.T) {
-	result := runTaskRegistryExporter(t, "--list-active")
+	result := runTaskRegistryExporter(t, prepareLakeTestRepo(t), "--list-active")
 	if result.ExitCode != 0 {
 		t.Fatalf("expected exporter success, got %+v", result)
 	}
@@ -179,7 +179,7 @@ func TestTaskRegistryExporterListActiveThroughLakeExe(t *testing.T) {
 }
 
 func TestTaskRegistryExporterGetMissingTaskFails(t *testing.T) {
-	result := runTaskRegistryExporter(t, "--get", "missing-task")
+	result := runTaskRegistryExporter(t, filepath.Clean("../.."), "--get", "missing-task")
 	if result.ExitCode == 0 {
 		t.Fatalf("expected missing task failure, got %+v", result)
 	}
@@ -297,9 +297,8 @@ func fileURI(path string) string {
 	return (&url.URL{Scheme: "file", Path: filepath.ToSlash(path)}).String()
 }
 
-func runTaskRegistryExporter(t *testing.T, args ...string) CommandResult {
+func runTaskRegistryExporter(t *testing.T, repoRoot string, args ...string) CommandResult {
 	t.Helper()
-	repoRoot := filepath.Clean("../..")
 	runner := CommandRunner{
 		Commands: command.NewRunner(config.CommandPolicy{
 			AllowedCWDs:           []string{repoRoot},
@@ -316,7 +315,41 @@ func runTaskRegistryExporter(t *testing.T, args ...string) CommandResult {
 	return result
 }
 
+
+func prepareLakeTestRepo(t *testing.T) string {
+	t.Helper()
+	repo := t.TempDir()
+	realRoot := filepath.Clean("../..")
+	for _, dir := range []string{"MCPAIHelperProject"} {
+		if err := os.MkdirAll(filepath.Join(repo, dir), 0o700); err != nil {
+			t.Fatalf("create fixture dir: %v", err)
+		}
+	}
+	for _, file := range []string{"lean-toolchain", "lakefile.lean", "MCPAIHelperProject.lean", "MCPAIHelperProject/ProjectState.lean", "MCPAIHelperProject/Samples.lean", "MCPAIHelperProject/Registry.lean", "MCPAIHelperProject/TaskRegistryExport.lean", "MCPAIHelperProject/ActiveTasks.lean"} {
+		data, err := os.ReadFile(filepath.Join(realRoot, file))
+		if err != nil {
+			t.Fatalf("read fixture source %s: %v", file, err)
+		}
+		if err := os.WriteFile(filepath.Join(repo, file), data, 0o600); err != nil {
+			t.Fatalf("write fixture file %s: %v", file, err)
+		}
+	}
+	path := filepath.Join(repo, "MCPAIHelperProject", "ActiveTasks.lean")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read ActiveTasks.lean fixture: %v", err)
+	}
+	source := string(data)
+	source = strings.Replace(source, "status := .blocked,", "status := .proposed,", 1)
+	source = strings.Replace(source, "modelLevel := some .high,\n", "", 1)
+	if err := os.WriteFile(path, []byte(source), 0o600); err != nil {
+		t.Fatalf("write ActiveTasks.lean fixture: %v", err)
+	}
+	return repo
+}
+
 func decodeJSONOutput(t *testing.T, result CommandResult, target any) {
+
 	t.Helper()
 	output := strings.Join(result.Output, "\n")
 	if output == "" {
