@@ -215,6 +215,45 @@ func TestReadFileContentNotExist(t *testing.T) {
 	}
 }
 
+func TestRepoFileOpsRejectLeanSourceFiles(t *testing.T) {
+	dir := t.TempDir()
+	leanRel := filepath.Join("MCPAIHelperProject", "ActiveTasks.lean")
+	writePath := filepath.Join(dir, leanRel)
+	if err := os.MkdirAll(filepath.Dir(writePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(writePath, []byte("def secret := 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := ReadFileContentInRepo(dir, leanRel); err == nil || !strings.Contains(err.Error(), "Lean source files") {
+		t.Fatalf("ReadFileContentInRepo error = %v, want Lean source denial", err)
+	}
+	if _, err := ReadSnapshotInRepo(dir, leanRel); err == nil || !strings.Contains(err.Error(), "Lean source files") {
+		t.Fatalf("ReadSnapshotInRepo error = %v, want Lean source denial", err)
+	}
+	if _, err := ApplyGuardedReplace(ReplaceRequest{RepoPath: dir, Path: leanRel, ExpectedHash: "deadbeef", Old: "def", New: "theorem"}); err == nil || !strings.Contains(err.Error(), "Lean source files") {
+		t.Fatalf("ApplyGuardedReplace error = %v, want Lean source denial", err)
+	}
+}
+
+func TestSearchFilesSkipsLeanSourceFiles(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "Visible.go"), []byte("package p\n// needle\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "Hidden.lean"), []byte("-- needle\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := SearchFilesInRepo(dir, "", "needle", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Total != 1 || len(result.Matches) != 1 || result.Matches[0].File != "Visible.go" {
+		t.Fatalf("matches = %#v, want only Visible.go", result.Matches)
+	}
+}
+
 func TestReadFileContentInRepo(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "src", "main.go")

@@ -318,6 +318,9 @@ func SearchFiles(root string, pattern string, maxMatches int) (SearchResult, err
 		if relErr != nil || rel == "." {
 			return nil
 		}
+		if isProtectedLeanPath(rel) {
+			return nil
+		}
 		data, readErr := rootHandle.ReadFile(rel)
 		if readErr != nil {
 			return nil
@@ -473,9 +476,26 @@ func Hash(data []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
+const protectedLeanGenericToolMessage = "Lean source files are task-owned; use task-facing Lean/Lake tools instead of generic file tools"
+
+func rejectProtectedLeanPath(path string) error {
+	if isProtectedLeanPath(path) {
+		return fmt.Errorf("%s: %s", protectedLeanGenericToolMessage, filepath.ToSlash(filepath.Clean(path)))
+	}
+	return nil
+}
+
+func isProtectedLeanPath(path string) bool {
+	clean := filepath.ToSlash(filepath.Clean(strings.TrimSpace(path)))
+	return strings.HasSuffix(strings.ToLower(clean), ".lean")
+}
+
 func cleanPath(path string) (string, error) {
 	if strings.TrimSpace(path) == "" {
 		return "", errors.New("path is required")
+	}
+	if err := rejectProtectedLeanPath(path); err != nil {
+		return "", err
 	}
 	clean, err := filepath.Abs(path)
 	if err != nil {
@@ -511,6 +531,9 @@ func repoRelativePath(repoPath string, path string) (string, string, error) {
 	rel := filepath.Clean(path)
 	if rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 		return "", "", fmt.Errorf("path escapes repo_path: %q", path)
+	}
+	if err := rejectProtectedLeanPath(rel); err != nil {
+		return "", "", err
 	}
 	repoReal, err := filepath.EvalSymlinks(repoAbs)
 	if err != nil {

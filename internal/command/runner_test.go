@@ -3,6 +3,7 @@ package command
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/zol/mcp-ai-helper/internal/config"
@@ -136,6 +137,15 @@ func TestRunnerRunInRepoRejectsEscapingCWD(t *testing.T) {
 	_, err := runner.RunInRepo(t.Context(), "echo ok", dir, "../outside", 1)
 	if err == nil {
 		t.Fatal("expected repo escape error")
+	}
+}
+
+func TestRunnerRunInRepoRejectsLeanSourceCommand(t *testing.T) {
+	dir := t.TempDir()
+	runner := NewRunner(config.CommandPolicy{AllowedCWDs: []string{dir}, DefaultTimeoutSeconds: 1, MaxOutputBytes: 1000, MaxLines: 20})
+	_, err := runner.RunInRepo(t.Context(), "cat MCPAIHelperProject/ActiveTasks.lean", dir, "", 1)
+	if err == nil || !strings.Contains(err.Error(), "Lean source files") {
+		t.Fatalf("error = %v, want Lean source denial", err)
 	}
 }
 

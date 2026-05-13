@@ -237,6 +237,9 @@ func (r *Runner) RunFilteredInRepo(ctx context.Context, cmd string, repoPath str
 	if strings.TrimSpace(repoPath) == "" {
 		return Result{}, errors.New("repo_path is required")
 	}
+	if err := rejectProtectedLeanCommand(cmd); err != nil {
+		return Result{}, err
+	}
 	repo, err := resolveDir(repoPath)
 	if err != nil {
 		return Result{}, err
@@ -257,6 +260,18 @@ func (r *Runner) RunFilteredInRepo(ctx context.Context, cmd string, repoPath str
 // FilterHistory applies filter to a retained command output record.
 func (r *Runner) FilterHistory(commandID string, filter Filter) (Result, error) {
 	return r.history.Filter(commandID, filter)
+}
+
+const protectedLeanCommandMessage = "Lean source files are task-owned; use task-facing Lean/Lake tools instead of generic command/pipeline tools"
+
+func rejectProtectedLeanCommand(cmd string) error {
+	normalized := strings.ToLower(strings.ReplaceAll(cmd, "\\", "/"))
+	for _, marker := range []string{".lean", "mcpaihelperproject", "tasks/"} {
+		if strings.Contains(normalized, marker) {
+			return fmt.Errorf("%s: command references %q", protectedLeanCommandMessage, marker)
+		}
+	}
+	return nil
 }
 
 // CleanupHistory removes command log records that exceed retention policy limits.
