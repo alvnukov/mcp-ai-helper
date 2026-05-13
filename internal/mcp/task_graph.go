@@ -21,7 +21,7 @@ type TaskGraphRequest struct {
 type TaskGraph struct {
 	Nodes      []TaskGraphNode      `json:"nodes"`
 	Edges      []TaskGraphEdge      `json:"edges"`
-	Provenance TaskGraphProvenance   `json:"provenance"`
+	Provenance TaskGraphProvenance  `json:"provenance"`
 	Truncated  *TaskGraphTruncation `json:"truncated,omitempty"`
 }
 
@@ -123,6 +123,10 @@ func buildFullGraph(all []tasks.Task, maxNodes, maxBytes int) (TaskGraph, error)
 		}
 	}
 
+	filteredEdges, danglingEdges := filterEdgesToReturnedNodes(edges, nodes)
+	edges = filteredEdges
+	omittedEdges += danglingEdges
+
 	sort.Slice(nodes, func(i, j int) bool { return nodes[i].ID < nodes[j].ID })
 	sort.Slice(edges, func(i, j int) bool {
 		if edges[i].From != edges[j].From {
@@ -142,7 +146,7 @@ func buildFullGraph(all []tasks.Task, maxNodes, maxBytes int) (TaskGraph, error)
 		},
 	}
 
-	if truncatedByNodes {
+	if truncatedByNodes || omittedEdges > 0 {
 		result.Truncated = &TaskGraphTruncation{
 			OmittedNodes: omittedNodes,
 			OmittedEdges: omittedEdges,
@@ -232,6 +236,9 @@ func buildFocusedGraph(all []tasks.Task, focusID string, maxNodes, maxBytes int)
 		}
 	}
 
+	filteredEdges, omittedEdges := filterEdgesToReturnedNodes(edges, nodes)
+	edges = filteredEdges
+
 	sort.Slice(nodes[1:], func(i, j int) bool { return nodes[1+i].ID < nodes[1+j].ID })
 	sort.Slice(edges, func(i, j int) bool {
 		if edges[i].From != edges[j].From {
@@ -252,15 +259,34 @@ func buildFocusedGraph(all []tasks.Task, focusID string, maxNodes, maxBytes int)
 	}
 
 	totalRelevant := len(relevant)
-	if len(nodes) < totalRelevant {
+	if len(nodes) < totalRelevant || omittedEdges > 0 {
 		result.Truncated = &TaskGraphTruncation{
 			OmittedNodes: totalRelevant - len(nodes),
+			OmittedEdges: omittedEdges,
 			Reason:       fmt.Sprintf("max_nodes limit reached (%d)", maxNodes),
 		}
 	}
 
 	result = enforceMaxBytes(result, maxBytes, focusID)
 	return result, nil
+}
+
+func filterEdgesToReturnedNodes(edges []TaskGraphEdge, nodes []TaskGraphNode) ([]TaskGraphEdge, int) {
+	returned := make(map[string]bool, len(nodes))
+	for _, node := range nodes {
+		returned[node.ID] = true
+	}
+
+	filtered := make([]TaskGraphEdge, 0, len(edges))
+	omitted := 0
+	for _, edge := range edges {
+		if returned[edge.From] && returned[edge.To] {
+			filtered = append(filtered, edge)
+			continue
+		}
+		omitted++
+	}
+	return filtered, omitted
 }
 
 func taskToNode(t tasks.Task) TaskGraphNode {

@@ -152,7 +152,7 @@ func TestBuildTaskGraph_MaxNodes(t *testing.T) {
 }
 
 func TestBuildTaskGraph_FocusTask_MaxNodesPreservesFocus(t *testing.T) {
-	// Focus task must survive even when max_nodes is tiny
+	// Focus task must survive even when max_nodes is tiny.
 	all := []tasks.Task{
 		makeTask("parent", "done", "Parent", ""),
 		makeTask("focus", "in_progress", "Focus", "parent"),
@@ -169,8 +169,42 @@ func TestBuildTaskGraph_FocusTask_MaxNodesPreservesFocus(t *testing.T) {
 	if graph.Nodes[0].ID != "focus" {
 		t.Errorf("focus task should be the sole node")
 	}
+	if len(graph.Edges) != 0 {
+		t.Fatalf("expected no dangling edges, got %#v", graph.Edges)
+	}
 	if graph.Truncated == nil {
 		t.Fatal("expected truncation when max_nodes excludes relevant tasks")
+	}
+	if graph.Truncated.OmittedEdges != 3 {
+		t.Fatalf("expected 3 omitted edges, got %d", graph.Truncated.OmittedEdges)
+	}
+}
+
+func TestBuildTaskGraph_MaxNodesFiltersDanglingEdges(t *testing.T) {
+	all := []tasks.Task{
+		makeTask("parent", "done", "Parent", ""),
+		makeTask("child-1", "todo", "Child 1", "parent"),
+		makeTask("child-2", "todo", "Child 2", "parent"),
+		makeTask("child-3", "todo", "Child 3", "parent"),
+	}
+	graph, err := BuildTaskGraph(all, TaskGraphRequest{RepoPath: "/test", MaxNodes: 2})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	returned := map[string]bool{}
+	for _, node := range graph.Nodes {
+		returned[node.ID] = true
+	}
+	for _, edge := range graph.Edges {
+		if !returned[edge.From] || !returned[edge.To] {
+			t.Fatalf("edge references omitted node: %#v", edge)
+		}
+	}
+	if graph.Truncated == nil {
+		t.Fatal("expected truncation")
+	}
+	if graph.Truncated.OmittedEdges != 2 {
+		t.Fatalf("expected 2 omitted edges, got %d", graph.Truncated.OmittedEdges)
 	}
 }
 
