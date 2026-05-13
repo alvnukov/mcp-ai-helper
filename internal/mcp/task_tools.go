@@ -250,6 +250,31 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 		}
 		return structured(graph)
 	})
+	srv.AddTool(basemcp.NewTool("task_context",
+		basemcp.WithDescription("Return compact execution context for a selected task: goal chain, prerequisites, already done, planned next, blockers, boundaries, non-goals, acceptance criteria, verification plan, warnings and usage_contract. Use after task_current to get detailed context for a specific task."),
+		basemcp.WithString("repo_path", basemcp.Required()),
+		basemcp.WithString("task_id", basemcp.Required(), basemcp.Description("Task id to get execution context for. Use task_current to discover available task ids.")),
+		basemcp.WithNumber("max_nodes", basemcp.Description("Maximum items per section. Default 20.")),
+		basemcp.WithNumber("max_bytes", basemcp.Description("Maximum response bytes. Default 4096.")),
+	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+		var args TaskContextRequest
+		if err := bind(req, &args); err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
+		if err := validateTaskContextRequest(args); err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
+		backend := deps.loadTaskBackend()
+		list, _, err := backend.ListAll(ctx, args.RepoPath)
+		if err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
+		ctxResult, err := BuildTaskContext(list, args)
+		if err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
+		return structured(ctxResult)
+	})
 }
 
 func taskUpsertItemSchema() map[string]any {
