@@ -441,6 +441,32 @@ func TestRunWorkflowStepsTaskTransitionRejectsClosingGoal(t *testing.T) {
 	}
 }
 
+func TestRunWorkflowCommandRejectsLeanSourceAccess(t *testing.T) {
+	dir := t.TempDir()
+	leanPath := filepath.Join(dir, "MCPAIHelperProject", "ActiveTasks.lean")
+	if err := os.MkdirAll(filepath.Dir(leanPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(leanPath, []byte("def hidden := 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runner := NewRunner(testConfig(dir), nil)
+	result, err := runner.RunWorkflow(t.Context(), WorkflowRequest{
+		RepoPath: dir,
+		Steps: []WorkflowStep{{
+			ID:   "probe",
+			Tool: "command",
+			Args: map[string]any{"command": "cat MCPAIHelperProject/ActiveTasks.lean"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "failed" || !strings.Contains(result.Reason, "Lean source files") {
+		t.Fatalf("result status=%q reason=%q, want Lean source denial", result.Status, result.Reason)
+	}
+}
+
 func TestRunWorkflowStepsBranchOnCommandExitCodeAndOutput(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "x.txt")
