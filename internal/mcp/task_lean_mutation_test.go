@@ -83,6 +83,43 @@ func TestLeanUpsertCreatesDeterministicTaskAndValidates(t *testing.T) {
 	}
 }
 
+func TestLeanUpsertPersistsParentIDRelation(t *testing.T) {
+	repo := copyLeanRepoFixture(t)
+	result, err := upsertTask(context.Background(), tasks.AddRequest{RepoPath: repo, ID: "task-child-parent", ParentID: "task-040", Status: "todo", Title: "Child task"}, commandRunnerForRepo(repo), legacyStoreForTest(t))
+	if err != nil {
+		t.Fatalf("upsertTask returned error: %v", err)
+	}
+	if result.Task.ParentID != "task-040" {
+		t.Fatalf("upsert result parent_id = %q, want task-040", result.Task.ParentID)
+	}
+
+	child, _, err := readTask(context.Background(), repo, "task-child-parent", commandRunnerForRepo(repo), legacyStoreForTest(t))
+	if err != nil {
+		t.Fatalf("read generated child: %v", err)
+	}
+	if child.ParentID != "task-040" {
+		t.Fatalf("read child parent_id = %q, want task-040", child.ParentID)
+	}
+
+	all, _, err := readAllTasks(context.Background(), repo, commandRunnerForRepo(repo), legacyStoreForTest(t))
+	if err != nil {
+		t.Fatalf("read all tasks: %v", err)
+	}
+	graph, err := BuildTaskGraph(all, TaskGraphRequest{RepoPath: repo, FocusTaskID: "task-040", MaxNodes: 20})
+	if err != nil {
+		t.Fatalf("build graph: %v", err)
+	}
+	foundEdge := false
+	for _, edge := range graph.Edges {
+		if edge.From == "task-040" && edge.To == "task-child-parent" && edge.Kind == "parent_child" && edge.Provenance == "explicit" {
+			foundEdge = true
+		}
+	}
+	if !foundEdge {
+		t.Fatalf("focused graph missing explicit parent_child edge: %+v", graph)
+	}
+}
+
 func TestLeanBatchUpsertClosesMissingActiveTasks(t *testing.T) {
 	repo := copyLeanRepoFixture(t)
 	result, err := batchUpsertTasks(context.Background(), tasks.BatchUpsertRequest{RepoPath: repo, CloseMissing: true, MissingStatus: "done", Tasks: []tasks.AddRequest{{ID: "task-999", Status: "todo", Title: "Only task"}}}, commandRunnerForRepo(repo), legacyStoreForTest(t))

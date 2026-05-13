@@ -77,6 +77,7 @@ type leanTaskUpsertRPCRequest struct {
 	TaskType           string   `json:"task_type"`
 	Branch             string   `json:"branch"`
 	WorktreePath       string   `json:"worktree_path"`
+	ParentID           string   `json:"parent_id"`
 	AcceptanceCriteria []string `json:"acceptance_criteria"`
 	VerificationPlan   []string `json:"verification_plan"`
 }
@@ -369,7 +370,7 @@ func validateLeanTaskTransitionWithServer(ctx context.Context, repoPath string, 
 }
 
 func leanTaskUpsertParams(req tasks.AddRequest) leanTaskUpsertRPCRequest {
-	return leanTaskUpsertRPCRequest{ID: req.ID, Status: req.Status, Title: req.Title, Body: req.Body, Priority: req.Priority, ModelLevel: req.ModelLevel, Tags: nonNilStrings(req.Tags), TaskType: req.TaskType, Branch: req.Branch, WorktreePath: req.WorktreePath, AcceptanceCriteria: nonNilStrings(req.AcceptanceCriteria), VerificationPlan: nonNilStrings(req.VerificationPlan)}
+	return leanTaskUpsertRPCRequest{ID: req.ID, Status: req.Status, Title: req.Title, Body: req.Body, Priority: req.Priority, ModelLevel: req.ModelLevel, Tags: nonNilStrings(req.Tags), TaskType: req.TaskType, Branch: req.Branch, WorktreePath: req.WorktreePath, ParentID: req.ParentID, AcceptanceCriteria: nonNilStrings(req.AcceptanceCriteria), VerificationPlan: nonNilStrings(req.VerificationPlan)}
 }
 
 func nonNilStrings(values []string) []string {

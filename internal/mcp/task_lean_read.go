@@ -28,6 +28,7 @@ type leanTaskProjection struct {
 	TaskType           string   `json:"task_type"`
 	Branch             string   `json:"branch"`
 	WorktreePath       string   `json:"worktree_path"`
+	ParentID           string   `json:"parent_id"`
 	Status             string   `json:"status"`
 	Title              string   `json:"title"`
 	Body               string   `json:"body"`
@@ -228,6 +229,7 @@ func (p leanTaskProjection) toTask() (tasks.Task, error) {
 		TaskType:           p.TaskType,
 		Branch:             p.Branch,
 		WorktreePath:       p.WorktreePath,
+		ParentID:           p.ParentID,
 		Status:             p.Status,
 		Title:              p.Title,
 		Body:               p.Body,

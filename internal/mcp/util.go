@@ -81,7 +81,15 @@ func buildTaskTree(list []tasks.Task) map[string]any {
 		}
 	}
 	if goal == nil {
-		return map[string]any{"goal": nil, "children": nil}
+		return map[string]any{
+			"goal":     nil,
+			"children": []map[string]any{},
+			"diagnostic": map[string]string{
+				"code":      "task_tree_no_goal_root",
+				"message":   "no root task with tag 'goal' and empty parent_id was found",
+				"next_call": "task_graph",
+			},
+		}
 	}
 	children := map[string][]tasks.Task{}
 	for _, t := range list {
