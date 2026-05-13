@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 type fakeRunner struct {
@@ -100,5 +101,30 @@ func TestShellQuoteKeepsLeanCommandsReadable(t *testing.T) {
 	got := shellQuote([]string{"lake", "env", "lean", "Foo Bar.lean"})
 	if got != "lake env lean 'Foo Bar.lean'" {
 		t.Fatalf("quote = %q", got)
+	}
+}
+
+func TestServerManagerResetWaitsForWorkspaceLock(t *testing.T) {
+	manager := newServerManager()
+	lock := manager.workspaceLock("/tmp/workspace")
+	lock.Lock()
+
+	done := make(chan struct{})
+	go func() {
+		manager.reset("/tmp/workspace")
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("reset returned while workspace operation lock was held")
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	lock.Unlock()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("reset did not complete after workspace operation lock was released")
 	}
 }
