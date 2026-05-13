@@ -259,11 +259,10 @@ func callLeanTaskMutation(ctx context.Context, repoPath string, commands *comman
 			return leanRegistryEnvelope{}, err
 		}
 	}
-	result, err := lake.CallServerRPC(ctx, repoPath, lake.RPCRequest{SourceFile: "MCPAIHelperProject/TaskRegistryExport.lean", Method: method, Params: params, TimeoutSeconds: 20})
+	result, err := lake.CallServerRPC(ctx, repoPath, lake.RPCRequest{SourceFile: "MCPAIHelperProject/TaskRegistryExport.lean", Method: method, Params: params, TimeoutSeconds: 20, ResetAfterCall: true})
 	if err != nil {
 		return leanRegistryEnvelope{}, err
 	}
-	lake.ResetServerRPC(repoPath)
 	if result.Blocker != "" {
 		return leanRegistryEnvelope{}, fmt.Errorf("Lean task mutation blocker: %s", result.Blocker)
 	}
@@ -319,11 +318,11 @@ func writeLeanActiveTasksSource(ctx context.Context, repoPath string, source str
 		Method:         "MCPAIHelperProject.TaskRegistryExport.activeTasksWrite",
 		Params:         map[string]string{"source": source},
 		TimeoutSeconds: 20,
+		ResetAfterCall: true,
 	})
 	if err != nil {
 		return err
 	}
-	lake.ResetServerRPC(repoPath)
 	if result.Blocker != "" {
 		return fmt.Errorf("Lean active tasks rollback blocker: %s", result.Blocker)
 	}

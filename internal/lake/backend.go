@@ -47,6 +47,7 @@ type RPCRequest struct {
 	Method         string `json:"method"`
 	Params         any    `json:"params,omitempty"`
 	TimeoutSeconds int    `json:"timeout_seconds,omitempty"`
+	ResetAfterCall bool   `json:"reset_after_call,omitempty"`
 }
 
 // RPCResult is the compact result of one Lean server RPC call.
@@ -143,8 +144,9 @@ func RunExe(ctx context.Context, repoPath string, exeName string, exeArgs []stri
 var defaultServerManager = newServerManager()
 
 type serverManager struct {
-	mu      sync.Mutex
-	servers map[string]*serverProcess
+	mu             sync.Mutex
+	servers        map[string]*serverProcess
+	workspaceLocks map[string]*sync.Mutex
 }
 
 type serverProcess struct {
@@ -159,7 +161,7 @@ type serverProcess struct {
 }
 
 func newServerManager() *serverManager {
-	return &serverManager{servers: map[string]*serverProcess{}}
+	return &serverManager{servers: map[string]*serverProcess{}, workspaceLocks: map[string]*sync.Mutex{}}
 }
 
 // CallServerRPC calls one Lean RPC method through a shared per-workspace lake serve process.
@@ -181,6 +183,11 @@ func (m *serverManager) CallRPC(ctx context.Context, repoPath string, req RPCReq
 	if err != nil {
 		return RPCResult{WorkspaceDetected: false, Blocker: err.Error()}, nil
 	}
+
+	workspaceLock := m.workspaceLock(ws.Dir)
+	workspaceLock.Lock()
+	defer workspaceLock.Unlock()
+
 	sourceRel, sourceAbs, sourceBlocker := resolveRPCSource(ws.Dir, req.SourceFile)
 	if sourceBlocker != "" {
 		return RPCResult{WorkspaceDetected: true, WorkspaceDir: ws.Dir, Blocker: sourceBlocker}, nil
@@ -213,6 +220,9 @@ func (m *serverManager) CallRPC(ctx context.Context, repoPath string, req RPCReq
 		}
 		return serverRPCBlocker(ws, method, server.stderr, err), nil
 	}
+	if req.ResetAfterCall {
+		m.resetLocked(ws.Dir)
+	}
 	return result, nil
 }
 
@@ -240,6 +250,24 @@ func (m *serverManager) drop(workspaceDir string, server *serverProcess) {
 }
 
 func (m *serverManager) reset(workspaceDir string) {
+	workspaceLock := m.workspaceLock(workspaceDir)
+	workspaceLock.Lock()
+	defer workspaceLock.Unlock()
+	m.resetLocked(workspaceDir)
+}
+
+func (m *serverManager) workspaceLock(workspaceDir string) *sync.Mutex {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	lock := m.workspaceLocks[workspaceDir]
+	if lock == nil {
+		lock = &sync.Mutex{}
+		m.workspaceLocks[workspaceDir] = lock
+	}
+	return lock
+}
+
+func (m *serverManager) resetLocked(workspaceDir string) {
 	m.mu.Lock()
 	server := m.servers[workspaceDir]
 	delete(m.servers, workspaceDir)
