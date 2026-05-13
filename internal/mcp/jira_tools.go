@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	gojira "github.com/andygrunwald/go-jira"
@@ -178,6 +179,36 @@ func registerJiraTools(srv *server.MCPServer, deps *Server) {
 		})
 	})
 
+	srv.AddTool(basemcp.NewTool("jira_get_property",
+		basemcp.WithDescription("Smart Checklist workflow:\n1. Read: jira_get_property(issue_key, property_key=\"com.railsware.SmartChecklist.checklist\") — returns Markdown-formatted checklist. Each line starting with '- ' is an unchecked item, '+ ' is a checked/done item.\n2. Modify the text: add/remove lines, change '- ' to '+ ' to check an item, '+ ' to '- ' to uncheck.\n3. Write: jira_update(issue_key, custom_fields={\"com.railsware.SmartChecklist.checklist\": modified_markdown})."),
+		basemcp.WithString("issue_key", basemcp.Required(), basemcp.Description("Jira issue key.")),
+		basemcp.WithString("property_key", basemcp.Required(), basemcp.Description("Entity property key, e.g. com.railsware.SmartChecklist.checklist.")),
+	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+		var args struct {
+			IssueKey    string `json:"issue_key"`
+			PropertyKey string `json:"property_key"`
+		}
+		if err := bind(req, &args); err != nil {
+			return nil, err
+		}
+		jc, err := getClient()
+		if err != nil {
+			return safeError(deps, err), nil
+		}
+		var wrapper struct {
+			Key   string      `json:"key"`
+			Value interface{} `json:"value"`
+		}
+		if err := jc.GetIssueProperty(args.IssueKey, args.PropertyKey, &wrapper); err != nil {
+			return safeError(deps, err), nil
+		}
+		return structured(map[string]any{
+			"issue_key":    args.IssueKey,
+			"property_key": args.PropertyKey,
+			"value":        wrapper.Value,
+		})
+	})
+
 	srv.AddTool(basemcp.NewTool("jira_update",
 		basemcp.WithDescription("Update Jira issue fields. Only provided fields are changed."),
 		basemcp.WithString("issue_key", basemcp.Required(), basemcp.Description("Jira issue key.")),
@@ -187,7 +218,7 @@ func registerJiraTools(srv *server.MCPServer, deps *Server) {
 		basemcp.WithArray("labels", basemcp.Description("Replacement labels array.")),
 		basemcp.WithArray("components", basemcp.Description("Component names.")),
 		basemcp.WithArray("fix_versions", basemcp.Description("Fix version names.")),
-		basemcp.WithObject("custom_fields", basemcp.Description("Custom field ids mapped to values.")),
+		basemcp.WithObject("custom_fields", basemcp.Description("Fields to set. Dotted keys (com.railsware.SmartChecklist.checklist) write to entity property API — use this for Smart Checklist. Plain keys (customfield_12345) use standard issue update. Checklist format: '- item' = unchecked, '+ item' = checked.")),
 	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
 		var args jiraUpdateRequest
 		if err := bind(req, &args); err != nil {
@@ -227,18 +258,34 @@ func registerJiraTools(srv *server.MCPServer, deps *Server) {
 			}
 			fields["fixVersions"] = vers
 		}
+		props := make(map[string]interface{})
 		if args.CustomFields != nil {
 			for k, v := range args.CustomFields {
-				fields[k] = v
+				if strings.Contains(k, ".") {
+					props[k] = v
+				} else {
+					fields[k] = v
+				}
 			}
 		}
-		if len(fields) == 0 {
+		if len(fields) == 0 && len(props) == 0 {
 			return safeError(deps, fmt.Errorf("no fields to update")), nil
 		}
-		if err := jc.UpdateIssue(args.IssueKey, fields); err != nil {
-			return safeError(deps, err), nil
+		if len(fields) > 0 {
+			if err := jc.UpdateIssue(args.IssueKey, fields); err != nil {
+				return safeError(deps, err), nil
+			}
 		}
-		return structured(map[string]any{"status": "ok", "updated_fields": fieldKeys(fields)})
+		for k, v := range props {
+			if err := jc.SetIssueProperty(args.IssueKey, k, v); err != nil {
+				return safeError(deps, err), nil
+			}
+		}
+		updatedFields := fieldKeys(fields)
+		for k := range props {
+			updatedFields = append(updatedFields, k)
+		}
+		return structured(map[string]any{"status": "ok", "updated_fields": updatedFields})
 	})
 
 	srv.AddTool(basemcp.NewTool("jira_transition",

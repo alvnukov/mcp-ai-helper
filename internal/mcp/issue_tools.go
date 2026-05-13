@@ -70,7 +70,7 @@ func registerIssueTools(srv *server.MCPServer, deps *Server) {
 		if err != nil {
 			return nil, err
 		}
-		return structured(result)
+		return structured(map[string]any{"issues": result})
 	})
 
 	srv.AddTool(basemcp.NewTool("issue_accept",

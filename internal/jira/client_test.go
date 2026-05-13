@@ -125,11 +125,6 @@ func TestGetIssue(t *testing.T) {
 func TestUpdateIssue(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if r.Method == http.MethodGet {
-			w.Write([]byte(`{"key":"TEST-1","fields":{"summary":"old","unknowns":{}}}`))
-			return
-		}
-		// PUT — update
 		w.Write([]byte(`{"key":"TEST-1","fields":{"summary":"new"}}`))
 	}))
 	defer srv.Close()

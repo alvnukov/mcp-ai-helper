@@ -3,6 +3,7 @@ package jira
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -71,19 +72,57 @@ func (c *Client) GetIssue(key string) (*gojira.Issue, error) {
 
 // UpdateIssue updates issue fields.
 func (c *Client) UpdateIssue(key string, fields map[string]interface{}) error {
-	issue, _, err := c.jc.Issue.Get(key, nil)
-	if err != nil {
-		return fmt.Errorf("jira update %s: get: %w", key, err)
-	}
-	if issue.Fields == nil {
-		issue.Fields = &gojira.IssueFields{}
-	}
+	unknowns := make(map[string]interface{}, len(fields))
 	for k, v := range fields {
-		issue.Fields.Unknowns[k] = v
+		unknowns[k] = v
 	}
-	_, _, err = c.jc.Issue.Update(issue)
+	issue := &gojira.Issue{
+		Key: key,
+		Fields: &gojira.IssueFields{
+			Unknowns: unknowns,
+		},
+	}
+	_, _, err := c.jc.Issue.Update(issue)
 	if err != nil {
 		return fmt.Errorf("jira update %s: %w", key, err)
+	}
+	return nil
+}
+
+// SetIssueProperty sets an entity property on an issue.
+func (c *Client) SetIssueProperty(issueKey, propertyKey string, value interface{}) error {
+	path := fmt.Sprintf("rest/api/2/issue/%s/properties/%s", issueKey, propertyKey)
+	req, err := c.jc.NewRequest("PUT", path, value)
+	if err != nil {
+		return fmt.Errorf("jira set property %s %s: %w", issueKey, propertyKey, err)
+	}
+	resp, err := c.jc.Do(req, nil)
+	if err != nil {
+		return fmt.Errorf("jira set property %s %s: %w", issueKey, propertyKey, err)
+	}
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return fmt.Errorf("jira set property %s %s: HTTP %d: %s", issueKey, propertyKey, resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return nil
+}
+
+// GetIssueProperty reads an entity property from an issue.
+func (c *Client) GetIssueProperty(issueKey, propertyKey string, v interface{}) error {
+	path := fmt.Sprintf("rest/api/2/issue/%s/properties/%s", issueKey, propertyKey)
+	req, err := c.jc.NewRequest("GET", path, nil)
+	if err != nil {
+		return fmt.Errorf("jira get property %s %s: %w", issueKey, propertyKey, err)
+	}
+	resp, err := c.jc.Do(req, v)
+	if err != nil {
+		return fmt.Errorf("jira get property %s %s: %w", issueKey, propertyKey, err)
+	}
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return fmt.Errorf("jira get property %s %s: HTTP %d: %s", issueKey, propertyKey, resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	return nil
 }

@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -155,15 +156,43 @@ func (m *childManager) handleLocal(line []byte) bool {
 }
 
 func (m *childManager) build() error {
+	goBinary, err := resolveGoBinary(m.repoRoot)
+	if err != nil {
+		return err
+	}
 	// #nosec G204 -- internal go build with fixed args
-	cmd := exec.Command("go", "build", "-o", m.binaryPath, "./cmd/mcp-ai-helper")
+	cmd := exec.Command(goBinary, "build", "-o", m.binaryPath, "./cmd/mcp-ai-helper")
 	cmd.Dir = m.repoRoot
+	cmd.Env = append(os.Environ(), "GOTOOLCHAIN=local")
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("%w: %s", err, stringsTrim(stderr.String()))
 	}
 	return nil
+}
+
+func resolveGoBinary(repoRoot string) (string, error) {
+	modPath := filepath.Join(repoRoot, "go.mod")
+	data, err := os.ReadFile(modPath)
+	if err != nil {
+		return "go", nil
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "go ") {
+			version := strings.TrimSpace(strings.TrimPrefix(line, "go "))
+			home, err := os.UserHomeDir()
+			if err == nil {
+				sdkPath := filepath.Join(home, "sdk", "go"+version, "bin", "go")
+				if _, err := os.Stat(sdkPath); err == nil {
+					return sdkPath, nil
+				}
+			}
+			break
+		}
+	}
+	return "go", nil
 }
 
 func (m *childManager) rebuildAndRestart() error {
