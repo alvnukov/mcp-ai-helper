@@ -139,7 +139,6 @@ func registerConfigTools(srv *server.MCPServer, deps *Server, reload configReloa
 	})
 }
 
-
 func registerConfigOptionTools(srv *server.MCPServer, deps *Server, reload configReloadFunc) {
 	srv.AddTool(basemcp.NewTool("config_option_set",
 		basemcp.WithDescription("Set one allowlisted scalar config option without replacing the whole YAML config. Preserves hidden token fields and reloads by default."),
