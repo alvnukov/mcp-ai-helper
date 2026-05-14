@@ -332,6 +332,72 @@ func TestWriteValidatedConfigWritesValidConfig(t *testing.T) {
 	}
 }
 
+func TestWriteValidatedConfigPreservesRedactedTokenFields(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	_, err := writeValidatedConfig(path, `providers:
+  openai:
+    type: generic
+    base_url: https://api.example.test/v1
+    api_key: provider-token-123
+secrets:
+  GH_TOKEN:
+    value: gh-token-123456
+    enabled: true
+integrations:
+  jira:
+    url: https://jira.example.test
+    api_key: jira-token-123
+    api_key_env: JIRA_TOKEN
+    enabled: true
+  confluence:
+    url: https://conf.example.test
+    api_key: conf-token-123
+    api_key_env: CONF_TOKEN
+    enabled: true
+`)
+	if err != nil {
+		t.Fatalf("write initial config: %v", err)
+	}
+	loaded, err := writeValidatedConfig(path, `providers:
+  openai:
+    type: generic
+    base_url: https://api.example.test/v1
+integrations:
+  jira:
+    url: https://jira.example.test
+    enabled: true
+  confluence:
+    url: https://conf.example.test
+    enabled: true
+`)
+	if err != nil {
+		t.Fatalf("replace config: %v", err)
+	}
+	if got := loaded.Providers["openai"].APIKey; got != "provider-token-123" {
+		t.Fatalf("provider api_key = %q, want preserved token", got)
+	}
+	if got := loaded.Secrets["GH_TOKEN"].Value; got != "gh-token-123456" {
+		t.Fatalf("secret value = %q, want preserved token", got)
+	}
+	if loaded.Integrations.Jira == nil || loaded.Integrations.Jira.APIKey != "jira-token-123" || loaded.Integrations.Jira.APIKeyEnv != "JIRA_TOKEN" {
+		t.Fatalf("jira token fields were not preserved: %#v", loaded.Integrations.Jira)
+	}
+	if loaded.Integrations.Confluence == nil || loaded.Integrations.Confluence.APIKey != "conf-token-123" || loaded.Integrations.Confluence.APIKeyEnv != "CONF_TOKEN" {
+		t.Fatalf("confluence token fields were not preserved: %#v", loaded.Integrations.Confluence)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	for _, want := range []string{"provider-token-123", "gh-token-123456", "jira-token-123", "conf-token-123"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("written config does not preserve %q: %s", want, text)
+		}
+	}
+}
+
 func TestLanguageToolsRegistered(t *testing.T) {
 	t.Parallel()
 	cfg := &config.Config{AssistantGuidance: config.DefaultAssistantGuidance()}
