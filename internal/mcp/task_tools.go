@@ -275,6 +275,25 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 		}
 		return structured(ctxResult)
 	})
+	srv.AddTool(basemcp.NewTool("task_export",
+		basemcp.WithDescription("Export tasks from the current backend to an Obsidian Markdown directory."),
+		basemcp.WithString("repo_path", basemcp.Required()),
+		basemcp.WithString("target_dir", basemcp.Required()),
+		basemcp.WithBoolean("dry_run"),
+		basemcp.WithBoolean("overwrite"),
+	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+		var args ExportRequest
+		if err := bind(req, &args); err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
+		source := deps.loadTaskBackend()
+		target := newObsidianTaskBackend(args.TargetDir)
+		result, err := exportTasks(ctx, source, target, args.RepoPath, ImportExportRequest{DryRun: args.DryRun, Overwrite: args.Overwrite})
+		if err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
+		return structured(result)
+	})
 }
 
 func taskUpsertItemSchema() map[string]any {
