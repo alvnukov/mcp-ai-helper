@@ -15,8 +15,8 @@ import (
 type taskUIBackend interface {
 	List(context.Context, string) ([]tasks.Task, string, error)
 	Get(context.Context, string, string) (tasks.Task, string, error)
-	Upsert(context.Context, tasks.AddRequest) (leanMutationResult, error)
-	SetStatus(context.Context, tasks.StatusRequest) (leanMutationResult, error)
+	Upsert(context.Context, tasks.AddRequest) (taskMutationResult, error)
+	SetStatus(context.Context, tasks.StatusRequest) (taskMutationResult, error)
 }
 
 type serverTaskUIBackend struct {
@@ -33,12 +33,12 @@ func (b serverTaskUIBackend) Get(ctx context.Context, repoPath string, id string
 	return backend.Get(ctx, repoPath, id)
 }
 
-func (b serverTaskUIBackend) Upsert(ctx context.Context, req tasks.AddRequest) (leanMutationResult, error) {
+func (b serverTaskUIBackend) Upsert(ctx context.Context, req tasks.AddRequest) (taskMutationResult, error) {
 	backend := b.deps.loadTaskBackend()
 	return backend.Upsert(ctx, req)
 }
 
-func (b serverTaskUIBackend) SetStatus(ctx context.Context, req tasks.StatusRequest) (leanMutationResult, error) {
+func (b serverTaskUIBackend) SetStatus(ctx context.Context, req tasks.StatusRequest) (taskMutationResult, error) {
 	backend := b.deps.loadTaskBackend()
 	return backend.SetStatus(ctx, req)
 }

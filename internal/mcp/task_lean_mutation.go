@@ -20,14 +20,14 @@ const activeTasksLeanPath = "MCPAIHelperProject/ActiveTasks.lean"
 //go:embed task_registry_templates/* task_registry_templates/MCPAIHelperProject/*
 var taskRegistryBootstrapTemplates embed.FS
 
-type leanMutationResult struct {
+type taskMutationResult struct {
 	Task         tasks.Task `json:"task"`
 	Source       string     `json:"source"`
 	Validation   string     `json:"validation"`
 	ChangedFiles []string   `json:"changed_files,omitempty"`
 }
 
-type leanBatchMutationResult struct {
+type taskBatchMutationResult struct {
 	Upserted   []tasks.Task `json:"upserted"`
 	Closed     []tasks.Task `json:"closed"`
 	Source     string       `json:"source"`
@@ -93,26 +93,26 @@ type leanTaskDeleteRPCRequest struct {
 	ID string `json:"id"`
 }
 
-func setTaskStatus(ctx context.Context, req tasks.StatusRequest, commands *command.Runner, _ *tasks.Store) (leanMutationResult, error) {
+func setTaskStatus(ctx context.Context, req tasks.StatusRequest, commands *command.Runner, _ *tasks.Store) (taskMutationResult, error) {
 	if strings.TrimSpace(req.Status) == "" {
-		return leanMutationResult{}, errors.New("status is required")
+		return taskMutationResult{}, errors.New("status is required")
 	}
 	if err := ensureLeanTaskRegistryBootstrap(ctx, req.RepoPath, commands); err != nil {
-		return leanMutationResult{}, err
+		return taskMutationResult{}, err
 	}
 	payload, envelope, err := applyLeanTaskTransition(ctx, req.RepoPath, req, commands)
 	if err != nil {
-		return leanMutationResult{}, err
+		return taskMutationResult{}, err
 	}
 	if err := validateLeanRegistryBuild(ctx, req.RepoPath, commands, "after transition"); err != nil {
 		_ = writeLeanActiveTasksSource(ctx, req.RepoPath, payload.PreviousSource)
-		return leanMutationResult{}, err
+		return taskMutationResult{}, err
 	}
 	task, err := payload.Task.toTask()
 	if err != nil {
-		return leanMutationResult{}, err
+		return taskMutationResult{}, err
 	}
-	return leanMutationResult{Task: task, Source: "lean_registry", Validation: envelope.Validation.Summary + " + lake build", ChangedFiles: envelope.ChangedFiles}, nil
+	return taskMutationResult{Task: task, Source: "lean_registry", Validation: envelope.Validation.Summary + " + lake build", ChangedFiles: envelope.ChangedFiles}, nil
 }
 
 func ensureLeanTaskRegistryBootstrap(ctx context.Context, repoPath string, commands *command.Runner) error {
@@ -391,35 +391,35 @@ func taskProjectionsToTasks(projections []leanTaskProjection) ([]tasks.Task, err
 	return out, nil
 }
 
-func upsertTask(ctx context.Context, req tasks.AddRequest, commands *command.Runner, _ *tasks.Store) (leanMutationResult, error) {
+func upsertTask(ctx context.Context, req tasks.AddRequest, commands *command.Runner, _ *tasks.Store) (taskMutationResult, error) {
 	if strings.TrimSpace(req.Title) == "" {
-		return leanMutationResult{}, errors.New("title is required")
+		return taskMutationResult{}, errors.New("title is required")
 	}
 	if err := ensureLeanTaskRegistryBootstrap(ctx, req.RepoPath, commands); err != nil {
-		return leanMutationResult{}, err
+		return taskMutationResult{}, err
 	}
 	envelope, err := callLeanTaskMutation(ctx, req.RepoPath, commands, "MCPAIHelperProject.TaskRegistryExport.taskUpsertApply", "task.upsert.apply", leanTaskUpsertParams(req))
 	if err != nil {
-		return leanMutationResult{}, err
+		return taskMutationResult{}, err
 	}
 	var payload leanTaskTransitionApplyPayload
 	if err := json.Unmarshal(envelope.Data, &payload); err != nil {
-		return leanMutationResult{}, fmt.Errorf("decode Lean task upsert payload: %w", err)
+		return taskMutationResult{}, fmt.Errorf("decode Lean task upsert payload: %w", err)
 	}
 	if err := validateLeanRegistryBuild(ctx, req.RepoPath, commands, "after upsert"); err != nil {
 		_ = writeLeanActiveTasksSource(ctx, req.RepoPath, payload.PreviousSource)
-		return leanMutationResult{}, err
+		return taskMutationResult{}, err
 	}
 	task, err := payload.Task.toTask()
 	if err != nil {
-		return leanMutationResult{}, err
+		return taskMutationResult{}, err
 	}
-	return leanMutationResult{Task: task, Source: "lean_registry", Validation: envelope.Validation.Summary + " + lake build", ChangedFiles: envelope.ChangedFiles}, nil
+	return taskMutationResult{Task: task, Source: "lean_registry", Validation: envelope.Validation.Summary + " + lake build", ChangedFiles: envelope.ChangedFiles}, nil
 }
 
-func batchUpsertTasks(ctx context.Context, req tasks.BatchUpsertRequest, commands *command.Runner, _ *tasks.Store) (leanBatchMutationResult, error) {
+func batchUpsertTasks(ctx context.Context, req tasks.BatchUpsertRequest, commands *command.Runner, _ *tasks.Store) (taskBatchMutationResult, error) {
 	if err := ensureLeanTaskRegistryBootstrap(ctx, req.RepoPath, commands); err != nil {
-		return leanBatchMutationResult{}, err
+		return taskBatchMutationResult{}, err
 	}
 	items := make([]leanTaskUpsertRPCRequest, 0, len(req.Tasks))
 	for _, item := range req.Tasks {
@@ -427,49 +427,49 @@ func batchUpsertTasks(ctx context.Context, req tasks.BatchUpsertRequest, command
 	}
 	envelope, err := callLeanTaskMutation(ctx, req.RepoPath, commands, "MCPAIHelperProject.TaskRegistryExport.taskBatchUpsertApply", "task.batch_upsert.apply", leanTaskBatchUpsertRPCRequest{Tasks: items, CloseMissing: req.CloseMissing, MissingStatus: req.MissingStatus, ActiveStatuses: nonNilStrings(req.ActiveStatuses)})
 	if err != nil {
-		return leanBatchMutationResult{}, err
+		return taskBatchMutationResult{}, err
 	}
 	var payload leanTaskBatchApplyPayload
 	if err := json.Unmarshal(envelope.Data, &payload); err != nil {
-		return leanBatchMutationResult{}, fmt.Errorf("decode Lean task batch upsert payload: %w", err)
+		return taskBatchMutationResult{}, fmt.Errorf("decode Lean task batch upsert payload: %w", err)
 	}
 	if err := validateLeanRegistryBuild(ctx, req.RepoPath, commands, "after batch upsert"); err != nil {
 		_ = writeLeanActiveTasksSource(ctx, req.RepoPath, payload.PreviousSource)
-		return leanBatchMutationResult{}, err
+		return taskBatchMutationResult{}, err
 	}
 	upserted, err := taskProjectionsToTasks(payload.Upserted)
 	if err != nil {
-		return leanBatchMutationResult{}, err
+		return taskBatchMutationResult{}, err
 	}
 	closed, err := taskProjectionsToTasks(payload.Closed)
 	if err != nil {
-		return leanBatchMutationResult{}, err
+		return taskBatchMutationResult{}, err
 	}
-	return leanBatchMutationResult{Upserted: upserted, Closed: closed, Source: "lean_registry", Validation: envelope.Validation.Summary + " + lake build"}, nil
+	return taskBatchMutationResult{Upserted: upserted, Closed: closed, Source: "lean_registry", Validation: envelope.Validation.Summary + " + lake build"}, nil
 }
 
-func deleteTask(ctx context.Context, req tasks.DeleteRequest, commands *command.Runner, _ *tasks.Store) (leanMutationResult, error) {
+func deleteTask(ctx context.Context, req tasks.DeleteRequest, commands *command.Runner, _ *tasks.Store) (taskMutationResult, error) {
 	if strings.TrimSpace(req.ID) == "" {
-		return leanMutationResult{}, errors.New("id is required")
+		return taskMutationResult{}, errors.New("id is required")
 	}
 	if err := ensureLeanTaskRegistryBootstrap(ctx, req.RepoPath, commands); err != nil {
-		return leanMutationResult{}, err
+		return taskMutationResult{}, err
 	}
 	envelope, err := callLeanTaskMutation(ctx, req.RepoPath, commands, "MCPAIHelperProject.TaskRegistryExport.taskDeleteApply", "task.delete.apply", leanTaskDeleteRPCRequest{ID: req.ID})
 	if err != nil {
-		return leanMutationResult{}, err
+		return taskMutationResult{}, err
 	}
 	var payload leanTaskTransitionApplyPayload
 	if err := json.Unmarshal(envelope.Data, &payload); err != nil {
-		return leanMutationResult{}, fmt.Errorf("decode Lean task delete payload: %w", err)
+		return taskMutationResult{}, fmt.Errorf("decode Lean task delete payload: %w", err)
 	}
 	if err := validateLeanRegistryBuild(ctx, req.RepoPath, commands, "after delete"); err != nil {
 		_ = writeLeanActiveTasksSource(ctx, req.RepoPath, payload.PreviousSource)
-		return leanMutationResult{}, err
+		return taskMutationResult{}, err
 	}
 	task, err := payload.Task.toTask()
 	if err != nil {
-		return leanMutationResult{}, err
+		return taskMutationResult{}, err
 	}
-	return leanMutationResult{Task: task, Source: "lean_registry", Validation: envelope.Validation.Summary + " + lake build", ChangedFiles: envelope.ChangedFiles}, nil
+	return taskMutationResult{Task: task, Source: "lean_registry", Validation: envelope.Validation.Summary + " + lake build", ChangedFiles: envelope.ChangedFiles}, nil
 }
