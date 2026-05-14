@@ -588,7 +588,7 @@ models:
 routing: {}
 
 command_policy:
-  default_timeout_seconds: 20
+  default_timeout_seconds: 300
   max_output_bytes: 200000
   max_lines: 400
   log_dir: ~/.mcp-ai-helper/repos
@@ -619,7 +619,7 @@ func defaultConfig() *Config {
 		Routing:           map[string]string{},
 		AssistantGuidance: defaultAssistantGuidance,
 		CommandPolicy: CommandPolicy{
-			DefaultTimeoutSeconds: 20,
+			DefaultTimeoutSeconds: 300,
 			MaxOutputBytes:        200000,
 			MaxLines:              400,
 			AllowedCWDs:           []string{"."},
@@ -680,7 +680,7 @@ func applyDefaults(cfg *Config) {
 		cfg.AssistantGuidance = defaultAssistantGuidance
 	}
 	if cfg.CommandPolicy.DefaultTimeoutSeconds <= 0 {
-		cfg.CommandPolicy.DefaultTimeoutSeconds = 20
+		cfg.CommandPolicy.DefaultTimeoutSeconds = 300
 	}
 	if cfg.CommandPolicy.MaxOutputBytes <= 0 {
 		cfg.CommandPolicy.MaxOutputBytes = 200000

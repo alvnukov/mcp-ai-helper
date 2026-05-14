@@ -110,6 +110,12 @@ func TestLoadCreatesDefaultConfigInHomeDir(t *testing.T) {
 	if !strings.Contains(text, "reasoning_patterns:\n    enabled: true") {
 		t.Fatal("generated config should expose reasoning_patterns layer")
 	}
+	if !strings.Contains(text, "default_timeout_seconds: 300") {
+		t.Fatal("generated config should default command timeout to 300 seconds")
+	}
+	if cfg.CommandPolicy.DefaultTimeoutSeconds != 300 {
+		t.Fatalf("default command timeout = %d, want 300", cfg.CommandPolicy.DefaultTimeoutSeconds)
+	}
 	if !strings.Contains(cfg.AssistantGuidance, "one long run_workflow") {
 		t.Fatal("loaded config guidance is missing workflow policy")
 	}

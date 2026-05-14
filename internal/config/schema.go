@@ -56,7 +56,7 @@ func Schema() map[string]any {
 			{Path: "routing.query_default", Type: "string", Description: "Default model id for general query_model calls."},
 			{Path: "routing.log_summary", Type: "string", Description: "Model id for cheap log and command-output summarization."},
 			{Path: "routing.evidence_analysis", Type: "string", Description: "Model id for stronger evidence-based analysis."},
-			{Path: "command_policy.default_timeout_seconds", Type: "int", Default: "20", Description: "Default timeout for local commands."},
+			{Path: "command_policy.default_timeout_seconds", Type: "int", Default: "300", Description: "Default timeout for local commands, in seconds."},
 			{Path: "command_policy.max_output_bytes", Type: "int", Default: "200000", Description: "Maximum retained command output bytes before truncation/filtering."},
 			{Path: "command_policy.max_lines", Type: "int", Default: "400", Description: "Maximum returned output lines."},
 			{Path: "command_policy.allowed_cwds", Type: "[]string", Default: ".", Description: "Allowed command working directories. Use repo-relative entries for normal repo work."},
