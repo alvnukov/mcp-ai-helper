@@ -218,6 +218,44 @@ func TestTaskBatchUpsertSchemaAdvertisesTaskObjects(t *testing.T) {
 	}
 }
 
+func TestTaskGraphAndContextToolsAdvertiseUsageContract(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{AssistantGuidance: config.DefaultAssistantGuidance()}
+	srv := New(cfg)
+	tools := srv.ListTools()
+
+	graphTool, ok := tools["task_graph"]
+	if !ok {
+		t.Fatal("task_graph tool is not registered")
+	}
+	graphSchema, err := json.Marshal(graphTool.Tool.InputSchema)
+	if err != nil {
+		t.Fatalf("marshal task_graph schema: %v", err)
+	}
+	graphHelp := graphTool.Tool.Description + " " + string(graphSchema)
+	for _, want := range []string{"task-123", "parent_child", "provenance=explicit", "truncated", "next_call", "task_current"} {
+		if !strings.Contains(graphHelp, want) {
+			t.Fatalf("task_graph help missing %q: %s", want, graphHelp)
+		}
+	}
+
+	contextTool, ok := tools["task_context"]
+	if !ok {
+		t.Fatal("task_context tool is not registered")
+	}
+	contextSchema, err := json.Marshal(contextTool.Tool.InputSchema)
+	if err != nil {
+		t.Fatalf("marshal task_context schema: %v", err)
+	}
+	contextHelp := contextTool.Tool.Description + " " + string(contextSchema)
+	for _, want := range []string{"task-123", "task_current", "task_graph", "usage_contract", "truncated", "next_call"} {
+		if !strings.Contains(contextHelp, want) {
+			t.Fatalf("task_context help missing %q: %s", want, contextHelp)
+		}
+	}
+}
+
 func TestIssueToolsRegistered(t *testing.T) {
 	t.Parallel()
 
@@ -397,7 +435,6 @@ integrations:
 		}
 	}
 }
-
 
 func TestConfigOptionSetAndResetPreservesTokens(t *testing.T) {
 	t.Parallel()
