@@ -12,6 +12,13 @@ var ErrLossyField = errors.New("lossy field detected")
 var ErrDuplicateID = errors.New("duplicate task ID in target")
 var ErrStaleTarget = errors.New("stale target registry")
 
+type ExportRequest struct {
+	RepoPath  string `json:"repo_path"`
+	TargetDir string `json:"target_dir"`
+	DryRun    bool   `json:"dry_run"`
+	Overwrite bool   `json:"overwrite"`
+}
+
 type ImportExportRequest struct {
 	RepoPath string
 	DryRun   bool
