@@ -36,6 +36,49 @@ func TestValidateRejectsUnknownProvider(t *testing.T) {
 	}
 }
 
+func TestTaskRegistryBackendDefaultsToLean(t *testing.T) {
+	cfg := &Config{}
+	applyDefaults(cfg)
+	if cfg.TaskRegistry.Backend != "lean" {
+		t.Fatalf("backend = %q, want lean", cfg.TaskRegistry.Backend)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+}
+
+func TestTaskRegistryBackendRejectsInvalidValue(t *testing.T) {
+	cfg := &Config{TaskRegistry: TaskRegistryConfig{Backend: "magic"}}
+	applyDefaults(cfg)
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "unsupported task_registry.backend") {
+		t.Fatalf("expected unsupported backend error, got: %v", err)
+	}
+}
+
+func TestTaskRegistryBackendRequiresReadableObsidianPath(t *testing.T) {
+	cfg := &Config{TaskRegistry: TaskRegistryConfig{Backend: "obsidian"}}
+	applyDefaults(cfg)
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "task_registry.obsidian.path is required") {
+		t.Fatalf("expected missing path error, got: %v", err)
+	}
+
+	cfg.TaskRegistry.Obsidian.Path = filepath.Join(t.TempDir(), "missing")
+	err = cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "task_registry.obsidian.path not readable") {
+		t.Fatalf("expected unreadable path error, got: %v", err)
+	}
+}
+
+func TestTaskRegistryBackendAcceptsObsidianDirectory(t *testing.T) {
+	cfg := &Config{TaskRegistry: TaskRegistryConfig{Backend: "obsidian", Obsidian: ObsidianRegistryConfig{Path: t.TempDir()}}}
+	applyDefaults(cfg)
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+}
+
 func TestLoadCreatesDefaultConfigInHomeDir(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

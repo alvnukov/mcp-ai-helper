@@ -694,6 +694,11 @@ func applyDefaults(cfg *Config) {
 	if cfg.PipelinePolicy.MaxReturnChars <= 0 {
 		cfg.PipelinePolicy.MaxReturnChars = 4000
 	}
+	cfg.TaskRegistry.Backend = strings.TrimSpace(cfg.TaskRegistry.Backend)
+	if cfg.TaskRegistry.Backend == "" {
+		cfg.TaskRegistry.Backend = "lean"
+	}
+	cfg.TaskRegistry.Obsidian.Path = strings.TrimSpace(cfg.TaskRegistry.Obsidian.Path)
 }
 
 // Validate checks cross-references and provider/model invariants.
@@ -721,6 +726,23 @@ func (c *Config) Validate() error {
 		if model.Model == "" {
 			return fmt.Errorf("model %q: model name is required", id)
 		}
+	}
+	switch c.TaskRegistry.Backend {
+	case "lean":
+	case "obsidian":
+		path := strings.TrimSpace(c.TaskRegistry.Obsidian.Path)
+		if path == "" {
+			return errors.New("task_registry.obsidian.path is required")
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			return fmt.Errorf("task_registry.obsidian.path not readable: %w", err)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("task_registry.obsidian.path is not a directory: %s", path)
+		}
+	default:
+		return fmt.Errorf("unsupported task_registry.backend: %s", c.TaskRegistry.Backend)
 	}
 	return nil
 }
