@@ -21,7 +21,7 @@ import (
 )
 
 func TestTaskRegistryExporterGetTaskThroughLakeExe(t *testing.T) {
-	result := runTaskRegistryExporter(t, filepath.Clean("../.."), "--get", "task-034")
+	result := runTaskRegistryExporter(t, prepareLakeTestRepo(t), "--get", "task-034")
 	if result.ExitCode != 0 {
 		t.Fatalf("expected exporter success, got %+v", result)
 	}
@@ -43,7 +43,7 @@ func TestTaskRegistryExporterGetTaskThroughLakeExe(t *testing.T) {
 }
 
 func TestTaskRegistryGetThroughLakeServeRPC(t *testing.T) {
-	repoRoot := filepath.Clean("../..")
+	repoRoot := prepareLakeTestRepo(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -147,7 +147,7 @@ func TestTaskRegistryGetThroughLakeServeRPC(t *testing.T) {
 }
 
 func TestTaskRegistryExporterListActiveThroughLakeExe(t *testing.T) {
-	result := runTaskRegistryExporter(t, prepareLakeTestRepo(t), "--list-active")
+	result := runTaskRegistryExporter(t, prepareLakeTestRepoWithTask(t), "--list-active")
 	if result.ExitCode != 0 {
 		t.Fatalf("expected exporter success, got %+v", result)
 	}
@@ -179,7 +179,7 @@ func TestTaskRegistryExporterListActiveThroughLakeExe(t *testing.T) {
 }
 
 func TestTaskRegistryExporterGetMissingTaskFails(t *testing.T) {
-	result := runTaskRegistryExporter(t, filepath.Clean("../.."), "--get", "missing-task")
+	result := runTaskRegistryExporter(t, prepareLakeTestRepo(t), "--get", "missing-task")
 	if result.ExitCode == 0 {
 		t.Fatalf("expected missing task failure, got %+v", result)
 	}
@@ -318,31 +318,46 @@ func runTaskRegistryExporter(t *testing.T, repoRoot string, args ...string) Comm
 func prepareLakeTestRepo(t *testing.T) string {
 	t.Helper()
 	repo := t.TempDir()
-	realRoot := filepath.Clean("../..")
+	templateRoot := filepath.Clean("../mcp/task_registry_templates")
 	for _, dir := range []string{"MCPAIHelperProject"} {
 		if err := os.MkdirAll(filepath.Join(repo, dir), 0o700); err != nil {
 			t.Fatalf("create fixture dir: %v", err)
 		}
 	}
-	for _, file := range []string{"lean-toolchain", "lakefile.lean", "MCPAIHelperProject.lean", "MCPAIHelperProject/ProjectState.lean", "MCPAIHelperProject/Samples.lean", "MCPAIHelperProject/Registry.lean", "MCPAIHelperProject/TaskRegistryExport.lean", "MCPAIHelperProject/ActiveTasks.lean"} {
-		data, err := os.ReadFile(filepath.Join(realRoot, file))
+	for _, file := range []string{"lean-toolchain", "lakefile.lean", "MCPAIHelperProject.lean", "MCPAIHelperProject/ProjectState.lean", "MCPAIHelperProject/Samples.lean", "MCPAIHelperProject/Registry.lean", "MCPAIHelperProject/TaskRegistryExport.lean"} {
+		data, err := os.ReadFile(filepath.Join(templateRoot, file))
 		if err != nil {
-			t.Fatalf("read fixture source %s: %v", file, err)
+			t.Fatalf("read template %s: %v", file, err)
 		}
 		if err := os.WriteFile(filepath.Join(repo, file), data, 0o600); err != nil {
 			t.Fatalf("write fixture file %s: %v", file, err)
 		}
 	}
-	path := filepath.Join(repo, "MCPAIHelperProject", "ActiveTasks.lean")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read ActiveTasks.lean fixture: %v", err)
+	activePath := filepath.Join(repo, "MCPAIHelperProject", "ActiveTasks.lean")
+	emptySource := []byte("import MCPAIHelperProject.ProjectState\n\nnamespace MCPAIHelperProject\nnamespace ActiveTasks\n\ndef activeArtifacts : List Artifact :=\n  []\n\ndef activeRelations : List ArtifactRelation :=\n  []\n\nend ActiveTasks\nend MCPAIHelperProject\n")
+	if err := os.WriteFile(activePath, emptySource, 0o600); err != nil {
+		t.Fatalf("write empty ActiveTasks.lean: %v", err)
 	}
-	source := string(data)
-	source = strings.Replace(source, "status := .blocked,", "status := .proposed,", 1)
-	source = strings.Replace(source, "modelLevel := some .high,\n", "", 1)
-	if err := os.WriteFile(path, []byte(source), 0o600); err != nil {
-		t.Fatalf("write ActiveTasks.lean fixture: %v", err)
+	return repo
+}
+
+func prepareLakeTestRepoWithTask(t *testing.T) string {
+	t.Helper()
+	repo := prepareLakeTestRepo(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	result, err := CallServerRPC(ctx, repo, RPCRequest{
+		SourceFile:     "MCPAIHelperProject/TaskRegistryExport.lean",
+		Method:         "MCPAIHelperProject.TaskRegistryExport.taskUpsertApply",
+		Params:         map[string]any{"id": "task-006", "status": "todo", "title": "Test task 006", "body": "Test body for task-006", "priority": "high", "model_level": "high", "tags": []string{"test"}, "task_type": "feature", "branch": "", "worktree_path": ".worktrees/task-006", "parent_id": "", "acceptance_criteria": []string{}, "verification_plan": []string{}},
+		TimeoutSeconds: 60,
+		ResetAfterCall: true,
+	})
+	if err != nil {
+		t.Fatalf("seed task-006 via RPC: %v", err)
+	}
+	if result.Blocker != "" {
+		t.Fatalf("seed task-006 blocker: %s", result.Blocker)
 	}
 	return repo
 }

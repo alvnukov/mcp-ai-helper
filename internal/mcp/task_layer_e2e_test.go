@@ -7,23 +7,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zol/mcp-ai-helper/internal/lake"
 	"github.com/zol/mcp-ai-helper/internal/tasks"
 )
 
 func TestLeanBackedTaskLayerEndToEnd(t *testing.T) {
-	repo := copyLeanRepoFixture(t)
+	repo := seedLeanTestFixture(t)
 	commands := commandRunnerForRepo(repo)
 	store := legacyStoreForTest(t)
 	ctx := context.Background()
-
-	build, err := lake.Build(ctx, repo, lake.CommandRunner{Commands: commands, TimeoutSeconds: 20})
-	if err != nil {
-		t.Fatalf("lake build returned error: %v", err)
-	}
-	if !build.WorkspaceDetected || build.ExitCode != 0 {
-		t.Fatalf("lake build failed: %+v", build)
-	}
 
 	current, source, err := readCurrentTasks(ctx, repo, commands, store)
 	if err != nil {

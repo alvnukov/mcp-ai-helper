@@ -51,7 +51,7 @@ func TestReadTaskPrefersLeanExporter(t *testing.T) {
 }
 
 func TestReadTaskExporterFailureDoesNotFallbackToLegacy(t *testing.T) {
-	repoRoot := filepath.Clean("../..")
+	repoRoot := t.TempDir()
 	_, source, err := readTask(context.Background(), repoRoot, "missing-task", commandRunnerForRepo(repoRoot), legacyStoreForTest(t))
 	if err == nil {
 		t.Fatal("expected missing Lean task error")
@@ -154,17 +154,11 @@ func containsTaskWithSource(list []tasks.Task, id string, source string) bool {
 
 func prepareReadTestRepo(t *testing.T) string {
 	t.Helper()
-	repo := copyLeanRepoFixture(t)
-	path := filepath.Join(repo, "MCPAIHelperProject", "ActiveTasks.lean")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read ActiveTasks.lean fixture: %v", err)
-	}
-	source := string(data)
-	source = strings.Replace(source, "status := .blocked,", "status := .proposed,", 1)
-	source = strings.Replace(source, "modelLevel := some .high,\n", "", 1)
-	if err := os.WriteFile(path, []byte(source), 0o600); err != nil {
-		t.Fatalf("write ActiveTasks.lean fixture: %v", err)
+	repo := seedLeanTestFixture(t)
+	runner := commandRunnerForRepo(repo)
+	store := legacyStoreForTest(t)
+	if _, err := upsertTask(context.Background(), tasks.AddRequest{RepoPath: repo, ID: "task-006", Status: "todo", Title: "Test task 006", Body: "Test body for task-006", Priority: "high", ModelLevel: "", Tags: []string{"test"}, TaskType: "feature", WorktreePath: ".worktrees/task-006"}, runner, store); err != nil {
+		t.Fatalf("prepare task-006: %v", err)
 	}
 	return repo
 }

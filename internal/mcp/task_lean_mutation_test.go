@@ -14,7 +14,7 @@ import (
 )
 
 func TestLeanSetStatusUpdatesRegistryAndValidates(t *testing.T) {
-	repo := copyLeanRepoFixture(t)
+	repo := seedLeanTestFixture(t)
 	result, err := setTaskStatus(context.Background(), tasks.StatusRequest{RepoPath: repo, ID: "task-040", Status: "blocked"}, commandRunnerForRepo(repo), legacyStoreForTest(t))
 	if err != nil {
 		t.Fatalf("setTaskStatus returned error: %v", err)
@@ -35,7 +35,7 @@ func TestLeanSetStatusUpdatesRegistryAndValidates(t *testing.T) {
 }
 
 func TestLeanTransitionServerRejectsInvalidStatusWithTypedDiagnostic(t *testing.T) {
-	repo := copyLeanRepoFixture(t)
+	repo := seedLeanTestFixture(t)
 	_, _, err := validateLeanTaskTransitionWithServer(context.Background(), repo, tasks.StatusRequest{RepoPath: repo, ID: "task-040", Status: "not-a-status"}, tasks.Task{ID: "task-040", Status: "not-a-status"})
 	if err == nil || !strings.Contains(err.Error(), "invalid_status") {
 		t.Fatalf("expected typed invalid_status rejection, got %v", err)
@@ -84,7 +84,7 @@ func TestLeanUpsertCreatesDeterministicTaskAndValidates(t *testing.T) {
 }
 
 func TestLeanUpsertPersistsParentIDRelation(t *testing.T) {
-	repo := copyLeanRepoFixture(t)
+	repo := seedLeanTestFixture(t)
 	result, err := upsertTask(context.Background(), tasks.AddRequest{RepoPath: repo, ID: "task-child-parent", ParentID: "task-040", Status: "todo", Title: "Child task"}, commandRunnerForRepo(repo), legacyStoreForTest(t))
 	if err != nil {
 		t.Fatalf("upsertTask returned error: %v", err)
@@ -121,7 +121,7 @@ func TestLeanUpsertPersistsParentIDRelation(t *testing.T) {
 }
 
 func TestLeanBatchUpsertClosesMissingActiveTasks(t *testing.T) {
-	repo := copyLeanRepoFixture(t)
+	repo := seedLeanTestFixture(t)
 	result, err := batchUpsertTasks(context.Background(), tasks.BatchUpsertRequest{RepoPath: repo, CloseMissing: true, MissingStatus: "done", Tasks: []tasks.AddRequest{{ID: "task-999", Status: "todo", Title: "Only task"}}}, commandRunnerForRepo(repo), legacyStoreForTest(t))
 	if err != nil {
 		t.Fatalf("batchUpsertTasks returned error: %v", err)
@@ -207,13 +207,35 @@ func copyLeanRepoFixture(t *testing.T) string {
 			t.Fatalf("create fixture dir: %v", err)
 		}
 	}
-	for _, file := range []string{"lean-toolchain", "lakefile.lean", "MCPAIHelperProject.lean", "MCPAIHelperProject/ProjectState.lean", "MCPAIHelperProject/Samples.lean", "MCPAIHelperProject/ActiveTasks.lean", "MCPAIHelperProject/Registry.lean", "MCPAIHelperProject/TaskRegistryExport.lean"} {
-		data, err := os.ReadFile(filepath.Join("../..", file))
+	for _, file := range []string{"lean-toolchain", "lakefile.lean", "MCPAIHelperProject.lean", "MCPAIHelperProject/ProjectState.lean", "MCPAIHelperProject/Samples.lean", "MCPAIHelperProject/Registry.lean", "MCPAIHelperProject/TaskRegistryExport.lean"} {
+		data, err := taskRegistryBootstrapTemplates.ReadFile("task_registry_templates/" + file)
 		if err != nil {
-			t.Fatalf("read fixture source %s: %v", file, err)
+			t.Fatalf("read embedded fixture %s: %v", file, err)
 		}
 		if err := os.WriteFile(filepath.Join(repo, file), data, 0o600); err != nil {
 			t.Fatalf("write fixture file %s: %v", file, err)
+		}
+	}
+	activePath := filepath.Join(repo, "MCPAIHelperProject", "ActiveTasks.lean")
+	if err := os.WriteFile(activePath, []byte(emptyActiveTasksLeanSource), 0o600); err != nil {
+		t.Fatalf("write empty ActiveTasks.lean: %v", err)
+	}
+	return repo
+}
+
+func seedLeanTestFixture(t *testing.T) string {
+	t.Helper()
+	repo := copyLeanRepoFixture(t)
+	runner := commandRunnerForRepo(repo)
+	store := legacyStoreForTest(t)
+	seeds := []tasks.AddRequest{
+		{RepoPath: repo, ID: "task-006", Status: "blocked", Title: "Test task 006", Body: "Test body for task-006", Priority: "high", ModelLevel: "high", Tags: []string{"test"}, TaskType: "feature", WorktreePath: ".worktrees/task-006"},
+		{RepoPath: repo, ID: "task-040", Status: "done", Title: "Test task 040", Body: "Test body for task-040", Priority: "critical", Tags: []string{"tasks"}, TaskType: "feature"},
+		{RepoPath: repo, ID: "task-043", Status: "done", Title: "Test task 043", Body: "Test body for task-043", Priority: "high", Tags: []string{"cleanup"}, TaskType: "feature"},
+	}
+	for _, seed := range seeds {
+		if _, err := upsertTask(context.Background(), seed, runner, store); err != nil {
+			t.Fatalf("seed %s: %v", seed.ID, err)
 		}
 	}
 	return repo
@@ -228,7 +250,7 @@ func TestLeanMutationCommandRunnerPolicy(t *testing.T) {
 }
 
 func TestRunWorkflowTaskTransitionUsesLeanRegistry(t *testing.T) {
-	repo := copyLeanRepoFixture(t)
+	repo := seedLeanTestFixture(t)
 	cfg := &config.Config{
 		Providers: map[string]config.ProviderConfig{},
 		Models:    map[string]config.ModelConfig{},
@@ -310,7 +332,7 @@ func TestRunWorkflowCurrentTaskIDBlocksLeanTaskOnSkippedGate(t *testing.T) {
 }
 
 func TestLeanDeleteRemovesTaskAndValidates(t *testing.T) {
-	repo := copyLeanRepoFixture(t)
+	repo := seedLeanTestFixture(t)
 	result, err := deleteTask(context.Background(), tasks.DeleteRequest{RepoPath: repo, ID: "task-040"}, commandRunnerForRepo(repo), legacyStoreForTest(t))
 	if err != nil {
 		t.Fatalf("deleteTask returned error: %v", err)
