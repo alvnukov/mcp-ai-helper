@@ -302,10 +302,12 @@ func splitBody(body string) (string, []string, []string) {
 			break
 		}
 		nl := strings.IndexByte(body, '\n')
-		heading := strings.TrimSpace(body[3:])
+		var heading string
 		if nl < 0 {
+			heading = strings.TrimSpace(body[3:])
 			body = ""
 		} else {
+			heading = strings.TrimSpace(body[3:nl])
 			body = body[nl+1:]
 		}
 		nextIdx := strings.Index(body, "\n## ")
