@@ -467,6 +467,27 @@ func TestRunWorkflowCommandRejectsLeanSourceAccess(t *testing.T) {
 	}
 }
 
+func TestRunWorkflowCommandRejectsHelperConfigAccess(t *testing.T) {
+	dir := t.TempDir()
+	cfg := testConfig(dir)
+	cfg.CommandPolicy.ProtectedConfigPath = filepath.Join(t.TempDir(), ".mcp-ai-helper", "config.yaml")
+	runner := NewRunner(cfg, nil)
+	result, err := runner.RunWorkflow(t.Context(), WorkflowRequest{
+		RepoPath: dir,
+		Steps: []WorkflowStep{{
+			ID:   "probe",
+			Tool: "command",
+			Args: map[string]any{"command": "sed -n '1p' " + cfg.CommandPolicy.ProtectedConfigPath},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "failed" || !strings.Contains(result.Reason, "current helper config") || !strings.Contains(result.Reason, "config_replace") {
+		t.Fatalf("result status=%q reason=%q, want helper config denial with config tool recommendation", result.Status, result.Reason)
+	}
+}
+
 func TestRunWorkflowStepsBranchOnCommandExitCodeAndOutput(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "x.txt")

@@ -236,6 +236,7 @@ type CommandPolicy struct {
 	LogRetentionDays      int      `yaml:"log_retention_days" json:"log_retention_days"`
 	LogMaxRecords         int      `yaml:"log_max_records" json:"log_max_records"`
 	LogCompress           bool     `yaml:"log_compress" json:"log_compress"`
+	ProtectedConfigPath   string   `yaml:"-" json:"-"`
 }
 
 // PipelinePolicy defines workflow and result composition limits.

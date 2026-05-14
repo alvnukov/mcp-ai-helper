@@ -97,7 +97,9 @@ func (s *Server) loadTaskBackend() taskBackend {
 
 func buildDeps(cfg *config.Config) (provider.ChatClient, *command.Runner, *pipeline.Runner, *tasks.Store, taskBackend) {
 	chat := provider.NewClient(cfg.Providers)
-	cmds := command.NewRunnerWithMask(cfg.CommandPolicy, cfg.SecretMask())
+	commandPolicy := cfg.CommandPolicy
+	commandPolicy.ProtectedConfigPath = cfg.SourcePath
+	cmds := command.NewRunnerWithMask(commandPolicy, cfg.SecretMask())
 	projectStore, err := project.NewStore(cfg.CommandPolicy.LogDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mcp-ai-helper: project store from %q: %v; falling back to .mcp-ai-helper\n", cfg.CommandPolicy.LogDir, err)

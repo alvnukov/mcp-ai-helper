@@ -149,6 +149,16 @@ func TestRunnerRunInRepoRejectsLeanSourceCommand(t *testing.T) {
 	}
 }
 
+func TestRunnerRunInRepoRejectsHelperConfigCommand(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(t.TempDir(), ".mcp-ai-helper", "config.yaml")
+	runner := NewRunner(config.CommandPolicy{AllowedCWDs: []string{dir}, DefaultTimeoutSeconds: 1, MaxOutputBytes: 1000, MaxLines: 20, ProtectedConfigPath: configPath})
+	_, err := runner.RunInRepo(t.Context(), "sed -n '1p' "+configPath, dir, "", 1)
+	if err == nil || !strings.Contains(err.Error(), "current helper config") || !strings.Contains(err.Error(), "config_replace") {
+		t.Fatalf("error = %v, want helper config denial with config tool recommendation", err)
+	}
+}
+
 func TestRunnerRunInRepoAllowsRestrictedSubdir(t *testing.T) {
 	dir := t.TempDir()
 	safe := filepath.Join(dir, "safe")
