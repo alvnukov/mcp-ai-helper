@@ -78,6 +78,47 @@ Parent/epic. Add a configurable task registry backend.
 	}
 }
 
+func TestObsidianParsesClosingDotsAndNormalizesFields(t *testing.T) {
+	input := `---
+id: normalize-task
+title: Normalize Task
+status: In-Progress
+priority: HIGH
+model_level: Very High
+tags:
+  - Tasks
+  -  Backend 
+...
+
+## Body
+
+Normalized.
+`
+	note, err := parseNote([]byte(input), "normalize-task")
+	if err != nil {
+		t.Fatalf("parseNote: %v", err)
+	}
+	if note.Status != "in_progress" || note.Priority != "high" || note.ModelLevel != "very_high" {
+		t.Fatalf("normalized fields = status:%q priority:%q model:%q", note.Status, note.Priority, note.ModelLevel)
+	}
+	if len(note.Tags) != 2 || note.Tags[0] != "tasks" || note.Tags[1] != "backend" {
+		t.Fatalf("tags = %#v", note.Tags)
+	}
+}
+
+func TestObsidianRejectsInvalidStatus(t *testing.T) {
+	input := `---
+id: bad-status
+title: Bad Status
+status: waiting
+---
+`
+	_, err := parseNote([]byte(input), "bad-status")
+	if err == nil || !strings.Contains(err.Error(), "invalid status") {
+		t.Fatalf("expected invalid status error, got: %v", err)
+	}
+}
+
 func TestObsidianParseChildWithParentID(t *testing.T) {
 	input := `---
 id: lean-registry-backend-adapter

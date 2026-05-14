@@ -298,17 +298,10 @@ func (b *obsidianTaskBackend) readNote(id string) (taskNote, error) {
 
 func parseNote(data []byte, expectedID string) (taskNote, error) {
 	text := string(data)
-	const delim = "---\n"
-	if !strings.HasPrefix(text, delim) {
-		return taskNote{}, fmt.Errorf("%w: missing opening --- in %s", errInvalidFrontmatter, expectedID)
+	fm, body, err := splitFrontmatter(text, expectedID)
+	if err != nil {
+		return taskNote{}, err
 	}
-	rest := text[len(delim):]
-	endIdx := strings.Index(rest, "\n---")
-	if endIdx < 0 {
-		return taskNote{}, fmt.Errorf("%w: missing closing --- in %s", errInvalidFrontmatter, expectedID)
-	}
-	fm := rest[:endIdx]
-	body := rest[endIdx+4:]
 	var note taskNote
 	if err := yaml.Unmarshal([]byte(fm), &note); err != nil {
 		repaired := quotePlainScalarFrontmatter(fm)
@@ -319,20 +312,106 @@ func parseNote(data []byte, expectedID string) (taskNote, error) {
 			return taskNote{}, fmt.Errorf("frontmatter parse failed in %s.md: %w", expectedID, err)
 		}
 	}
-	if strings.TrimSpace(note.ID) == "" {
-		return taskNote{}, fmt.Errorf("%w: 'id' is required in %s.md", errMissingRequired, expectedID)
-	}
-	if strings.TrimSpace(note.Title) == "" {
-		return taskNote{}, fmt.Errorf("%w: 'title' is required in %s.md", errMissingRequired, expectedID)
-	}
-	if strings.TrimSpace(note.Status) == "" {
-		return taskNote{}, fmt.Errorf("%w: 'status' is required in %s.md", errMissingRequired, expectedID)
-	}
-	if note.ID != expectedID {
-		return taskNote{}, fmt.Errorf("id mismatch in %s: frontmatter id=%s, filename id=%s", expectedID, note.ID, expectedID)
+	if err := normalizeParsedNote(&note, expectedID); err != nil {
+		return taskNote{}, err
 	}
 	note.Body, note.AccCriteriaSection, note.VerPlanSection = splitBody(body)
 	return note, nil
+}
+
+func splitFrontmatter(text string, expectedID string) (string, string, error) {
+	const opening = "---\n"
+	if !strings.HasPrefix(text, opening) {
+		return "", "", fmt.Errorf("%w: missing opening --- in %s", errInvalidFrontmatter, expectedID)
+	}
+	rest := text[len(opening):]
+	lineStart := 0
+	for lineStart <= len(rest) {
+		lineEnd := strings.IndexByte(rest[lineStart:], '\n')
+		if lineEnd < 0 {
+			break
+		}
+		lineEnd += lineStart
+		line := strings.TrimSpace(rest[lineStart:lineEnd])
+		if line == "---" || line == "..." {
+			return rest[:lineStart], rest[lineEnd+1:], nil
+		}
+		lineStart = lineEnd + 1
+	}
+	return "", "", fmt.Errorf("%w: missing closing --- in %s", errInvalidFrontmatter, expectedID)
+}
+
+func normalizeParsedNote(note *taskNote, expectedID string) error {
+	note.ID = strings.TrimSpace(note.ID)
+	note.Title = strings.TrimSpace(note.Title)
+	if note.ID == "" {
+		return fmt.Errorf("%w: 'id' is required in %s.md", errMissingRequired, expectedID)
+	}
+	if note.Title == "" {
+		return fmt.Errorf("%w: 'title' is required in %s.md", errMissingRequired, expectedID)
+	}
+	if note.ID != expectedID {
+		return fmt.Errorf("id mismatch in %s: frontmatter id=%s, filename id=%s", expectedID, note.ID, expectedID)
+	}
+	note.Status = normalizeFrontmatterEnum(note.Status)
+	if !validStatus(note.Status) {
+		return fmt.Errorf("invalid status in %s.md: %s", expectedID, note.Status)
+	}
+	note.Priority = normalizeFrontmatterEnum(note.Priority)
+	if note.Priority != "" && !validPriority(note.Priority) {
+		return fmt.Errorf("invalid priority in %s.md: %s", expectedID, note.Priority)
+	}
+	note.ModelLevel = normalizeFrontmatterEnum(note.ModelLevel)
+	if note.ModelLevel != "" && !validModelLevel(note.ModelLevel) {
+		return fmt.Errorf("invalid model_level in %s.md: %s", expectedID, note.ModelLevel)
+	}
+	note.Tags = normalizeTags(note.Tags)
+	return nil
+}
+
+func normalizeFrontmatterEnum(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.ReplaceAll(value, "-", "_")
+	value = strings.ReplaceAll(value, " ", "_")
+	return value
+}
+
+func validStatus(value string) bool {
+	switch value {
+	case "todo", "in_progress", "blocked", "done":
+		return true
+	default:
+		return false
+	}
+}
+
+func validPriority(value string) bool {
+	switch value {
+	case "low", "medium", "high", "critical":
+		return true
+	default:
+		return false
+	}
+}
+
+func validModelLevel(value string) bool {
+	switch value {
+	case "low", "medium", "high", "very_high":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeTags(tags []string) []string {
+	out := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		tag = strings.ToLower(strings.TrimSpace(tag))
+		if tag != "" {
+			out = append(out, tag)
+		}
+	}
+	return out
 }
 
 func quotePlainScalarFrontmatter(fm string) string {
