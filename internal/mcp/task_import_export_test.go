@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"errors"
 	"os"
 	"testing"
 
@@ -52,11 +53,34 @@ func TestExportConflictDetection(t *testing.T) {
 	obsidian.Upsert(nil, tasks.AddRequest{ID: "task-1", Status: "done", Title: "Existing"})
 	lean := newRecordingTaskBackend()
 	result, err := exportTasks(nil, lean, obsidian, "/repo", ImportExportRequest{})
-	if err != nil {
-		t.Fatalf("exportTasks: %v", err)
+	if !errors.Is(err, ErrDuplicateID) {
+		t.Fatalf("expected duplicate ID error, got %v", err)
 	}
 	if len(result.Conflicts) != 1 || result.Conflicts[0] != "task-1" {
 		t.Fatalf("expected conflict for task-1, got %v", result.Conflicts)
+	}
+}
+
+func TestExportConflictFailsWithoutPartialWrites(t *testing.T) {
+	sourceDir := t.TempDir()
+	targetDir := t.TempDir()
+	source := newObsidianTaskBackend(sourceDir)
+	target := newObsidianTaskBackend(targetDir)
+	if _, err := source.Upsert(nil, tasks.AddRequest{ID: "a-new", Status: "todo", Title: "New"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := source.Upsert(nil, tasks.AddRequest{ID: "b-existing", Status: "todo", Title: "Existing From Source"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := target.Upsert(nil, tasks.AddRequest{ID: "b-existing", Status: "done", Title: "Existing Target"}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := exportTasks(nil, source, target, "/repo", ImportExportRequest{})
+	if !errors.Is(err, ErrDuplicateID) {
+		t.Fatalf("expected duplicate ID error, got %v", err)
+	}
+	if _, err := os.Stat(targetDir + "/a-new.md"); !os.IsNotExist(err) {
+		t.Fatalf("conflicting export must not partially write a-new.md")
 	}
 }
 
@@ -68,8 +92,8 @@ func TestExportRoundTrip(t *testing.T) {
 	be1.Upsert(nil, tasks.AddRequest{
 		ID: "roundtrip", Status: "todo", Title: "Round Trip",
 		Priority: "high", ModelLevel: "medium",
-		Body: "Test body.",
-		Tags: []string{"test"},
+		Body:               "Test body.",
+		Tags:               []string{"test"},
 		AcceptanceCriteria: []string{"Must survive round trip"},
 		VerificationPlan:   []string{"Export", "Import", "Verify"},
 	})

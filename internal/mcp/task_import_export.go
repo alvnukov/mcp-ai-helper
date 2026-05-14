@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/zol/mcp-ai-helper/internal/tasks"
 )
@@ -20,8 +21,8 @@ type ExportRequest struct {
 }
 
 type ImportExportRequest struct {
-	RepoPath string
-	DryRun   bool
+	RepoPath  string
+	DryRun    bool
 	Overwrite bool
 }
 
@@ -45,25 +46,42 @@ func exportTasks(ctx context.Context, source taskBackend, target taskBackend, re
 		return nil, fmt.Errorf("read source tasks: %w", err)
 	}
 	result := &ImportExportResult{DryRun: req.DryRun}
+	planned := make([]tasks.Task, 0, len(sourceTasks))
+	updates := make(map[string]bool, len(sourceTasks))
 	for _, srcTask := range sourceTasks {
-		existing, _, getErr := target.Get(ctx, repoPath, srcTask.ID)
+		_, _, getErr := target.Get(ctx, repoPath, srcTask.ID)
 		if getErr == nil {
 			if !req.Overwrite {
 				result.Conflicts = append(result.Conflicts, srcTask.ID)
 				continue
 			}
-			_ = existing
+			updates[srcTask.ID] = true
 		}
+		planned = append(planned, srcTask)
 		if req.DryRun {
-			result.Added = append(result.Added, srcTask)
-			continue
+			if updates[srcTask.ID] {
+				result.Updated = append(result.Updated, srcTask)
+			} else {
+				result.Added = append(result.Added, srcTask)
+			}
 		}
+	}
+	if len(result.Conflicts) > 0 {
+		if req.DryRun {
+			return result, nil
+		}
+		return result, fmt.Errorf("%w: %s", ErrDuplicateID, strings.Join(result.Conflicts, ", "))
+	}
+	if req.DryRun {
+		return result, nil
+	}
+	for _, srcTask := range planned {
 		upsertReq := taskToAddRequest(srcTask, repoPath)
 		mutResult, err := target.Upsert(ctx, upsertReq)
 		if err != nil {
 			return nil, fmt.Errorf("write task %s to target: %w", srcTask.ID, err)
 		}
-		if getErr == nil {
+		if updates[srcTask.ID] {
 			result.Updated = append(result.Updated, mutResult.Task)
 		} else {
 			result.Added = append(result.Added, mutResult.Task)
@@ -80,6 +98,6 @@ func taskToAddRequest(t tasks.Task, repoPath string) tasks.AddRequest {
 		Tags: t.Tags, Branch: t.Branch, WorktreePath: t.WorktreePath,
 		AcceptanceCriteria: t.AcceptanceCriteria,
 		VerificationPlan:   t.VerificationPlan,
-		Body: t.Body,
+		Body:               t.Body,
 	}
 }
