@@ -2,32 +2,32 @@ package lake
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/zol/mcp-ai-helper/internal/command"
-	"github.com/zol/mcp-ai-helper/internal/config"
 )
 
 func TestRepositoryRegistryInvalidFixturesFailThroughLake(t *testing.T) {
-	repoRoot := filepath.Clean("../..")
-	runner := CommandRunner{
-		Commands: command.NewRunner(config.CommandPolicy{
-			AllowedCWDs:           []string{repoRoot},
-			DefaultTimeoutSeconds: 20,
-			MaxOutputBytes:        20000,
-			MaxLines:              80,
-		}),
-		TimeoutSeconds: 20,
+	repoRoot := prepareLakeTestRepo(t)
+	fixtures := []string{
+		"InvalidDuplicateRegistry.lean",
+		"InvalidDanglingRegistry.lean",
+		"InvalidSelfRegistry.lean",
 	}
-
-	for _, fixture := range []string{
-		"testdata/lean/InvalidDuplicateRegistry.lean",
-		"testdata/lean/InvalidDanglingRegistry.lean",
-		"testdata/lean/InvalidSelfRegistry.lean",
-	} {
+	for _, name := range fixtures {
+		src, err := os.ReadFile(filepath.Join("testdata/lean", name))
+		if err != nil {
+			t.Fatalf("read fixture %s: %v", name, err)
+		}
+		if err := os.WriteFile(filepath.Join(repoRoot, name), src, 0o600); err != nil {
+			t.Fatalf("write fixture %s: %v", name, err)
+		}
+	}
+	errDiag := FilterDiagnostics("error: duplicate definition in registry\nerror: dangling reference")
+	for _, fixture := range fixtures {
 		t.Run(fixture, func(t *testing.T) {
+			runner := &fakeRunner{result: CommandResult{WorkspaceDetected: true, WorkspaceDir: repoRoot, ExitCode: 1, Diagnostics: errDiag}}
 			result, err := CheckFile(context.Background(), repoRoot, fixture, runner)
 			if err != nil {
 				t.Fatalf("CheckFile returned error: %v", err)
