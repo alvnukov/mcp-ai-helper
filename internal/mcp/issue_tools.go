@@ -47,7 +47,10 @@ func registerIssueTools(srv *server.MCPServer, deps *Server) {
 		if err := bind(request, &args); err != nil {
 			return nil, err
 		}
-		backend := deps.loadTaskBackend()
+		backend, err := deps.loadTaskBackendForRepo(args.RepoPath)
+		if err != nil {
+			return nil, err
+		}
 		result, err := addIssue(ctx, args, backend)
 		if err != nil {
 			return nil, err
@@ -65,7 +68,10 @@ func registerIssueTools(srv *server.MCPServer, deps *Server) {
 		if err := bind(request, &args); err != nil {
 			return nil, err
 		}
-		backend := deps.loadTaskBackend()
+		backend, err := deps.loadTaskBackendForRepo(args.RepoPath)
+		if err != nil {
+			return nil, err
+		}
 		result, err := listIssues(ctx, args, backend)
 		if err != nil {
 			return nil, err
@@ -82,7 +88,10 @@ func registerIssueTools(srv *server.MCPServer, deps *Server) {
 		if err := bind(request, &args); err != nil {
 			return nil, err
 		}
-		backend := deps.loadTaskBackend()
+		backend, err := deps.loadTaskBackendForRepo(args.RepoPath)
+		if err != nil {
+			return nil, err
+		}
 		result, err := acceptIssue(ctx, args, backend)
 		if err != nil {
 			return nil, err

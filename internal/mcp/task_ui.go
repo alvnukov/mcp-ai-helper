@@ -24,22 +24,34 @@ type serverTaskUIBackend struct {
 }
 
 func (b serverTaskUIBackend) List(ctx context.Context, repoPath string) ([]tasks.Task, string, error) {
-	backend := b.deps.loadTaskBackend()
+	backend, err := b.deps.loadTaskBackendForRepo(repoPath)
+	if err != nil {
+		return nil, "", err
+	}
 	return backend.ListAll(ctx, repoPath)
 }
 
 func (b serverTaskUIBackend) Get(ctx context.Context, repoPath string, id string) (tasks.Task, string, error) {
-	backend := b.deps.loadTaskBackend()
+	backend, err := b.deps.loadTaskBackendForRepo(repoPath)
+	if err != nil {
+		return tasks.Task{}, "", err
+	}
 	return backend.Get(ctx, repoPath, id)
 }
 
 func (b serverTaskUIBackend) Upsert(ctx context.Context, req tasks.AddRequest) (taskMutationResult, error) {
-	backend := b.deps.loadTaskBackend()
+	backend, err := b.deps.loadTaskBackendForRepo(req.RepoPath)
+	if err != nil {
+		return taskMutationResult{}, err
+	}
 	return backend.Upsert(ctx, req)
 }
 
 func (b serverTaskUIBackend) SetStatus(ctx context.Context, req tasks.StatusRequest) (taskMutationResult, error) {
-	backend := b.deps.loadTaskBackend()
+	backend, err := b.deps.loadTaskBackendForRepo(req.RepoPath)
+	if err != nil {
+		return taskMutationResult{}, err
+	}
 	return backend.SetStatus(ctx, req)
 }
 

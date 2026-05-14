@@ -95,6 +95,31 @@ func (s *Server) loadTaskBackend() taskBackend {
 	return s.taskBackend
 }
 
+func (s *Server) loadTaskBackendForRepo(repoPath string) (taskBackend, error) {
+	cfg, _, cmds, _, store := s.loadDeps()
+	repoCfg, err := config.LoadRepoConfig(repoPath)
+	if err != nil {
+		return nil, err
+	}
+	if repoCfg == nil || repoCfg.TaskRegistry == nil {
+		return s.loadTaskBackend(), nil
+	}
+	merged, err := config.MergeRepoConfig(cfg, repoCfg, repoPath)
+	if err != nil {
+		return nil, err
+	}
+	return buildTaskBackend(merged, cmds, store), nil
+}
+
+func buildTaskBackend(cfg *config.Config, cmds *command.Runner, store *tasks.Store) taskBackend {
+	switch cfg.TaskRegistry.Backend {
+	case "obsidian":
+		return newObsidianTaskBackend(cfg.TaskRegistry.Obsidian.Path)
+	default:
+		return newLakeTaskBackend(cmds, store)
+	}
+}
+
 func buildDeps(cfg *config.Config) (provider.ChatClient, *command.Runner, *pipeline.Runner, *tasks.Store, taskBackend) {
 	chat := provider.NewClient(cfg.Providers)
 	commandPolicy := cfg.CommandPolicy
@@ -106,13 +131,7 @@ func buildDeps(cfg *config.Config) (provider.ChatClient, *command.Runner, *pipel
 		projectStore, _ = project.NewStore(".mcp-ai-helper")
 	}
 	store := tasks.NewStore(projectStore)
-	var backend taskBackend
-	switch cfg.TaskRegistry.Backend {
-	case "obsidian":
-		backend = newObsidianTaskBackend(cfg.TaskRegistry.Obsidian.Path)
-	default:
-		backend = newLakeTaskBackend(cmds, store)
-	}
+	backend := buildTaskBackend(cfg, cmds, store)
 	pipes := pipeline.NewRunnerWithTaskBackend(cfg, chat, workflowTaskBackend{backend: backend})
 	return chat, cmds, pipes, store, backend
 }
@@ -153,7 +172,7 @@ func (s *Server) pipelineRunnerForRepo(repoPath string, toolName string) (*pipel
 		return nil, err
 	}
 	cmds := command.NewRunnerWithMask(merged.CommandPolicy, merged.SecretMask())
-	backend := newLakeTaskBackend(cmds, store)
+	backend := buildTaskBackend(merged, cmds, store)
 	return pipeline.NewRunnerWithTaskBackend(merged, chat, workflowTaskBackend{backend: backend}), nil
 }
 
