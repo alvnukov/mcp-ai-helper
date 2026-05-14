@@ -259,11 +259,11 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 		return structured(result)
 	})
 	srv.AddTool(basemcp.NewTool("task_graph",
-		basemcp.WithDescription("Return a bounded task graph with nodes and explicit parent-child edges from canonical task data. Includes provenance and truncation metadata. Use for overview and dependency inspection."),
-		basemcp.WithString("repo_path", basemcp.Required()),
-		basemcp.WithString("focus_task_id", basemcp.Description("Optional task id to center the graph on. Includes ancestors, children and siblings.")),
-		basemcp.WithNumber("max_nodes", basemcp.Description("Maximum nodes to return. Default 50.")),
-		basemcp.WithNumber("max_bytes", basemcp.Description("Maximum response bytes. Default 8192.")),
+		basemcp.WithDescription("Return a bounded task graph for overview/dependency inspection. Example calls: {\"repo_path\":\"/repo\"} for a compact graph, or {\"repo_path\":\"/repo\",\"focus_task_id\":\"task-123\"} to center on one task. Nodes expose id/status/title/priority/model_level/tags/parent_id/task_type. Edges are factual explicit parent_id relationships only: kind=parent_child, provenance=explicit; no inferred edges are emitted. Results include provenance.source and edge_kinds. If limits omit data, truncated reports omitted_nodes/omitted_edges and reason. Missing focus task returns an error; next_call: task_current to discover ids, then task_graph with focus_task_id or larger max_nodes/max_bytes."),
+		basemcp.WithString("repo_path", basemcp.Required(), basemcp.Description("Repository root whose configured task registry backend supplies canonical task data.")),
+		basemcp.WithString("focus_task_id", basemcp.Description("Optional task id to center the graph on. Includes ancestor parent chain, direct children, and siblings that share the same parent.")),
+		basemcp.WithNumber("max_nodes", basemcp.Description("Maximum nodes to return. Default 50. If exceeded, truncated.omitted_nodes and omitted_edges explain what was left out.")),
+		basemcp.WithNumber("max_bytes", basemcp.Description("Maximum response bytes. Default 8192. If exceeded, retry with a larger limit or a focus_task_id.")),
 	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
 		var args TaskGraphRequest
 		if err := bind(req, &args); err != nil {
@@ -287,11 +287,11 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 		return structured(graph)
 	})
 	srv.AddTool(basemcp.NewTool("task_context",
-		basemcp.WithDescription("Return compact execution context for a selected task: goal chain, prerequisites, already done, planned next, blockers, boundaries, non-goals, acceptance criteria, verification plan, warnings and usage_contract. Use after task_current to get detailed context for a specific task."),
-		basemcp.WithString("repo_path", basemcp.Required()),
-		basemcp.WithString("task_id", basemcp.Required(), basemcp.Description("Task id to get execution context for. Use task_current to discover available task ids.")),
-		basemcp.WithNumber("max_nodes", basemcp.Description("Maximum items per section. Default 20.")),
-		basemcp.WithNumber("max_bytes", basemcp.Description("Maximum response bytes. Default 4096.")),
+		basemcp.WithDescription("Return compact execution context for one selected task after task_current. Example call: {\"repo_path\":\"/repo\",\"task_id\":\"task-123\"}. Response is selected-task-first and includes goal_chain, prerequisites, already_done, planned_next, blockers, boundaries, non_goals, acceptance_criteria, verification_plan, warnings, usage_contract, and optional truncated metadata. Use task_graph first or next when dependency overview, parent/child provenance, or omitted graph data matters. Missing task returns an error; next_call: task_current to discover ids. If truncated, retry with larger max_nodes/max_bytes."),
+		basemcp.WithString("repo_path", basemcp.Required(), basemcp.Description("Repository root whose configured task registry backend supplies canonical task data.")),
+		basemcp.WithString("task_id", basemcp.Required(), basemcp.Description("Task id to get execution context for. Use task_current to discover ids, or task_graph to inspect relationships before selecting one.")),
+		basemcp.WithNumber("max_nodes", basemcp.Description("Maximum items per section. Default 20. If exceeded, truncated metadata reports omitted sections.")),
+		basemcp.WithNumber("max_bytes", basemcp.Description("Maximum response bytes. Default 4096. If exceeded, retry with a larger limit or inspect dependencies through task_graph.")),
 	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
 		var args TaskContextRequest
 		if err := bind(req, &args); err != nil {
