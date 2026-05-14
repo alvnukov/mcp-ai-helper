@@ -13,4 +13,5 @@ CLAUDE.md
 .worktrees/
 .backups/
 .mcp-ai-helper.yaml
+obsidian-tasks/.obsidian/
 mcp-ai-helper-dev
