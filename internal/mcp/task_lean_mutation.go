@@ -236,7 +236,7 @@ end MCPAIHelperProject
 `
 
 func validateLeanRegistryBuild(ctx context.Context, repoPath string, commands *command.Runner, phase string) error {
-	buildResult, buildErr := lake.Build(ctx, repoPath, lake.CommandRunner{Commands: commands, TimeoutSeconds: 20})
+	buildResult, buildErr := lake.Build(ctx, repoPath, lake.CommandRunner{Commands: commands, TimeoutSeconds: leanTaskRegistryTimeoutSeconds})
 	if buildErr != nil {
 		return fmt.Errorf("validate Lean task registry %s: %w", phase, buildErr)
 	}
@@ -259,7 +259,7 @@ func callLeanTaskMutation(ctx context.Context, repoPath string, commands *comman
 			return leanRegistryEnvelope{}, err
 		}
 	}
-	result, err := lake.CallServerRPC(ctx, repoPath, lake.RPCRequest{SourceFile: "MCPAIHelperProject/TaskRegistryExport.lean", Method: method, Params: params, TimeoutSeconds: 20, ResetAfterCall: true})
+	result, err := lake.CallServerRPC(ctx, repoPath, lake.RPCRequest{SourceFile: "MCPAIHelperProject/TaskRegistryExport.lean", Method: method, Params: params, TimeoutSeconds: leanTaskRegistryTimeoutSeconds, ResetAfterCall: true})
 	if err != nil {
 		return leanRegistryEnvelope{}, err
 	}
@@ -317,7 +317,7 @@ func writeLeanActiveTasksSource(ctx context.Context, repoPath string, source str
 		SourceFile:     "MCPAIHelperProject/TaskRegistryExport.lean",
 		Method:         "MCPAIHelperProject.TaskRegistryExport.activeTasksWrite",
 		Params:         map[string]string{"source": source},
-		TimeoutSeconds: 20,
+		TimeoutSeconds: leanTaskRegistryTimeoutSeconds,
 		ResetAfterCall: true,
 	})
 	if err != nil {

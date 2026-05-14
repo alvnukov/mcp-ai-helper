@@ -46,6 +46,17 @@ func exportTasks(ctx context.Context, source taskBackend, target taskBackend, re
 		return nil, fmt.Errorf("read source tasks: %w", err)
 	}
 	result := &ImportExportResult{DryRun: req.DryRun}
+	duplicateSourceIDs := duplicateTaskIDs(sourceTasks)
+	if len(duplicateSourceIDs) > 0 {
+		result.Conflicts = append(result.Conflicts, duplicateSourceIDs...)
+		for _, id := range duplicateSourceIDs {
+			result.Losses = append(result.Losses, LossReport{TaskID: id, Field: "id", Reason: "duplicate source ID cannot be represented losslessly in target"})
+		}
+		if req.DryRun {
+			return result, nil
+		}
+		return result, fmt.Errorf("%w in source: %s", ErrDuplicateID, strings.Join(duplicateSourceIDs, ", "))
+	}
 	planned := make([]tasks.Task, 0, len(sourceTasks))
 	updates := make(map[string]bool, len(sourceTasks))
 	for _, srcTask := range sourceTasks {
@@ -90,6 +101,18 @@ func exportTasks(ctx context.Context, source taskBackend, target taskBackend, re
 	return result, nil
 }
 
+func duplicateTaskIDs(items []tasks.Task) []string {
+	counts := make(map[string]int, len(items))
+	duplicates := []string{}
+	for _, item := range items {
+		counts[item.ID]++
+		if counts[item.ID] == 2 {
+			duplicates = append(duplicates, item.ID)
+		}
+	}
+	return duplicates
+}
+
 func taskToAddRequest(t tasks.Task, repoPath string) tasks.AddRequest {
 	return tasks.AddRequest{
 		RepoPath: repoPath, ID: t.ID, Title: t.Title, Status: t.Status,
@@ -99,5 +122,8 @@ func taskToAddRequest(t tasks.Task, repoPath string) tasks.AddRequest {
 		AcceptanceCriteria: t.AcceptanceCriteria,
 		VerificationPlan:   t.VerificationPlan,
 		Body:               t.Body,
+		CreatedAt:          t.CreatedAt,
+		UpdatedAt:          t.UpdatedAt,
+		PreserveTimestamps: true,
 	}
 }

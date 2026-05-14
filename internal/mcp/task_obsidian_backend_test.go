@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zol/mcp-ai-helper/internal/tasks"
 )
@@ -148,15 +149,25 @@ Implement the minimal backend abstraction.
 }
 
 func TestObsidianRoundTrip(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(repo, ".worktrees", "test-task"), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	dir := t.TempDir()
 	backend := newObsidianTaskBackend(dir)
+	createdAt := time.Date(2026, 5, 3, 10, 0, 0, 1, time.UTC)
+	updatedAt := time.Date(2026, 5, 4, 11, 0, 0, 2, time.UTC)
 	result, err := backend.Upsert(nil, tasks.AddRequest{
-		ID: "test-task", Status: "todo", Title: "Round Trip Test",
+		RepoPath: repo,
+		ID:       "test-task", Status: "todo", Title: "Round Trip Test",
 		Priority: "medium", ModelLevel: "low",
+		TaskType: "feature", Branch: "feature/test-task", WorktreePath: ".worktrees/test-task",
 		Body:               "This is the body.",
 		AcceptanceCriteria: []string{"Must round-trip without loss"},
 		VerificationPlan:   []string{"Run test", "Check output"},
 		Tags:               []string{"test", "roundtrip"},
+		CreatedAt:          createdAt,
+		UpdatedAt:          updatedAt,
 	})
 	if err != nil {
 		t.Fatalf("Upsert: %v", err)
@@ -164,7 +175,7 @@ func TestObsidianRoundTrip(t *testing.T) {
 	if result.Task.ID != "test-task" {
 		t.Fatalf("id = %q", result.Task.ID)
 	}
-	got, _, err := backend.Get(nil, "", "test-task")
+	got, _, err := backend.Get(nil, repo, "test-task")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -180,6 +191,9 @@ func TestObsidianRoundTrip(t *testing.T) {
 	if got.ModelLevel != "low" {
 		t.Fatalf("model_level = %q", got.ModelLevel)
 	}
+	if got.TaskType != "feature" || got.Branch != "feature/test-task" || got.WorktreePath != ".worktrees/test-task" {
+		t.Fatalf("worktree fields = task_type:%q branch:%q worktree:%q", got.TaskType, got.Branch, got.WorktreePath)
+	}
 	if got.Body != "This is the body." {
 		t.Fatalf("body = %q", got.Body)
 	}
@@ -194,6 +208,12 @@ func TestObsidianRoundTrip(t *testing.T) {
 	}
 	if got.ProjectionSource != "obsidian_registry" {
 		t.Fatalf("projection_source = %q", got.ProjectionSource)
+	}
+	if !got.CreatedAt.Equal(createdAt) || !got.UpdatedAt.Equal(updatedAt) {
+		t.Fatalf("timestamps = created:%s updated:%s", got.CreatedAt, got.UpdatedAt)
+	}
+	if !got.WorktreeExists || !strings.HasSuffix(got.CodePath, filepath.Join(".worktrees", "test-task")) {
+		t.Fatalf("worktree context = exists:%v code_path:%q", got.WorktreeExists, got.CodePath)
 	}
 }
 
