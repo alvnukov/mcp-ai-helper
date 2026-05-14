@@ -14,10 +14,10 @@ type taskBackend interface {
 	ListCurrent(ctx context.Context, repoPath string) ([]tasks.Task, string, error)
 	ListAll(ctx context.Context, repoPath string) ([]tasks.Task, string, error)
 	Get(ctx context.Context, repoPath string, id string) (tasks.Task, string, error)
-	Upsert(ctx context.Context, req tasks.AddRequest) (leanMutationResult, error)
-	SetStatus(ctx context.Context, req tasks.StatusRequest) (leanMutationResult, error)
-	BatchUpsert(ctx context.Context, req tasks.BatchUpsertRequest) (leanBatchMutationResult, error)
-	Delete(ctx context.Context, req tasks.DeleteRequest) (leanMutationResult, error)
+	Upsert(ctx context.Context, req tasks.AddRequest) (taskMutationResult, error)
+	SetStatus(ctx context.Context, req tasks.StatusRequest) (taskMutationResult, error)
+	BatchUpsert(ctx context.Context, req tasks.BatchUpsertRequest) (taskBatchMutationResult, error)
+	Delete(ctx context.Context, req tasks.DeleteRequest) (taskMutationResult, error)
 }
 
 type lakeTaskBackend struct {
@@ -41,19 +41,19 @@ func (b lakeTaskBackend) Get(ctx context.Context, repoPath string, id string) (t
 	return readTask(ctx, repoPath, id, b.commands, b.store)
 }
 
-func (b lakeTaskBackend) Upsert(ctx context.Context, req tasks.AddRequest) (leanMutationResult, error) {
+func (b lakeTaskBackend) Upsert(ctx context.Context, req tasks.AddRequest) (taskMutationResult, error) {
 	return upsertTask(ctx, req, b.commands, b.store)
 }
 
-func (b lakeTaskBackend) SetStatus(ctx context.Context, req tasks.StatusRequest) (leanMutationResult, error) {
+func (b lakeTaskBackend) SetStatus(ctx context.Context, req tasks.StatusRequest) (taskMutationResult, error) {
 	return setTaskStatus(ctx, req, b.commands, b.store)
 }
 
-func (b lakeTaskBackend) BatchUpsert(ctx context.Context, req tasks.BatchUpsertRequest) (leanBatchMutationResult, error) {
+func (b lakeTaskBackend) BatchUpsert(ctx context.Context, req tasks.BatchUpsertRequest) (taskBatchMutationResult, error) {
 	return batchUpsertTasks(ctx, req, b.commands, b.store)
 }
 
-func (b lakeTaskBackend) Delete(ctx context.Context, req tasks.DeleteRequest) (leanMutationResult, error) {
+func (b lakeTaskBackend) Delete(ctx context.Context, req tasks.DeleteRequest) (taskMutationResult, error) {
 	return deleteTask(ctx, req, b.commands, b.store)
 }
 

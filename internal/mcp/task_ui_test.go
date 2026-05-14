@@ -40,7 +40,7 @@ func (b *fakeTaskUIBackend) Get(_ context.Context, _ string, id string) (tasks.T
 	return item, "lean_registry", nil
 }
 
-func (b *fakeTaskUIBackend) Upsert(_ context.Context, req tasks.AddRequest) (leanMutationResult, error) {
+func (b *fakeTaskUIBackend) Upsert(_ context.Context, req tasks.AddRequest) (taskMutationResult, error) {
 	item := b.items[req.ID]
 	item.ID = req.ID
 	item.Title = req.Title
@@ -53,15 +53,15 @@ func (b *fakeTaskUIBackend) Upsert(_ context.Context, req tasks.AddRequest) (lea
 	item.VerificationPlan = req.VerificationPlan
 	item.UpdatedAt = item.UpdatedAt.Add(time.Second)
 	b.items[item.ID] = item
-	return leanMutationResult{Task: item, Source: "lean_registry", Validation: "test"}, nil
+	return taskMutationResult{Task: item, Source: "lean_registry", Validation: "test"}, nil
 }
 
-func (b *fakeTaskUIBackend) SetStatus(_ context.Context, req tasks.StatusRequest) (leanMutationResult, error) {
+func (b *fakeTaskUIBackend) SetStatus(_ context.Context, req tasks.StatusRequest) (taskMutationResult, error) {
 	item := b.items[req.ID]
 	item.Status = req.Status
 	item.UpdatedAt = item.UpdatedAt.Add(time.Second)
 	b.items[item.ID] = item
-	return leanMutationResult{Task: item, Source: "lean_registry", Validation: "test"}, nil
+	return taskMutationResult{Task: item, Source: "lean_registry", Validation: "test"}, nil
 }
 
 func TestTaskUIListFiltersTasks(t *testing.T) {
