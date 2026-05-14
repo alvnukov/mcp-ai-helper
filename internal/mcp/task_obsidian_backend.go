@@ -24,25 +24,70 @@ func newObsidianTaskBackend(dir string) taskBackend {
 	return &obsidianTaskBackend{dir: dir}
 }
 
+func NewObsidianTaskBackend(dir string) taskBackend {
+	return newObsidianTaskBackend(dir)
+}
+
+type yamlStringList []string
+
 type taskNote struct {
-	ID                 string   `yaml:"id"`
-	Title              string   `yaml:"title"`
-	Status             string   `yaml:"status"`
-	Priority           string   `yaml:"priority,omitempty"`
-	ModelLevel         string   `yaml:"model_level,omitempty"`
-	TaskType           string   `yaml:"task_type,omitempty"`
-	ParentID           string   `yaml:"parent_id,omitempty"`
-	Tags               []string `yaml:"tags,omitempty"`
-	Branch             string   `yaml:"branch,omitempty"`
-	WorktreePath       string   `yaml:"worktree_path,omitempty"`
-	AcceptanceCriteria []string `yaml:"acceptance_criteria,omitempty"`
-	VerificationPlan   []string `yaml:"verification_plan,omitempty"`
-	CreatedAt          string   `yaml:"created_at,omitempty"`
-	UpdatedAt          string   `yaml:"updated_at,omitempty"`
-	Body               string   `yaml:"-"`
-	BodySection        string   `yaml:"-"`
-	AccCriteriaSection []string `yaml:"-"`
-	VerPlanSection     []string `yaml:"-"`
+	ID                 string         `yaml:"id"`
+	Title              string         `yaml:"title"`
+	Status             string         `yaml:"status"`
+	Priority           string         `yaml:"priority,omitempty"`
+	ModelLevel         string         `yaml:"model_level,omitempty"`
+	TaskType           string         `yaml:"task_type,omitempty"`
+	ParentID           string         `yaml:"parent_id,omitempty"`
+	Tags               []string       `yaml:"tags,omitempty"`
+	Branch             string         `yaml:"branch,omitempty"`
+	WorktreePath       string         `yaml:"worktree_path,omitempty"`
+	AcceptanceCriteria yamlStringList `yaml:"acceptance_criteria,omitempty"`
+	VerificationPlan   yamlStringList `yaml:"verification_plan,omitempty"`
+	CreatedAt          string         `yaml:"created_at,omitempty"`
+	UpdatedAt          string         `yaml:"updated_at,omitempty"`
+	Body               string         `yaml:"-"`
+	BodySection        string         `yaml:"-"`
+	AccCriteriaSection []string       `yaml:"-"`
+	VerPlanSection     []string       `yaml:"-"`
+}
+
+func (l *yamlStringList) UnmarshalYAML(node *yaml.Node) error {
+	switch node.Kind {
+	case yaml.SequenceNode:
+		out := make([]string, 0, len(node.Content))
+		for _, item := range node.Content {
+			value, err := yamlListItemString(item)
+			if err != nil {
+				return err
+			}
+			out = append(out, value)
+		}
+		*l = out
+		return nil
+	case yaml.ScalarNode:
+		if strings.TrimSpace(node.Value) == "" {
+			*l = nil
+			return nil
+		}
+		*l = yamlStringList{node.Value}
+		return nil
+	default:
+		return fmt.Errorf("expected YAML string list, got node kind %d", node.Kind)
+	}
+}
+
+func yamlListItemString(node *yaml.Node) (string, error) {
+	switch node.Kind {
+	case yaml.ScalarNode:
+		return node.Value, nil
+	case yaml.MappingNode:
+		if len(node.Content) == 2 && node.Content[0].Kind == yaml.ScalarNode && node.Content[1].Kind == yaml.ScalarNode {
+			return node.Content[0].Value + ": " + node.Content[1].Value, nil
+		}
+		return "", fmt.Errorf("expected single key/value string item, got mapping with %d nodes", len(node.Content))
+	default:
+		return "", fmt.Errorf("expected YAML string item, got node kind %d", node.Kind)
+	}
 }
 
 var errInvalidFrontmatter = errors.New("invalid frontmatter")
@@ -101,10 +146,10 @@ func (b *obsidianTaskBackend) Upsert(_ context.Context, req tasks.AddRequest) (t
 		Priority: req.Priority, ModelLevel: req.ModelLevel,
 		TaskType: req.TaskType, ParentID: req.ParentID,
 		Tags: nonNilTags(req.Tags), Branch: req.Branch,
-		WorktreePath: req.WorktreePath,
-		AcceptanceCriteria: req.AcceptanceCriteria,
-		VerificationPlan:   req.VerificationPlan,
-		CreatedAt: createdAt, UpdatedAt: now.Format(time.RFC3339Nano),
+		WorktreePath:       req.WorktreePath,
+		AcceptanceCriteria: yamlStringList(req.AcceptanceCriteria),
+		VerificationPlan:   yamlStringList(req.VerificationPlan),
+		CreatedAt:          createdAt, UpdatedAt: now.Format(time.RFC3339Nano),
 		Body: req.Body,
 	}
 	if err := b.writeNote(note); err != nil {
@@ -154,7 +199,10 @@ func (b *obsidianTaskBackend) BatchUpsert(_ context.Context, req tasks.BatchUpse
 		if len(activeStatuses) == 0 {
 			activeStatuses = []string{"todo", "in_progress"}
 		}
-		all, _ := b.readAll()
+		all, err := b.readAll()
+		if err != nil {
+			return taskBatchMutationResult{}, err
+		}
 		for _, t := range all {
 			if batchIDs[t.ID] {
 				continue
@@ -211,7 +259,7 @@ func (b *obsidianTaskBackend) readAll() ([]tasks.Task, error) {
 		id := strings.TrimSuffix(entry.Name(), ".md")
 		note, err := b.readNote(id)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("read obsidian task note %s: %w", id, err)
 		}
 		out = append(out, noteToTask(note))
 	}
@@ -360,7 +408,9 @@ func parseBulletList(text string) []string {
 func (b *obsidianTaskBackend) writeNote(note taskNote) error {
 	var buf bytes.Buffer
 	buf.WriteString("---\n")
-	b.encodeYAML(&buf, note)
+	if err := b.encodeYAML(&buf, note); err != nil {
+		return err
+	}
 	buf.WriteString("---\n")
 	if note.Body != "" {
 		buf.WriteString("\n## Body\n\n")
@@ -370,7 +420,7 @@ func (b *obsidianTaskBackend) writeNote(note taskNote) error {
 	if len(note.AccCriteriaSection) > 0 || len(note.AcceptanceCriteria) > 0 {
 		criteria := note.AccCriteriaSection
 		if len(criteria) == 0 {
-			criteria = note.AcceptanceCriteria
+			criteria = []string(note.AcceptanceCriteria)
 		}
 		buf.WriteString("\n## Acceptance Criteria\n")
 		for _, c := range criteria {
@@ -387,7 +437,7 @@ func (b *obsidianTaskBackend) writeNote(note taskNote) error {
 	if len(note.VerPlanSection) > 0 || len(note.VerificationPlan) > 0 {
 		plan := note.VerPlanSection
 		if len(plan) == 0 {
-			plan = note.VerificationPlan
+			plan = []string(note.VerificationPlan)
 		}
 		buf.WriteString("\n## Verification Plan\n")
 		for i, v := range plan {
@@ -412,34 +462,13 @@ func (b *obsidianTaskBackend) writeNote(note taskNote) error {
 	return nil
 }
 
-func (b *obsidianTaskBackend) encodeYAML(buf *bytes.Buffer, note taskNote) {
-	encode := func(key, value string) {
-		if value != "" {
-			buf.WriteString(fmt.Sprintf("%s: %s\n", key, value))
-		}
+func (b *obsidianTaskBackend) encodeYAML(buf *bytes.Buffer, note taskNote) error {
+	data, err := yaml.Marshal(note)
+	if err != nil {
+		return fmt.Errorf("encode task %s frontmatter: %w", note.ID, err)
 	}
-	encodeArr := func(key string, values []string) {
-		if len(values) > 0 {
-			buf.WriteString(fmt.Sprintf("%s:\n", key))
-			for _, v := range values {
-				buf.WriteString(fmt.Sprintf("  - %s\n", v))
-			}
-		}
-	}
-	encode("id", note.ID)
-	encode("title", note.Title)
-	encode("status", note.Status)
-	encode("priority", note.Priority)
-	encode("model_level", note.ModelLevel)
-	encode("task_type", note.TaskType)
-	encode("parent_id", note.ParentID)
-	encodeArr("tags", note.Tags)
-	encode("branch", note.Branch)
-	encode("worktree_path", note.WorktreePath)
-	encodeArr("acceptance_criteria", note.AcceptanceCriteria)
-	encodeArr("verification_plan", note.VerificationPlan)
-	encode("created_at", note.CreatedAt)
-	encode("updated_at", note.UpdatedAt)
+	_, err = buf.Write(data)
+	return err
 }
 
 func noteToTask(note taskNote) tasks.Task {
@@ -449,11 +478,11 @@ func noteToTask(note taskNote) tasks.Task {
 	if body == "" && len(note.BodySection) > 0 {
 		body = note.BodySection
 	}
-	ac := note.AcceptanceCriteria
+	ac := []string(note.AcceptanceCriteria)
 	if len(ac) == 0 {
 		ac = note.AccCriteriaSection
 	}
-	vp := note.VerificationPlan
+	vp := []string(note.VerificationPlan)
 	if len(vp) == 0 {
 		vp = note.VerPlanSection
 	}
@@ -462,10 +491,10 @@ func noteToTask(note taskNote) tasks.Task {
 		Priority: note.Priority, ModelLevel: note.ModelLevel,
 		TaskType: note.TaskType, ParentID: note.ParentID,
 		Tags: note.Tags, Branch: note.Branch,
-		WorktreePath: note.WorktreePath,
+		WorktreePath:       note.WorktreePath,
 		AcceptanceCriteria: ac, VerificationPlan: vp,
 		ProjectionSource: "obsidian_registry",
-		CreatedAt: createdAt, UpdatedAt: updatedAt,
+		CreatedAt:        createdAt, UpdatedAt: updatedAt,
 		Body: body,
 	}
 }

@@ -77,16 +77,20 @@ func defaultGraphLimits(req TaskGraphRequest) (int, int) {
 }
 
 // BuildTaskGraph constructs a task graph from canonical task data.
-func BuildTaskGraph(all []tasks.Task, req TaskGraphRequest) (TaskGraph, error) {
+func BuildTaskGraph(all []tasks.Task, req TaskGraphRequest, source ...string) (TaskGraph, error) {
+	graphSource := "lean_registry"
+	if len(source) > 0 && strings.TrimSpace(source[0]) != "" {
+		graphSource = source[0]
+	}
 	maxNodes, maxBytes := defaultGraphLimits(req)
 
 	if req.FocusTaskID != "" {
-		return buildFocusedGraph(all, req.FocusTaskID, maxNodes, maxBytes)
+		return buildFocusedGraph(all, req.FocusTaskID, maxNodes, maxBytes, graphSource)
 	}
-	return buildFullGraph(all, maxNodes, maxBytes)
+	return buildFullGraph(all, maxNodes, maxBytes, graphSource)
 }
 
-func buildFullGraph(all []tasks.Task, maxNodes, maxBytes int) (TaskGraph, error) {
+func buildFullGraph(all []tasks.Task, maxNodes, maxBytes int, source string) (TaskGraph, error) {
 	nodes := make([]TaskGraphNode, 0, len(all))
 	edges := make([]TaskGraphEdge, 0)
 
@@ -139,7 +143,7 @@ func buildFullGraph(all []tasks.Task, maxNodes, maxBytes int) (TaskGraph, error)
 		Nodes: nodes,
 		Edges: edges,
 		Provenance: TaskGraphProvenance{
-			Source: "lean_registry",
+			Source: source,
 			EdgeKinds: map[string]string{
 				edgeKindParent: "explicit parent-child relationship from task parent_id field",
 			},
@@ -158,7 +162,7 @@ func buildFullGraph(all []tasks.Task, maxNodes, maxBytes int) (TaskGraph, error)
 	return result, nil
 }
 
-func buildFocusedGraph(all []tasks.Task, focusID string, maxNodes, maxBytes int) (TaskGraph, error) {
+func buildFocusedGraph(all []tasks.Task, focusID string, maxNodes, maxBytes int, source string) (TaskGraph, error) {
 	taskMap := make(map[string]tasks.Task, len(all))
 	for i := range all {
 		taskMap[all[i].ID] = all[i]
@@ -251,7 +255,7 @@ func buildFocusedGraph(all []tasks.Task, focusID string, maxNodes, maxBytes int)
 		Nodes: nodes,
 		Edges: edges,
 		Provenance: TaskGraphProvenance{
-			Source: "lean_registry",
+			Source: source,
 			EdgeKinds: map[string]string{
 				edgeKindParent: "explicit parent-child relationship from task parent_id field",
 			},

@@ -112,10 +112,10 @@ func TestObsidianRoundTrip(t *testing.T) {
 	result, err := backend.Upsert(nil, tasks.AddRequest{
 		ID: "test-task", Status: "todo", Title: "Round Trip Test",
 		Priority: "medium", ModelLevel: "low",
-		Body: "This is the body.",
+		Body:               "This is the body.",
 		AcceptanceCriteria: []string{"Must round-trip without loss"},
 		VerificationPlan:   []string{"Run test", "Check output"},
-		Tags: []string{"test", "roundtrip"},
+		Tags:               []string{"test", "roundtrip"},
 	})
 	if err != nil {
 		t.Fatalf("Upsert: %v", err)
@@ -176,6 +176,70 @@ id: test
 	_, err := parseNote([]byte(input), "test")
 	if err == nil || !strings.Contains(err.Error(), "'title' is required") {
 		t.Fatalf("expected missing title error, got: %v", err)
+	}
+}
+
+func TestObsidianParsesFrontmatterListItemsWithColon(t *testing.T) {
+	input := `---
+id: colon-list
+title: Colon List
+status: done
+acceptance_criteria:
+  - Contract includes test-first examples: valid fixtures, invalid fixtures and round-trip expectations.
+verification_plan:
+  - Check examples for deterministic parse/write behavior, config routing clarity and no silent data loss.
+---
+
+## Body
+
+Done task note.
+`
+	note, err := parseNote([]byte(input), "colon-list")
+	if err != nil {
+		t.Fatalf("parseNote: %v", err)
+	}
+	want := "Contract includes test-first examples: valid fixtures, invalid fixtures and round-trip expectations."
+	if len(note.AcceptanceCriteria) != 1 || note.AcceptanceCriteria[0] != want {
+		t.Fatalf("acceptance_criteria = %#v", note.AcceptanceCriteria)
+	}
+}
+
+func TestObsidianWriterQuotesColonScalars(t *testing.T) {
+	dir := t.TempDir()
+	backend := newObsidianTaskBackend(dir)
+	_, err := backend.Upsert(nil, tasks.AddRequest{
+		ID: "colon-title", Status: "todo", Title: "Config: backend selection",
+		AcceptanceCriteria: []string{"Examples: lean and obsidian"},
+	})
+	if err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	got, _, err := backend.Get(nil, "", "colon-title")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Title != "Config: backend selection" {
+		t.Fatalf("title = %q", got.Title)
+	}
+	if len(got.AcceptanceCriteria) != 1 || got.AcceptanceCriteria[0] != "Examples: lean and obsidian" {
+		t.Fatalf("acceptance_criteria = %#v", got.AcceptanceCriteria)
+	}
+}
+
+func TestObsidianListAllFailsClosedOnInvalidNote(t *testing.T) {
+	dir := t.TempDir()
+	backend := newObsidianTaskBackend(dir)
+	_, err := backend.Upsert(nil, tasks.AddRequest{ID: "valid", Status: "todo", Title: "Valid"})
+	if err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	bad := []byte("---\nid: invalid\nstatus: todo\n---\n")
+	if err := os.WriteFile(filepath.Join(dir, "invalid.md"), bad, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = backend.ListAll(nil, "")
+	if err == nil || !strings.Contains(err.Error(), "read obsidian task note invalid") {
+		t.Fatalf("expected invalid note error, got: %v", err)
 	}
 }
 
@@ -262,11 +326,11 @@ func TestObsidianRoundTripAllFields(t *testing.T) {
 		ID: "full-task", Status: "in_progress", Title: "Full Field Task",
 		Priority: "critical", ModelLevel: "high", TaskType: "feature",
 		ParentID: "parent-epic",
-		Tags: []string{"critical", "security", "backend"},
-		Branch: "feature/full-task", WorktreePath: ".worktrees/full-task",
+		Tags:     []string{"critical", "security", "backend"},
+		Branch:   "feature/full-task", WorktreePath: ".worktrees/full-task",
 		AcceptanceCriteria: []string{"All fields survive round-trip", "No silent drops"},
 		VerificationPlan:   []string{"Write", "Read back", "Compare"},
-		Body: "This task has every supported field populated.\nSecond paragraph.",
+		Body:               "This task has every supported field populated.\nSecond paragraph.",
 	}
 	_, err := backend.Upsert(nil, original)
 	if err != nil {
@@ -335,8 +399,8 @@ func TestObsidianLeanSpecificFieldsNotDropped(t *testing.T) {
 	backend := newObsidianTaskBackend(dir)
 	_, err := backend.Upsert(nil, tasks.AddRequest{
 		ID: "lean-fields", Status: "todo", Title: "Lean Fields Test",
-		Branch: "feature/lean-fields",
-		WorktreePath: ".worktrees/lean-fields",
+		Branch:             "feature/lean-fields",
+		WorktreePath:       ".worktrees/lean-fields",
 		AcceptanceCriteria: []string{"Branch must survive"},
 		VerificationPlan:   []string{"Check branch", "Check worktree"},
 	})
