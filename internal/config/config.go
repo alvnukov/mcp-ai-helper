@@ -455,25 +455,25 @@ func MergeRepoConfig(base *Config, repoCfg *RepoConfig, repoPath string) (*Confi
 		return nil, errors.New("base config is required")
 	}
 	merged := *base
-	if repoCfg == nil {
-		return &merged, nil
-	}
-	if repoCfg.CommandPolicy != nil && len(repoCfg.CommandPolicy.AllowedCWDs) > 0 {
-		allowed, err := resolveRepoAllowedCWDs(repoPath, repoCfg.CommandPolicy.AllowedCWDs)
-		if err != nil {
-			return nil, err
+	if repoCfg != nil {
+		if repoCfg.CommandPolicy != nil && len(repoCfg.CommandPolicy.AllowedCWDs) > 0 {
+			allowed, err := resolveRepoAllowedCWDs(repoPath, repoCfg.CommandPolicy.AllowedCWDs)
+			if err != nil {
+				return nil, err
+			}
+			merged.CommandPolicy = base.CommandPolicy
+			merged.CommandPolicy.AllowedCWDs = allowed
 		}
-		merged.CommandPolicy = base.CommandPolicy
-		merged.CommandPolicy.AllowedCWDs = allowed
-	}
-	if repoCfg.TaskRegistry != nil {
-		registry, err := resolveRepoTaskRegistry(repoPath, *repoCfg.TaskRegistry)
-		if err != nil {
-			return nil, err
+		if repoCfg.TaskRegistry != nil {
+			merged.TaskRegistry = *repoCfg.TaskRegistry
 		}
-		merged.TaskRegistry = registry
 	}
 	applyDefaults(&merged)
+	registry, err := resolveRepoTaskRegistry(repoPath, merged.TaskRegistry)
+	if err != nil {
+		return nil, err
+	}
+	merged.TaskRegistry = registry
 	if err := merged.Validate(); err != nil {
 		return nil, err
 	}
@@ -776,6 +776,9 @@ func (c *Config) Validate() error {
 		}
 		checkPath := strings.TrimSpace(c.TaskRegistry.Obsidian.ResolvedPath)
 		if checkPath == "" {
+			if !filepath.IsAbs(path) {
+				return nil
+			}
 			checkPath = path
 		}
 		info, err := os.Stat(checkPath)

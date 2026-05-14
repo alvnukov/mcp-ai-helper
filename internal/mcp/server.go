@@ -101,9 +101,6 @@ func (s *Server) loadTaskBackendForRepo(repoPath string) (taskBackend, error) {
 	if err != nil {
 		return nil, err
 	}
-	if repoCfg == nil || repoCfg.TaskRegistry == nil {
-		return s.loadTaskBackend(), nil
-	}
 	merged, err := config.MergeRepoConfig(cfg, repoCfg, repoPath)
 	if err != nil {
 		return nil, err
