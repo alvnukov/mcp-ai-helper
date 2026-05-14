@@ -225,6 +225,17 @@ Done task note.
 	}
 }
 
+func TestObsidianParsesFrontmatterListItemsStartingWithBacktick(t *testing.T) {
+	input := "---\nid: task-118\ntitle: Read Files\nstatus: done\nacceptance_criteria:\n  - `read_files` is registered with an accurate MCP input schema: required `repo_path` and required string-array `paths`.\n---\n"
+	note, err := parseNote([]byte(input), "task-118")
+	if err != nil {
+		t.Fatalf("parseNote: %v", err)
+	}
+	if len(note.AcceptanceCriteria) != 1 || !strings.Contains(note.AcceptanceCriteria[0], "read_files") {
+		t.Fatalf("acceptance_criteria = %#v", note.AcceptanceCriteria)
+	}
+}
+
 func TestObsidianWriterQuotesColonScalars(t *testing.T) {
 	dir := t.TempDir()
 	backend := newObsidianTaskBackend(dir)

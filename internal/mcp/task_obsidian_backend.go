@@ -339,6 +339,16 @@ func quotePlainScalarFrontmatter(fm string) string {
 	lines := strings.Split(fm, "\n")
 	changed := false
 	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "- ") {
+			value := strings.TrimSpace(trimmed[2:])
+			if value != "" && !isQuotedYAMLScalar(value) {
+				prefix := line[:strings.Index(line, "-")+2]
+				lines[i] = prefix + " " + strconv.Quote(value)
+				changed = true
+			}
+			continue
+		}
 		idx := strings.Index(line, ": ")
 		if idx <= 0 {
 			continue
@@ -348,7 +358,7 @@ func quotePlainScalarFrontmatter(fm string) string {
 			continue
 		}
 		value := line[idx+2:]
-		if !strings.Contains(value, ": ") || strings.HasPrefix(value, "\"") || strings.HasPrefix(value, "'") {
+		if !strings.Contains(value, ": ") || isQuotedYAMLScalar(value) {
 			continue
 		}
 		lines[i] = key + ": " + strconv.Quote(value)
@@ -358,6 +368,10 @@ func quotePlainScalarFrontmatter(fm string) string {
 		return fm
 	}
 	return strings.Join(lines, "\n")
+}
+
+func isQuotedYAMLScalar(value string) bool {
+	return strings.HasPrefix(value, "\"") || strings.HasPrefix(value, "'")
 }
 
 func plainScalarFrontmatterKey(key string) bool {
