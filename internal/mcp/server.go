@@ -114,7 +114,11 @@ func (s *Server) loadTaskBackendForRepo(repoPath string) (taskBackend, error) {
 func buildTaskBackend(cfg *config.Config, cmds *command.Runner, store *tasks.Store) taskBackend {
 	switch cfg.TaskRegistry.Backend {
 	case "obsidian":
-		return newObsidianTaskBackend(cfg.TaskRegistry.Obsidian.Path)
+		path := cfg.TaskRegistry.Obsidian.ResolvedPath
+		if path == "" {
+			path = cfg.TaskRegistry.Obsidian.Path
+		}
+		return newObsidianTaskBackend(path)
 	default:
 		return newLakeTaskBackend(cmds, store)
 	}

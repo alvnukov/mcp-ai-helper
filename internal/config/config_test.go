@@ -242,8 +242,11 @@ func TestMergeRepoConfigOverlaysTaskRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if merged.TaskRegistry.Backend != "obsidian" || merged.TaskRegistry.Obsidian.Path != notesDir {
-		t.Fatalf("task registry = %#v, want obsidian path %q", merged.TaskRegistry, notesDir)
+	if merged.TaskRegistry.Backend != "obsidian" || merged.TaskRegistry.Obsidian.Path != "notes" {
+		t.Fatalf("task registry path = %q, want repo-relative path", merged.TaskRegistry.Obsidian.Path)
+	}
+	if merged.TaskRegistry.Obsidian.ResolvedPath != notesDir {
+		t.Fatalf("resolved obsidian path = %q, want %q", merged.TaskRegistry.Obsidian.ResolvedPath, notesDir)
 	}
 }
 
