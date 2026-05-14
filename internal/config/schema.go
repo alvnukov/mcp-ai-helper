@@ -18,8 +18,9 @@ func Schema() map[string]any {
 		"workflow": []string{
 			"Call config_schema before editing config when field meaning is unclear.",
 			"Use config_read to inspect the active sanitized config.",
-			"Use config_replace with a complete YAML document; the helper validates it before replacing the file.",
-			"Use config_reload after an external config edit; config_replace reloads by default.",
+			"Use config_option_set/config_option_reset for allowlisted scalar option edits; prefer them over full YAML replacement.",
+			"Use config_replace only when a full validated YAML replacement is explicitly required; it preserves hidden token fields where possible.",
+			"Use config_reload after an external config edit; config_option_set and config_replace reload by default.",
 			"Use language_profiles before code edits so format/test/lint commands are selected by language instead of ad hoc shell habits.",
 		},
 		"fields": []FieldDoc{

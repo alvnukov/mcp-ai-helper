@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	basemcp "github.com/mark3labs/mcp-go/mcp"
@@ -29,7 +30,21 @@ type configReplaceRequest struct {
 	RepoPath   string `json:"repo_path"`
 }
 
+type configOptionSetRequest struct {
+	Path       string `json:"path"`
+	Value      string `json:"value"`
+	ConfigPath string `json:"config_path"`
+	Reload     *bool  `json:"reload"`
+}
+
+type configOptionResetRequest struct {
+	Path       string `json:"path"`
+	ConfigPath string `json:"config_path"`
+	Reload     *bool  `json:"reload"`
+}
+
 func registerConfigTools(srv *server.MCPServer, deps *Server, reload configReloadFunc) {
+	registerConfigOptionTools(srv, deps, reload)
 	srv.AddTool(basemcp.NewTool("config_schema",
 		basemcp.WithDescription("Return machine-readable documentation for every mcp-ai-helper config field and the safe model-driven setup workflow."),
 	), func(_ context.Context, _ basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
@@ -122,6 +137,233 @@ func registerConfigTools(srv *server.MCPServer, deps *Server, reload configReloa
 		}
 		return structured(map[string]any{"status": "ok", "config_path": path, "config": loaded})
 	})
+}
+
+
+func registerConfigOptionTools(srv *server.MCPServer, deps *Server, reload configReloadFunc) {
+	srv.AddTool(basemcp.NewTool("config_option_set",
+		basemcp.WithDescription("Set one allowlisted scalar config option without replacing the whole YAML config. Preserves hidden token fields and reloads by default."),
+		basemcp.WithString("path", basemcp.Required(), basemcp.Description("Allowlisted config option path, for example layers.tasks.enabled or command_policy.max_lines.")),
+		basemcp.WithString("value", basemcp.Required(), basemcp.Description("Scalar value as string. Bool options accept true/false; int options accept decimal integers.")),
+		basemcp.WithString("config_path", basemcp.Description("Optional config file path. Empty means the active config path.")),
+		basemcp.WithBoolean("reload", basemcp.Description("Reload runtime after writing. Defaults to true.")),
+	), func(_ context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+		var args configOptionSetRequest
+		if err := bind(req, &args); err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
+		cfg, _, _, _, _ := deps.loadDeps()
+		path := effectiveConfigPath(args.ConfigPath, cfg.SourcePath)
+		loaded, err := setConfigOption(path, args.Path, args.Value)
+		if err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
+		reloadNow := args.Reload == nil || *args.Reload
+		if reloadNow {
+			loaded, err = reload(path)
+			if err != nil {
+				return basemcp.NewToolResultError(err.Error()), nil
+			}
+		}
+		return structured(map[string]any{"status": "ok", "path": args.Path, "value": args.Value, "reloaded": reloadNow, "config_path": path, "config": loaded})
+	})
+
+	srv.AddTool(basemcp.NewTool("config_option_reset",
+		basemcp.WithDescription("Reset one allowlisted optional config option without replacing the whole YAML config. Currently supports optional bool overrides."),
+		basemcp.WithString("path", basemcp.Required(), basemcp.Description("Allowlisted optional config option path, for example layers.tasks.enabled or command_policy.log_enabled.")),
+		basemcp.WithString("config_path", basemcp.Description("Optional config file path. Empty means the active config path.")),
+		basemcp.WithBoolean("reload", basemcp.Description("Reload runtime after writing. Defaults to true.")),
+	), func(_ context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+		var args configOptionResetRequest
+		if err := bind(req, &args); err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
+		cfg, _, _, _, _ := deps.loadDeps()
+		path := effectiveConfigPath(args.ConfigPath, cfg.SourcePath)
+		loaded, err := resetConfigOption(path, args.Path)
+		if err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
+		reloadNow := args.Reload == nil || *args.Reload
+		if reloadNow {
+			loaded, err = reload(path)
+			if err != nil {
+				return basemcp.NewToolResultError(err.Error()), nil
+			}
+		}
+		return structured(map[string]any{"status": "ok", "path": args.Path, "reset": true, "reloaded": reloadNow, "config_path": path, "config": loaded})
+	})
+}
+
+func setConfigOption(path string, optionPath string, value string) (*config.Config, error) {
+	if config.IsRepoConfigPath(path) {
+		return nil, errors.New("repo config (.mcp-ai-helper.yaml) is user-editable only; use config_read with repo_path to inspect it")
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		return nil, err
+	}
+	if err := applyConfigOption(cfg, strings.TrimSpace(optionPath), strings.TrimSpace(value)); err != nil {
+		return nil, err
+	}
+	if err := validateConfigOptionValue(strings.TrimSpace(optionPath), strings.TrimSpace(value)); err != nil {
+		return nil, err
+	}
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("marshal config: %w", err)
+	}
+	return writeValidatedConfig(path, string(data))
+}
+
+func resetConfigOption(path string, optionPath string) (*config.Config, error) {
+	if config.IsRepoConfigPath(path) {
+		return nil, errors.New("repo config (.mcp-ai-helper.yaml) is user-editable only; use config_read with repo_path to inspect it")
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		return nil, err
+	}
+	if err := resetOptionalConfigOption(cfg, strings.TrimSpace(optionPath)); err != nil {
+		return nil, err
+	}
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("marshal config: %w", err)
+	}
+	return writeValidatedConfig(path, string(data))
+}
+
+func applyConfigOption(cfg *config.Config, optionPath string, value string) error {
+	switch optionPath {
+	case "layers.logs.enabled":
+		cfg.Layers.Logs.Enabled = boolValue(value)
+	case "layers.tasks.enabled":
+		cfg.Layers.Tasks.Enabled = boolValue(value)
+	case "layers.issues.enabled":
+		cfg.Layers.Issues.Enabled = boolValue(value)
+	case "layers.guidance.enabled":
+		cfg.Layers.Guidance.Enabled = boolValue(value)
+	case "layers.models.enabled":
+		cfg.Layers.Models.Enabled = boolValue(value)
+	case "layers.commands.enabled":
+		cfg.Layers.Commands.Enabled = boolValue(value)
+	case "layers.workflows.enabled":
+		cfg.Layers.Workflows.Enabled = boolValue(value)
+	case "layers.reasoning_patterns.enabled":
+		cfg.Layers.ReasoningPatterns.Enabled = boolValue(value)
+	case "command_policy.default_timeout_seconds":
+		cfg.CommandPolicy.DefaultTimeoutSeconds = positiveIntValue(optionPath, value)
+	case "command_policy.max_output_bytes":
+		cfg.CommandPolicy.MaxOutputBytes = positiveIntValue(optionPath, value)
+	case "command_policy.max_lines":
+		cfg.CommandPolicy.MaxLines = positiveIntValue(optionPath, value)
+	case "command_policy.log_dir":
+		cfg.CommandPolicy.LogDir = nonEmptyStringValue(optionPath, value)
+	case "command_policy.log_enabled":
+		cfg.CommandPolicy.LogEnabled = boolValue(value)
+	case "command_policy.log_retention_days":
+		cfg.CommandPolicy.LogRetentionDays = positiveIntValue(optionPath, value)
+	case "command_policy.log_max_records":
+		cfg.CommandPolicy.LogMaxRecords = positiveIntValue(optionPath, value)
+	case "command_policy.log_compress":
+		cfg.CommandPolicy.LogCompress = derefBool(boolValue(value))
+	case "pipeline_policy.max_return_chars":
+		cfg.PipelinePolicy.MaxReturnChars = positiveIntValue(optionPath, value)
+	case "pipeline_policy.require_evidence_for_analysis":
+		cfg.PipelinePolicy.RequireEvidenceForAnalysis = derefBool(boolValue(value))
+	case "task_registry.backend":
+		cfg.TaskRegistry.Backend = registryBackendValue(value)
+	case "task_registry.obsidian.path":
+		cfg.TaskRegistry.Obsidian.Path = nonEmptyStringValue(optionPath, value)
+	case "task_registry.obsidian.vault":
+		cfg.TaskRegistry.Obsidian.Vault = nonEmptyStringValue(optionPath, value)
+	default:
+		return fmt.Errorf("unsupported config option path %q; use config_schema for allowlisted options", optionPath)
+	}
+	return nil
+}
+
+func resetOptionalConfigOption(cfg *config.Config, optionPath string) error {
+	switch optionPath {
+	case "layers.logs.enabled":
+		cfg.Layers.Logs.Enabled = nil
+	case "layers.tasks.enabled":
+		cfg.Layers.Tasks.Enabled = nil
+	case "layers.issues.enabled":
+		cfg.Layers.Issues.Enabled = nil
+	case "layers.guidance.enabled":
+		cfg.Layers.Guidance.Enabled = nil
+	case "layers.models.enabled":
+		cfg.Layers.Models.Enabled = nil
+	case "layers.commands.enabled":
+		cfg.Layers.Commands.Enabled = nil
+	case "layers.workflows.enabled":
+		cfg.Layers.Workflows.Enabled = nil
+	case "layers.reasoning_patterns.enabled":
+		cfg.Layers.ReasoningPatterns.Enabled = nil
+	case "command_policy.log_enabled":
+		cfg.CommandPolicy.LogEnabled = nil
+	default:
+		return fmt.Errorf("config option path %q cannot be reset; set an explicit value instead", optionPath)
+	}
+	return nil
+}
+
+func boolValue(value string) *bool {
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return nil
+	}
+	return &parsed
+}
+
+func derefBool(value *bool) bool {
+	return value != nil && *value
+}
+
+func positiveIntValue(optionPath string, value string) int {
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed <= 0 {
+		return 0
+	}
+	return parsed
+}
+
+func nonEmptyStringValue(optionPath string, value string) string {
+	if strings.TrimSpace(value) == "" {
+		return ""
+	}
+	return value
+}
+
+func registryBackendValue(value string) string {
+	return strings.TrimSpace(value)
+}
+
+func validateConfigOptionValue(optionPath string, value string) error {
+	switch optionPath {
+	case "layers.logs.enabled", "layers.tasks.enabled", "layers.issues.enabled", "layers.guidance.enabled", "layers.models.enabled", "layers.commands.enabled", "layers.workflows.enabled", "layers.reasoning_patterns.enabled", "command_policy.log_enabled", "command_policy.log_compress", "pipeline_policy.require_evidence_for_analysis":
+		if _, err := strconv.ParseBool(value); err != nil {
+			return fmt.Errorf("config option %s requires a boolean value", optionPath)
+		}
+	case "command_policy.default_timeout_seconds", "command_policy.max_output_bytes", "command_policy.max_lines", "command_policy.log_retention_days", "command_policy.log_max_records", "pipeline_policy.max_return_chars":
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed <= 0 {
+			return fmt.Errorf("config option %s requires a positive integer value", optionPath)
+		}
+	case "command_policy.log_dir", "task_registry.obsidian.path", "task_registry.obsidian.vault":
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("config option %s requires a non-empty string value", optionPath)
+		}
+	case "task_registry.backend":
+		switch value {
+		case "", "lean", "obsidian":
+		default:
+			return fmt.Errorf("config option %s must be lean or obsidian", optionPath)
+		}
+	}
+	return nil
 }
 
 func effectiveConfigPath(requested string, active string) string {

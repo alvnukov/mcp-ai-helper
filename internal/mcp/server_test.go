@@ -294,7 +294,7 @@ func TestConfigToolsRegistered(t *testing.T) {
 	cfg := &config.Config{AssistantGuidance: config.DefaultAssistantGuidance()}
 	srv := New(cfg)
 	tools := srv.ListTools()
-	for _, name := range []string{"config_schema", "config_read", "config_replace", "config_reload", "feature_list", "feature_get", "feature_enable", "feature_disable", "feature_reset"} {
+	for _, name := range []string{"config_schema", "config_read", "config_replace", "config_reload", "config_option_set", "config_option_reset", "feature_list", "feature_get", "feature_enable", "feature_disable", "feature_reset"} {
 		if _, ok := tools[name]; !ok {
 			t.Fatalf("%s tool is not registered", name)
 		}
@@ -395,6 +395,67 @@ integrations:
 		if !strings.Contains(text, want) {
 			t.Fatalf("written config does not preserve %q: %s", want, text)
 		}
+	}
+}
+
+
+func TestConfigOptionSetAndResetPreservesTokens(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	_, err := writeValidatedConfig(path, `layers:
+  tasks:
+    enabled: true
+providers:
+  openai:
+    type: generic
+    base_url: https://api.example.test/v1
+    api_key: provider-token-123
+secrets:
+  GH_TOKEN:
+    value: gh-token-123456
+    enabled: true
+`)
+	if err != nil {
+		t.Fatalf("write initial config: %v", err)
+	}
+	loaded, err := setConfigOption(path, "layers.tasks.enabled", "false")
+	if err != nil {
+		t.Fatalf("set option: %v", err)
+	}
+	if loaded.Layers.Tasks.Enabled == nil || *loaded.Layers.Tasks.Enabled {
+		t.Fatalf("layers.tasks.enabled = %#v, want false", loaded.Layers.Tasks.Enabled)
+	}
+	if loaded.Providers["openai"].APIKey != "provider-token-123" || loaded.Secrets["GH_TOKEN"].Value != "gh-token-123456" {
+		t.Fatalf("token fields were not preserved: provider=%q secret=%q", loaded.Providers["openai"].APIKey, loaded.Secrets["GH_TOKEN"].Value)
+	}
+	loaded, err = setConfigOption(path, "command_policy.max_lines", "77")
+	if err != nil {
+		t.Fatalf("set int option: %v", err)
+	}
+	if loaded.CommandPolicy.MaxLines != 77 {
+		t.Fatalf("max_lines = %d, want 77", loaded.CommandPolicy.MaxLines)
+	}
+	loaded, err = resetConfigOption(path, "layers.tasks.enabled")
+	if err != nil {
+		t.Fatalf("reset option: %v", err)
+	}
+	if loaded.Layers.Tasks.Enabled != nil {
+		t.Fatalf("layers.tasks.enabled = %#v, want nil reset", loaded.Layers.Tasks.Enabled)
+	}
+}
+
+func TestConfigOptionSetRejectsUnsupportedAndInvalidValues(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	_, err := writeValidatedConfig(path, "providers: {}\nmodels: {}\nrouting: {}\n")
+	if err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if _, err := setConfigOption(path, "providers.openai.api_key", "secret"); err == nil || !strings.Contains(err.Error(), "unsupported config option") {
+		t.Fatalf("unsupported path error = %v", err)
+	}
+	if _, err := setConfigOption(path, "command_policy.max_lines", "zero"); err == nil || !strings.Contains(err.Error(), "positive integer") {
+		t.Fatalf("invalid int error = %v", err)
 	}
 }
 
