@@ -231,6 +231,30 @@ command_policy:
 	}
 }
 
+func TestMergeRepoConfigOverlaysTaskRegistry(t *testing.T) {
+	repo := t.TempDir()
+	notesDir := filepath.Join(repo, "notes")
+	if err := os.Mkdir(notesDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	repoCfg := &RepoConfig{TaskRegistry: &TaskRegistryConfig{Backend: "obsidian", Obsidian: ObsidianRegistryConfig{Path: "notes"}}}
+	merged, err := MergeRepoConfig(&Config{Providers: map[string]ProviderConfig{}, Models: map[string]ModelConfig{}, Routing: map[string]string{}}, repoCfg, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if merged.TaskRegistry.Backend != "obsidian" || merged.TaskRegistry.Obsidian.Path != notesDir {
+		t.Fatalf("task registry = %#v, want obsidian path %q", merged.TaskRegistry, notesDir)
+	}
+}
+
+func TestMergeRepoConfigRejectsInvalidTaskRegistry(t *testing.T) {
+	repoCfg := &RepoConfig{TaskRegistry: &TaskRegistryConfig{Backend: "obsidian"}}
+	_, err := MergeRepoConfig(&Config{Providers: map[string]ProviderConfig{}, Models: map[string]ModelConfig{}, Routing: map[string]string{}}, repoCfg, t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "task_registry.obsidian.path is required") {
+		t.Fatalf("expected missing obsidian path error, got: %v", err)
+	}
+}
+
 func TestMergeRepoConfigRejectsEscapingAllowedCWD(t *testing.T) {
 	repo := t.TempDir()
 	repoCfg := &RepoConfig{CommandPolicy: &struct {

@@ -84,11 +84,44 @@ Child body with parent link.
 	return dir
 }
 
+func TestRepoLocalTaskRegistryBackendSelection(t *testing.T) {
+	repo := t.TempDir()
+	notesDir := filepath.Join(repo, "notes")
+	if err := os.Mkdir(notesDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".mcp-ai-helper.yaml"), []byte(`task_registry:
+  backend: obsidian
+  obsidian:
+    path: notes
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{
+		Providers:    map[string]config.ProviderConfig{},
+		Models:       map[string]config.ModelConfig{},
+		Routing:      map[string]string{},
+		TaskRegistry: config.TaskRegistryConfig{Backend: "lean"},
+	}
+	deps := &Server{cfg: cfg, taskBackend: newLakeTaskBackend(nil, tasks.NewStore(nil))}
+
+	selected, err := deps.loadTaskBackendForRepo(repo)
+	if err != nil {
+		t.Fatalf("loadTaskBackendForRepo: %v", err)
+	}
+	if _, err := selected.Upsert(context.Background(), tasks.AddRequest{RepoPath: repo, ID: "repo-local", Status: "todo", Title: "Repo Local"}); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(notesDir, "repo-local.md")); err != nil {
+		t.Fatalf("repo-local obsidian task was not written: %v", err)
+	}
+}
+
 func TestObsidianIntegrationServer(t *testing.T) {
 	dir := setupObsidianTestDir(t)
 	cfg := &config.Config{
 		TaskRegistry: config.TaskRegistryConfig{
-			Backend: "obsidian",
+			Backend:  "obsidian",
 			Obsidian: config.ObsidianRegistryConfig{Path: dir},
 		},
 	}

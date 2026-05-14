@@ -148,8 +148,9 @@ type ToolPermissions struct {
 // RepoConfig is a repo-local optional config loaded from .mcp-ai-helper.yaml.
 // config_replace refuses to write this file; feature tools may update only the features section.
 type RepoConfig struct {
-	SourcePath    string          `yaml:"-" json:"repo_config_path"`
-	Permissions   RepoPermissions `yaml:"permissions" json:"permissions"`
+	SourcePath    string              `yaml:"-" json:"repo_config_path"`
+	Permissions   RepoPermissions     `yaml:"permissions" json:"permissions"`
+	TaskRegistry  *TaskRegistryConfig `yaml:"task_registry" json:"task_registry,omitempty"`
 	CommandPolicy *struct {
 		AllowedCWDs []string `yaml:"allowed_cwds" json:"allowed_cwds"`
 	} `yaml:"command_policy" json:"command_policy"`
@@ -453,16 +454,42 @@ func MergeRepoConfig(base *Config, repoCfg *RepoConfig, repoPath string) (*Confi
 		return nil, errors.New("base config is required")
 	}
 	merged := *base
-	if repoCfg == nil || repoCfg.CommandPolicy == nil || len(repoCfg.CommandPolicy.AllowedCWDs) == 0 {
+	if repoCfg == nil {
 		return &merged, nil
 	}
-	allowed, err := resolveRepoAllowedCWDs(repoPath, repoCfg.CommandPolicy.AllowedCWDs)
-	if err != nil {
+	if repoCfg.CommandPolicy != nil && len(repoCfg.CommandPolicy.AllowedCWDs) > 0 {
+		allowed, err := resolveRepoAllowedCWDs(repoPath, repoCfg.CommandPolicy.AllowedCWDs)
+		if err != nil {
+			return nil, err
+		}
+		merged.CommandPolicy = base.CommandPolicy
+		merged.CommandPolicy.AllowedCWDs = allowed
+	}
+	if repoCfg.TaskRegistry != nil {
+		registry, err := resolveRepoTaskRegistry(repoPath, *repoCfg.TaskRegistry)
+		if err != nil {
+			return nil, err
+		}
+		merged.TaskRegistry = registry
+	}
+	applyDefaults(&merged)
+	if err := merged.Validate(); err != nil {
 		return nil, err
 	}
-	merged.CommandPolicy = base.CommandPolicy
-	merged.CommandPolicy.AllowedCWDs = allowed
 	return &merged, nil
+}
+
+func resolveRepoTaskRegistry(repoPath string, registry TaskRegistryConfig) (TaskRegistryConfig, error) {
+	registry.Backend = strings.TrimSpace(registry.Backend)
+	registry.Obsidian.Path = strings.TrimSpace(registry.Obsidian.Path)
+	if registry.Backend == "obsidian" && registry.Obsidian.Path != "" && !filepath.IsAbs(registry.Obsidian.Path) {
+		repo, err := filepath.Abs(strings.TrimSpace(repoPath))
+		if err != nil {
+			return TaskRegistryConfig{}, fmt.Errorf("resolve repo_path: %w", err)
+		}
+		registry.Obsidian.Path = filepath.Join(repo, registry.Obsidian.Path)
+	}
+	return registry, nil
 }
 
 func resolveRepoAllowedCWDs(repoPath string, values []string) ([]string, error) {
