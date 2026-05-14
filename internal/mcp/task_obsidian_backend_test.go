@@ -254,3 +254,109 @@ func TestObsidianListCurrent(t *testing.T) {
 		t.Fatalf("expected 2 active tasks, got %d", len(active))
 	}
 }
+
+func TestObsidianRoundTripAllFields(t *testing.T) {
+	dir := t.TempDir()
+	backend := newObsidianTaskBackend(dir)
+	original := tasks.AddRequest{
+		ID: "full-task", Status: "in_progress", Title: "Full Field Task",
+		Priority: "critical", ModelLevel: "high", TaskType: "feature",
+		ParentID: "parent-epic",
+		Tags: []string{"critical", "security", "backend"},
+		Branch: "feature/full-task", WorktreePath: ".worktrees/full-task",
+		AcceptanceCriteria: []string{"All fields survive round-trip", "No silent drops"},
+		VerificationPlan:   []string{"Write", "Read back", "Compare"},
+		Body: "This task has every supported field populated.\nSecond paragraph.",
+	}
+	_, err := backend.Upsert(nil, original)
+	if err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	got, _, err := backend.Get(nil, "", "full-task")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	checks := []struct {
+		field string
+		got   string
+		want  string
+	}{
+		{"id", got.ID, "full-task"},
+		{"title", got.Title, "Full Field Task"},
+		{"status", got.Status, "in_progress"},
+		{"priority", got.Priority, "critical"},
+		{"model_level", got.ModelLevel, "high"},
+		{"task_type", got.TaskType, "feature"},
+		{"parent_id", got.ParentID, "parent-epic"},
+		{"branch", got.Branch, "feature/full-task"},
+		{"worktree_path", got.WorktreePath, ".worktrees/full-task"},
+		{"projection_source", got.ProjectionSource, "obsidian_registry"},
+	}
+	for _, c := range checks {
+		if c.got != c.want {
+			t.Errorf("%s: got %q, want %q", c.field, c.got, c.want)
+		}
+	}
+	if len(got.Tags) != 3 {
+		t.Errorf("tags: got %d, want 3: %v", len(got.Tags), got.Tags)
+	}
+	if len(got.AcceptanceCriteria) != 2 {
+		t.Errorf("acceptance_criteria: got %d, want 2: %v", len(got.AcceptanceCriteria), got.AcceptanceCriteria)
+	}
+	if len(got.VerificationPlan) != 3 {
+		t.Errorf("verification_plan: got %d, want 3: %v", len(got.VerificationPlan), got.VerificationPlan)
+	}
+	if got.Body != original.Body {
+		t.Errorf("body: got %q, want %q", got.Body, original.Body)
+	}
+}
+
+func TestObsidianMissingRequiredFieldWouldFail(t *testing.T) {
+	fixture := `---
+id: no-title-task
+status: todo
+---
+
+## Body
+
+No title here.
+`
+	_, err := parseNote([]byte(fixture), "no-title-task")
+	if err == nil {
+		t.Fatal("expected missing title to fail, got nil")
+	}
+	if !strings.Contains(err.Error(), "'title' is required") {
+		t.Fatalf("expected title required error, got: %v", err)
+	}
+}
+
+func TestObsidianLeanSpecificFieldsNotDropped(t *testing.T) {
+	dir := t.TempDir()
+	backend := newObsidianTaskBackend(dir)
+	_, err := backend.Upsert(nil, tasks.AddRequest{
+		ID: "lean-fields", Status: "todo", Title: "Lean Fields Test",
+		Branch: "feature/lean-fields",
+		WorktreePath: ".worktrees/lean-fields",
+		AcceptanceCriteria: []string{"Branch must survive"},
+		VerificationPlan:   []string{"Check branch", "Check worktree"},
+	})
+	if err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	got, _, err := backend.Get(nil, "", "lean-fields")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Branch != "feature/lean-fields" {
+		t.Errorf("Lean field 'branch' was silently dropped: got %q", got.Branch)
+	}
+	if got.WorktreePath != ".worktrees/lean-fields" {
+		t.Errorf("Lean field 'worktree_path' was silently dropped: got %q", got.WorktreePath)
+	}
+	if len(got.AcceptanceCriteria) == 0 {
+		t.Error("Lean field 'acceptance_criteria' was silently dropped")
+	}
+	if len(got.VerificationPlan) == 0 {
+		t.Error("Lean field 'verification_plan' was silently dropped")
+	}
+}
