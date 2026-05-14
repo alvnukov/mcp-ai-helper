@@ -89,7 +89,7 @@ routing:
   evidence_analysis: strong_analysis
 
 command_policy:
-  default_timeout_seconds: 20
+  default_timeout_seconds: 300
   max_output_bytes: 200000
   max_lines: 400
   log_dir: ~/.mcp-ai-helper/repos
