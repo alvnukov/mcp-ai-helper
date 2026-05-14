@@ -310,6 +310,7 @@ func (b *obsidianTaskBackend) tryRead(id string) (tasks.Task, bool) {
 
 func (b *obsidianTaskBackend) readNote(id string) (taskNote, error) {
 	path := b.notePath(id)
+	// #nosec G304,G703 -- path from notePath, scoped under obsidian tasks directory
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -610,11 +611,13 @@ func (b *obsidianTaskBackend) writeNote(note taskNote) error {
 		buf.WriteString("\n")
 	}
 	tmpPath := b.notePath(note.ID) + ".tmp"
+	// #nosec G306 -- obsidian markdown notes are intentionally world-readable
 	if err := os.WriteFile(tmpPath, buf.Bytes(), 0o644); err != nil {
 		return fmt.Errorf("write task %s: %w", note.ID, err)
 	}
 	if err := os.Rename(tmpPath, b.notePath(note.ID)); err != nil {
-		os.Remove(tmpPath)
+		// #nosec G104 -- best-effort cleanup, Rename error is the primary failure
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("commit task %s: %w", note.ID, err)
 	}
 	return nil
