@@ -104,7 +104,13 @@ func buildDeps(cfg *config.Config) (provider.ChatClient, *command.Runner, *pipel
 		projectStore, _ = project.NewStore(".mcp-ai-helper")
 	}
 	store := tasks.NewStore(projectStore)
-	backend := newLakeTaskBackend(cmds, store)
+	var backend taskBackend
+	switch cfg.TaskRegistry.Backend {
+	case "obsidian":
+		backend = newObsidianTaskBackend(cfg.TaskRegistry.Obsidian.Path)
+	default:
+		backend = newLakeTaskBackend(cmds, store)
+	}
 	pipes := pipeline.NewRunnerWithTaskBackend(cfg, chat, workflowTaskBackend{backend: backend})
 	return chat, cmds, pipes, store, backend
 }
