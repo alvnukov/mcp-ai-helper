@@ -333,8 +333,8 @@ func TestBuildTaskGraph_Determinstic(t *testing.T) {
 		makeTask("task-b", "todo", "B", "task-a"),
 	}
 	req := TaskGraphRequest{RepoPath: "/test"}
-	graph1, _ := BuildTaskGraph(all, req)
-	graph2, _ := BuildTaskGraph(all, req)
+	graph1, _ := BuildTaskGraph(all, req, "test_source")
+	graph2, _ := BuildTaskGraph(all, req, "test_source")
 	if len(graph1.Nodes) != len(graph2.Nodes) {
 		t.Fatal("node count differs between calls")
 	}
