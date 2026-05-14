@@ -271,8 +271,9 @@ type TaskRegistryConfig struct {
 
 // ObsidianRegistryConfig holds Obsidian-backed registry settings.
 type ObsidianRegistryConfig struct {
-	Path  string `yaml:"path" json:"path"`
-	Vault string `yaml:"vault" json:"vault,omitempty"`
+	Path         string `yaml:"path" json:"path"`
+	Vault        string `yaml:"vault" json:"vault,omitempty"`
+	ResolvedPath string `yaml:"-" json:"-"`
 }
 
 // IsEnabled returns true when the integration is enabled (default true when non-nil).
@@ -482,12 +483,24 @@ func MergeRepoConfig(base *Config, repoCfg *RepoConfig, repoPath string) (*Confi
 func resolveRepoTaskRegistry(repoPath string, registry TaskRegistryConfig) (TaskRegistryConfig, error) {
 	registry.Backend = strings.TrimSpace(registry.Backend)
 	registry.Obsidian.Path = strings.TrimSpace(registry.Obsidian.Path)
-	if registry.Backend == "obsidian" && registry.Obsidian.Path != "" && !filepath.IsAbs(registry.Obsidian.Path) {
+	registry.Obsidian.ResolvedPath = strings.TrimSpace(registry.Obsidian.ResolvedPath)
+	if registry.Backend == "obsidian" && registry.Obsidian.Path != "" {
+		if filepath.IsAbs(registry.Obsidian.Path) {
+			registry.Obsidian.ResolvedPath = registry.Obsidian.Path
+			return registry, nil
+		}
 		repo, err := filepath.Abs(strings.TrimSpace(repoPath))
 		if err != nil {
 			return TaskRegistryConfig{}, fmt.Errorf("resolve repo_path: %w", err)
 		}
-		registry.Obsidian.Path = filepath.Join(repo, registry.Obsidian.Path)
+		if repo == "" {
+			return TaskRegistryConfig{}, errors.New("repo_path is required for repo-local task_registry.obsidian.path")
+		}
+		resolved := filepath.Join(repo, registry.Obsidian.Path)
+		if !insideDir(repo, resolved) {
+			return TaskRegistryConfig{}, fmt.Errorf("repo-local task_registry.obsidian.path %q escapes repo_path", registry.Obsidian.Path)
+		}
+		registry.Obsidian.ResolvedPath = resolved
 	}
 	return registry, nil
 }
@@ -761,7 +774,11 @@ func (c *Config) Validate() error {
 		if path == "" {
 			return errors.New("task_registry.obsidian.path is required")
 		}
-		info, err := os.Stat(path)
+		checkPath := strings.TrimSpace(c.TaskRegistry.Obsidian.ResolvedPath)
+		if checkPath == "" {
+			checkPath = path
+		}
+		info, err := os.Stat(checkPath)
 		if err != nil {
 			return fmt.Errorf("task_registry.obsidian.path not readable: %w", err)
 		}
