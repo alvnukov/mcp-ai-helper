@@ -10,6 +10,7 @@ import (
 
 	basemcp "github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	"gopkg.in/yaml.v3"
 
 	"github.com/zol/mcp-ai-helper/internal/config"
 )
@@ -172,6 +173,19 @@ func writeValidatedConfig(path string, yamlText string) (*config.Config, error) 
 	if err != nil {
 		return nil, fmt.Errorf("validate config: %w", err)
 	}
+	if existing, existingErr := loadExistingConfig(path); existingErr == nil && preserveRedactedConfigFields(existing, loaded, yamlText) {
+		rewritten, err := yaml.Marshal(loaded)
+		if err != nil {
+			return nil, fmt.Errorf("preserve redacted config fields: %w", err)
+		}
+		if err := os.WriteFile(tmpPath, rewritten, 0o600); err != nil {
+			return nil, fmt.Errorf("rewrite config with preserved redacted fields: %w", err)
+		}
+		loaded, err = config.Load(tmpPath)
+		if err != nil {
+			return nil, fmt.Errorf("validate preserved config: %w", err)
+		}
+	}
 	if err := os.Rename(tmpPath, path); err != nil {
 		src, readErr := root.ReadFile(tmpBase)
 		if readErr != nil {
@@ -183,4 +197,84 @@ func writeValidatedConfig(path string, yamlText string) (*config.Config, error) 
 	}
 	loaded.SourcePath = path
 	return loaded, nil
+}
+
+func loadExistingConfig(path string) (*config.Config, error) {
+	if _, err := os.Stat(path); err != nil {
+		return nil, err
+	}
+	return config.Load(path)
+}
+
+func preserveRedactedConfigFields(existing *config.Config, replacement *config.Config, yamlText string) bool {
+	changed := false
+	if !yamlHasTopLevelKey(yamlText, "secrets") && len(existing.Secrets) > 0 {
+		replacement.Secrets = existing.Secrets
+		changed = true
+	}
+	for id, oldProvider := range existing.Providers {
+		newProvider, ok := replacement.Providers[id]
+		if !ok || oldProvider.APIKey == "" || newProvider.APIKey != "" {
+			continue
+		}
+		newProvider.APIKey = oldProvider.APIKey
+		replacement.Providers[id] = newProvider
+		changed = true
+	}
+	if preserveJiraRedactedFields(existing.Integrations.Jira, replacement.Integrations.Jira) {
+		changed = true
+	}
+	if preserveConfluenceRedactedFields(existing.Integrations.Confluence, replacement.Integrations.Confluence) {
+		changed = true
+	}
+	return changed
+}
+
+func preserveJiraRedactedFields(existing *config.JiraConfig, replacement *config.JiraConfig) bool {
+	if existing == nil || replacement == nil {
+		return false
+	}
+	changed := false
+	if existing.APIKey != "" && replacement.APIKey == "" {
+		replacement.APIKey = existing.APIKey
+		changed = true
+	}
+	if existing.APIKeyEnv != "" && replacement.APIKeyEnv == "" {
+		replacement.APIKeyEnv = existing.APIKeyEnv
+		changed = true
+	}
+	return changed
+}
+
+func preserveConfluenceRedactedFields(existing *config.ConfluenceConfig, replacement *config.ConfluenceConfig) bool {
+	if existing == nil || replacement == nil {
+		return false
+	}
+	changed := false
+	if existing.APIKey != "" && replacement.APIKey == "" {
+		replacement.APIKey = existing.APIKey
+		changed = true
+	}
+	if existing.APIKeyEnv != "" && replacement.APIKeyEnv == "" {
+		replacement.APIKeyEnv = existing.APIKeyEnv
+		changed = true
+	}
+	return changed
+}
+
+func yamlHasTopLevelKey(yamlText string, key string) bool {
+	var node yaml.Node
+	if err := yaml.Unmarshal([]byte(yamlText), &node); err != nil || len(node.Content) == 0 {
+		return false
+	}
+	mapping := node.Content[0]
+	if mapping.Kind != yaml.MappingNode {
+		return false
+	}
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		if mapping.Content[i].Value == key {
+			return true
+		}
+	}
+	return false
 }
