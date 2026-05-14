@@ -15,7 +15,10 @@ import (
 	"github.com/zol/mcp-ai-helper/internal/tasks"
 )
 
-const leanTaskRegistryExporter = "task_registry_export"
+const (
+	leanTaskRegistryExporter       = "task_registry_export"
+	leanTaskRegistryTimeoutSeconds = 300
+)
 
 var ErrLeanTaskExporterMissing = errors.New("Lean task registry exporter is not configured")
 
@@ -185,7 +188,7 @@ func leanTaskListMode(args []string) (bool, error) {
 }
 
 func callLeanTaskRead(ctx context.Context, repoPath string, method string, operation string, params any) (leanRegistryEnvelope, error) {
-	result, err := lake.CallServerRPC(ctx, repoPath, lake.RPCRequest{SourceFile: "MCPAIHelperProject/TaskRegistryExport.lean", Method: method, Params: params, TimeoutSeconds: 20})
+	result, err := lake.CallServerRPC(ctx, repoPath, lake.RPCRequest{SourceFile: "MCPAIHelperProject/TaskRegistryExport.lean", Method: method, Params: params, TimeoutSeconds: leanTaskRegistryTimeoutSeconds})
 	if err != nil {
 		return leanRegistryEnvelope{}, err
 	}

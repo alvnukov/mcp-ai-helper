@@ -149,11 +149,15 @@ func TestObsidianIntegrationServer(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ListCurrent: %v", err)
 		}
-		if len(active) != 1 {
-			t.Fatalf("expected 1 active task, got %d", len(active))
+		if len(active) != 2 {
+			t.Fatalf("expected 2 active tasks including blocked, got %d", len(active))
 		}
-		if active[0].ID != "integ-child" {
-			t.Fatalf("active task id = %q, want integ-child", active[0].ID)
+		seen := map[string]bool{}
+		for _, task := range active {
+			seen[task.ID] = true
+		}
+		if !seen["integ-child"] || !seen["integ-epic"] {
+			t.Fatalf("active task ids = %#v, want integ-child and blocked integ-epic", seen)
 		}
 	})
 

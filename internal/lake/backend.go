@@ -203,7 +203,7 @@ func (m *serverManager) CallRPC(ctx context.Context, repoPath string, req RPCReq
 	}
 	timeout := req.TimeoutSeconds
 	if timeout <= 0 {
-		timeout = 20
+		timeout = 300
 	}
 	runCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	defer cancel()

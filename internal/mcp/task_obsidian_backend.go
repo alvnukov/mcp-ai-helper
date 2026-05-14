@@ -98,34 +98,35 @@ func (b *obsidianTaskBackend) notePath(id string) string {
 	return filepath.Join(b.dir, id+".md")
 }
 
-func (b *obsidianTaskBackend) ListCurrent(_ context.Context, _ string) ([]tasks.Task, string, error) {
-	all, err := b.readAll()
+func (b *obsidianTaskBackend) ListCurrent(ctx context.Context, repoPath string) ([]tasks.Task, string, error) {
+	all, _, err := b.ListAll(ctx, repoPath)
 	if err != nil {
 		return nil, "obsidian_registry", err
 	}
 	active := make([]tasks.Task, 0, len(all))
 	for _, t := range all {
-		if t.Status == "todo" || t.Status == "in_progress" {
+		switch t.Status {
+		case "todo", "in_progress", "blocked":
 			active = append(active, t)
 		}
 	}
 	return active, "obsidian_registry", nil
 }
 
-func (b *obsidianTaskBackend) ListAll(_ context.Context, _ string) ([]tasks.Task, string, error) {
+func (b *obsidianTaskBackend) ListAll(_ context.Context, repoPath string) ([]tasks.Task, string, error) {
 	all, err := b.readAll()
 	if err != nil {
 		return nil, "obsidian_registry", err
 	}
-	return all, "obsidian_registry", nil
+	return withObsidianWorktreeContext(repoPath, all), "obsidian_registry", nil
 }
 
-func (b *obsidianTaskBackend) Get(_ context.Context, _ string, id string) (tasks.Task, string, error) {
+func (b *obsidianTaskBackend) Get(_ context.Context, repoPath string, id string) (tasks.Task, string, error) {
 	t, err := b.readOne(id)
 	if err != nil {
 		return tasks.Task{}, "obsidian_registry", err
 	}
-	return t, "obsidian_registry", nil
+	return tasks.WithWorktreeContext(repoPath, t), "obsidian_registry", nil
 }
 
 func (b *obsidianTaskBackend) Upsert(_ context.Context, req tasks.AddRequest) (taskMutationResult, error) {
@@ -138,9 +139,21 @@ func (b *obsidianTaskBackend) Upsert(_ context.Context, req tasks.AddRequest) (t
 	}
 	now := time.Now().UTC()
 	existing, exists := b.tryRead(id)
-	createdAt := now.Format(time.RFC3339Nano)
-	if exists && !existing.CreatedAt.IsZero() {
-		createdAt = existing.CreatedAt.Format(time.RFC3339Nano)
+	createdAt := now
+	updatedAt := now
+	if req.PreserveTimestamps {
+		createdAt = req.CreatedAt.UTC()
+		updatedAt = req.UpdatedAt.UTC()
+	} else {
+		if exists && !existing.CreatedAt.IsZero() {
+			createdAt = existing.CreatedAt.UTC()
+		}
+		if !req.CreatedAt.IsZero() {
+			createdAt = req.CreatedAt.UTC()
+		}
+		if !req.UpdatedAt.IsZero() {
+			updatedAt = req.UpdatedAt.UTC()
+		}
 	}
 	note := taskNote{
 		ID: id, Title: req.Title, Status: req.Status,
@@ -150,13 +163,13 @@ func (b *obsidianTaskBackend) Upsert(_ context.Context, req tasks.AddRequest) (t
 		WorktreePath:       req.WorktreePath,
 		AcceptanceCriteria: yamlStringList(req.AcceptanceCriteria),
 		VerificationPlan:   yamlStringList(req.VerificationPlan),
-		CreatedAt:          createdAt, UpdatedAt: now.Format(time.RFC3339Nano),
+		CreatedAt:          createdAt.Format(time.RFC3339Nano), UpdatedAt: updatedAt.Format(time.RFC3339Nano),
 		Body: req.Body,
 	}
 	if err := b.writeNote(note); err != nil {
 		return taskMutationResult{}, err
 	}
-	task := noteToTask(note)
+	task := tasks.WithWorktreeContext(req.RepoPath, noteToTask(note))
 	return taskMutationResult{Task: task, Source: "obsidian_registry", Validation: "frontmatter parsed + file written", ChangedFiles: []string{id + ".md"}}, nil
 }
 
@@ -173,13 +186,16 @@ func (b *obsidianTaskBackend) SetStatus(_ context.Context, req tasks.StatusReque
 	if err := b.writeNote(note); err != nil {
 		return taskMutationResult{}, err
 	}
-	task := noteToTask(note)
+	task := tasks.WithWorktreeContext(req.RepoPath, noteToTask(note))
 	return taskMutationResult{Task: task, Source: "obsidian_registry", Validation: "frontmatter parsed + file written", ChangedFiles: []string{req.ID + ".md"}}, nil
 }
 
 func (b *obsidianTaskBackend) BatchUpsert(_ context.Context, req tasks.BatchUpsertRequest) (taskBatchMutationResult, error) {
 	upserted := make([]tasks.Task, 0, len(req.Tasks))
 	for _, item := range req.Tasks {
+		if item.RepoPath == "" {
+			item.RepoPath = req.RepoPath
+		}
 		result, err := b.Upsert(context.Background(), item)
 		if err != nil {
 			return taskBatchMutationResult{}, fmt.Errorf("batch upsert %s: %w", item.ID, err)
@@ -198,7 +214,7 @@ func (b *obsidianTaskBackend) BatchUpsert(_ context.Context, req tasks.BatchUpse
 		}
 		activeStatuses := req.ActiveStatuses
 		if len(activeStatuses) == 0 {
-			activeStatuses = []string{"todo", "in_progress"}
+			activeStatuses = []string{"todo", "in_progress", "blocked"}
 		}
 		all, err := b.readAll()
 		if err != nil {
@@ -219,7 +235,7 @@ func (b *obsidianTaskBackend) BatchUpsert(_ context.Context, req tasks.BatchUpse
 					if err := b.writeNote(note); err != nil {
 						continue
 					}
-					closed = append(closed, noteToTask(note))
+					closed = append(closed, tasks.WithWorktreeContext(req.RepoPath, noteToTask(note)))
 					break
 				}
 			}
@@ -240,8 +256,16 @@ func (b *obsidianTaskBackend) Delete(_ context.Context, req tasks.DeleteRequest)
 	if err := os.Remove(path); err != nil {
 		return taskMutationResult{}, fmt.Errorf("delete task %s: %w", req.ID, err)
 	}
-	task := noteToTask(note)
+	task := tasks.WithWorktreeContext(req.RepoPath, noteToTask(note))
 	return taskMutationResult{Task: task, Source: "obsidian_registry", Validation: "file deleted", ChangedFiles: []string{req.ID + ".md"}}, nil
+}
+
+func withObsidianWorktreeContext(repoPath string, items []tasks.Task) []tasks.Task {
+	out := make([]tasks.Task, 0, len(items))
+	for _, item := range items {
+		out = append(out, tasks.WithWorktreeContext(repoPath, item))
+	}
+	return out
 }
 
 func (b *obsidianTaskBackend) readAll() ([]tasks.Task, error) {

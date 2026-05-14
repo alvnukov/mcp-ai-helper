@@ -41,20 +41,23 @@ type Task struct {
 }
 
 type AddRequest struct {
-	RepoPath           string   `json:"repo_path"`
-	ID                 string   `json:"id"`
-	TaskType           string   `json:"task_type"`
-	Branch             string   `json:"branch"`
-	WorktreePath       string   `json:"worktree_path"`
-	ParentID           string   `json:"parent_id,omitempty"`
-	Status             string   `json:"status"`
-	Title              string   `json:"title"`
-	Body               string   `json:"body"`
-	Priority           string   `json:"priority"`
-	ModelLevel         string   `json:"model_level"`
-	Tags               []string `json:"tags"`
-	AcceptanceCriteria []string `json:"acceptance_criteria"`
-	VerificationPlan   []string `json:"verification_plan"`
+	RepoPath           string    `json:"repo_path"`
+	ID                 string    `json:"id"`
+	TaskType           string    `json:"task_type"`
+	Branch             string    `json:"branch"`
+	WorktreePath       string    `json:"worktree_path"`
+	ParentID           string    `json:"parent_id,omitempty"`
+	Status             string    `json:"status"`
+	Title              string    `json:"title"`
+	Body               string    `json:"body"`
+	Priority           string    `json:"priority"`
+	ModelLevel         string    `json:"model_level"`
+	Tags               []string  `json:"tags"`
+	AcceptanceCriteria []string  `json:"acceptance_criteria"`
+	VerificationPlan   []string  `json:"verification_plan"`
+	CreatedAt          time.Time `json:"created_at,omitempty"`
+	UpdatedAt          time.Time `json:"updated_at,omitempty"`
+	PreserveTimestamps bool      `json:"preserve_timestamps,omitempty"`
 }
 
 type ListRequest struct {
