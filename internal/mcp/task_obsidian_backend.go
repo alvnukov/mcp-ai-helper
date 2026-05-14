@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -310,7 +311,13 @@ func parseNote(data []byte, expectedID string) (taskNote, error) {
 	body := rest[endIdx+4:]
 	var note taskNote
 	if err := yaml.Unmarshal([]byte(fm), &note); err != nil {
-		return taskNote{}, fmt.Errorf("frontmatter parse failed in %s.md: %w", expectedID, err)
+		repaired := quotePlainScalarFrontmatter(fm)
+		if repaired == fm {
+			return taskNote{}, fmt.Errorf("frontmatter parse failed in %s.md: %w", expectedID, err)
+		}
+		if retryErr := yaml.Unmarshal([]byte(repaired), &note); retryErr != nil {
+			return taskNote{}, fmt.Errorf("frontmatter parse failed in %s.md: %w", expectedID, err)
+		}
 	}
 	if strings.TrimSpace(note.ID) == "" {
 		return taskNote{}, fmt.Errorf("%w: 'id' is required in %s.md", errMissingRequired, expectedID)
@@ -326,6 +333,40 @@ func parseNote(data []byte, expectedID string) (taskNote, error) {
 	}
 	note.Body, note.AccCriteriaSection, note.VerPlanSection = splitBody(body)
 	return note, nil
+}
+
+func quotePlainScalarFrontmatter(fm string) string {
+	lines := strings.Split(fm, "\n")
+	changed := false
+	for i, line := range lines {
+		idx := strings.Index(line, ": ")
+		if idx <= 0 {
+			continue
+		}
+		key := line[:idx]
+		if !plainScalarFrontmatterKey(key) {
+			continue
+		}
+		value := line[idx+2:]
+		if !strings.Contains(value, ": ") || strings.HasPrefix(value, "\"") || strings.HasPrefix(value, "'") {
+			continue
+		}
+		lines[i] = key + ": " + strconv.Quote(value)
+		changed = true
+	}
+	if !changed {
+		return fm
+	}
+	return strings.Join(lines, "\n")
+}
+
+func plainScalarFrontmatterKey(key string) bool {
+	switch key {
+	case "id", "title", "status", "priority", "model_level", "task_type", "parent_id", "branch", "worktree_path":
+		return true
+	default:
+		return false
+	}
 }
 
 func splitBody(body string) (string, []string, []string) {

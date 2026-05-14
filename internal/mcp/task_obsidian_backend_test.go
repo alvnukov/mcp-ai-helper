@@ -179,6 +179,27 @@ id: test
 	}
 }
 
+func TestObsidianParsesPlainScalarTitleWithColon(t *testing.T) {
+	input := `---
+id: task-001
+title: task_current fails after successful helper rebuild: unknown executable task_registry_export
+status: done
+---
+
+## Body
+
+Human-authored task note.
+`
+	note, err := parseNote([]byte(input), "task-001")
+	if err != nil {
+		t.Fatalf("parseNote: %v", err)
+	}
+	want := "task_current fails after successful helper rebuild: unknown executable task_registry_export"
+	if note.Title != want {
+		t.Fatalf("title = %q", note.Title)
+	}
+}
+
 func TestObsidianParsesFrontmatterListItemsWithColon(t *testing.T) {
 	input := `---
 id: colon-list
