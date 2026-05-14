@@ -237,6 +237,9 @@ func (r *Runner) RunFilteredInRepo(ctx context.Context, cmd string, repoPath str
 	if strings.TrimSpace(repoPath) == "" {
 		return Result{}, errors.New("repo_path is required")
 	}
+	if err := rejectProtectedConfigCommand(cmd, r.policy.ProtectedConfigPath); err != nil {
+		return Result{}, err
+	}
 	if err := rejectProtectedLeanCommand(cmd); err != nil {
 		return Result{}, err
 	}
@@ -264,14 +267,42 @@ func (r *Runner) FilterHistory(commandID string, filter Filter) (Result, error) 
 
 const protectedLeanCommandMessage = "Lean source files are task-owned; use task-facing Lean/Lake tools instead of generic command/pipeline tools"
 
+const protectedConfigCommandMessage = "current helper config cannot be edited from pipeline/command tools; use config_read/config_replace/config_reload config tools instead"
+
+func rejectProtectedConfigCommand(cmd string, protectedPath string) error {
+	normalized := normalizeCommandPath(cmd)
+	for _, marker := range protectedConfigMarkers(protectedPath) {
+		if marker != "" && strings.Contains(normalized, marker) {
+			return fmt.Errorf("%s: command references %q", protectedConfigCommandMessage, marker)
+		}
+	}
+	return nil
+}
+
+func protectedConfigMarkers(protectedPath string) []string {
+	if strings.TrimSpace(protectedPath) == "" {
+		protectedPath = config.DefaultConfigPath()
+	}
+	return []string{
+		normalizeCommandPath(protectedPath),
+		normalizeCommandPath(config.DefaultConfigPath()),
+		"~/.mcp-ai-helper/config.yaml",
+		".mcp-ai-helper/config.yaml",
+	}
+}
+
 func rejectProtectedLeanCommand(cmd string) error {
-	normalized := strings.ToLower(strings.ReplaceAll(cmd, "\\", "/"))
+	normalized := normalizeCommandPath(cmd)
 	for _, marker := range []string{".lean", "mcpaihelperproject", "tasks/"} {
 		if strings.Contains(normalized, marker) {
 			return fmt.Errorf("%s: command references %q", protectedLeanCommandMessage, marker)
 		}
 	}
 	return nil
+}
+
+func normalizeCommandPath(value string) string {
+	return strings.ToLower(strings.ReplaceAll(value, "\\", "/"))
 }
 
 // CleanupHistory removes command log records that exceed retention policy limits.
