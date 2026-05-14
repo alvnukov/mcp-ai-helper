@@ -57,6 +57,7 @@ type Config struct {
 	CommandPolicy     CommandPolicy             `yaml:"command_policy" json:"command_policy"`
 	PipelinePolicy    PipelinePolicy            `yaml:"pipeline_policy" json:"pipeline_policy"`
 	Integrations      IntegrationsConfig        `yaml:"integrations" json:"integrations"`
+	TaskRegistry      TaskRegistryConfig        `yaml:"task_registry" json:"task_registry"`
 	Secrets           map[string]SecretConfig   `yaml:"secrets" json:"-"`
 }
 
@@ -258,6 +259,18 @@ type ConfluenceConfig struct {
 	AllowedSpaces []string `yaml:"allowed_spaces" json:"allowed_spaces"`
 	ReadOnly      *bool    `yaml:"read_only" json:"read_only"`
 	Enabled       *bool    `yaml:"enabled" json:"enabled"`
+}
+
+// TaskRegistryConfig controls which task registry backend is used.
+type TaskRegistryConfig struct {
+	Backend  string                 `yaml:"backend" json:"backend"`
+	Obsidian ObsidianRegistryConfig `yaml:"obsidian" json:"obsidian"`
+}
+
+// ObsidianRegistryConfig holds Obsidian-backed registry settings.
+type ObsidianRegistryConfig struct {
+	Path  string `yaml:"path" json:"path"`
+	Vault string `yaml:"vault" json:"vault,omitempty"`
 }
 
 // IsEnabled returns true when the integration is enabled (default true when non-nil).
