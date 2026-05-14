@@ -197,6 +197,14 @@ func TestDefaultConfigPathUsesHomeHelperDir(t *testing.T) {
 	}
 }
 
+func TestTaskRegistryBackendAllowsRelativeObsidianPathWithoutRepo(t *testing.T) {
+	cfg := &Config{TaskRegistry: TaskRegistryConfig{Backend: "obsidian", Obsidian: ObsidianRegistryConfig{Path: "obsidian-tasks"}}}
+	applyDefaults(cfg)
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+}
+
 func TestLoadRepoConfigAndMergePolicy(t *testing.T) {
 	repo := t.TempDir()
 	if err := os.WriteFile(filepath.Join(repo, repoConfigFile), []byte(`permissions:
@@ -228,6 +236,30 @@ command_policy:
 	}
 	if base.CommandPolicy.AllowedCWDs[0] != "." {
 		t.Fatalf("base config mutated: %#v", base.CommandPolicy.AllowedCWDs)
+	}
+}
+
+func TestMergeRepoConfigResolvesGlobalRelativeTaskRegistry(t *testing.T) {
+	repo := t.TempDir()
+	notesDir := filepath.Join(repo, "obsidian-tasks")
+	if err := os.Mkdir(notesDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	base := &Config{
+		Providers:    map[string]ProviderConfig{},
+		Models:       map[string]ModelConfig{},
+		Routing:      map[string]string{},
+		TaskRegistry: TaskRegistryConfig{Backend: "obsidian", Obsidian: ObsidianRegistryConfig{Path: "obsidian-tasks"}},
+	}
+	merged, err := MergeRepoConfig(base, nil, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if merged.TaskRegistry.Obsidian.Path != "obsidian-tasks" {
+		t.Fatalf("obsidian path = %q, want relative global path preserved", merged.TaskRegistry.Obsidian.Path)
+	}
+	if merged.TaskRegistry.Obsidian.ResolvedPath != notesDir {
+		t.Fatalf("resolved obsidian path = %q, want %q", merged.TaskRegistry.Obsidian.ResolvedPath, notesDir)
 	}
 }
 

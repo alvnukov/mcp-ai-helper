@@ -84,6 +84,32 @@ Child body with parent link.
 	return dir
 }
 
+func TestGlobalRelativeTaskRegistryBackendSelection(t *testing.T) {
+	repo := t.TempDir()
+	notesDir := filepath.Join(repo, "obsidian-tasks")
+	if err := os.Mkdir(notesDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{
+		Providers:    map[string]config.ProviderConfig{},
+		Models:       map[string]config.ModelConfig{},
+		Routing:      map[string]string{},
+		TaskRegistry: config.TaskRegistryConfig{Backend: "obsidian", Obsidian: config.ObsidianRegistryConfig{Path: "obsidian-tasks"}},
+	}
+	deps := &Server{cfg: cfg, taskBackend: newLakeTaskBackend(nil, tasks.NewStore(nil))}
+
+	selected, err := deps.loadTaskBackendForRepo(repo)
+	if err != nil {
+		t.Fatalf("loadTaskBackendForRepo: %v", err)
+	}
+	if _, err := selected.Upsert(context.Background(), tasks.AddRequest{RepoPath: repo, ID: "global-relative", Status: "todo", Title: "Global Relative"}); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(notesDir, "global-relative.md")); err != nil {
+		t.Fatalf("global relative obsidian task was not written: %v", err)
+	}
+}
+
 func TestRepoLocalTaskRegistryBackendSelection(t *testing.T) {
 	repo := t.TempDir()
 	notesDir := filepath.Join(repo, "notes")
