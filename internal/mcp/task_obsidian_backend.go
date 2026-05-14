@@ -282,42 +282,52 @@ func parseNote(data []byte, expectedID string) (taskNote, error) {
 
 func splitBody(body string) (string, []string, []string) {
 	body = strings.TrimLeft(body, "\n")
+	if body == "" {
+		return "", nil, nil
+	}
+	if !strings.HasPrefix(body, "## ") {
+		idx := strings.Index(body, "\n## ")
+		if idx < 0 {
+			return strings.TrimSpace(body), nil, nil
+		}
+		pre := strings.TrimSpace(body[:idx])
+		body = body[idx:]
+		if pre != "" {
+			return pre, nil, nil
+		}
+	}
 	var mainBody, accSection, verSection string
-	remaining := body
-	for {
-		nextH2 := strings.Index(remaining, "\n## ")
-		if nextH2 < 0 {
-			mainBody = remaining
+	for body != "" {
+		if !strings.HasPrefix(body, "## ") {
 			break
 		}
-		heading := strings.TrimSpace(remaining[nextH2+1:])
-		nextSection := strings.Index(remaining[nextH2+1:], "\n## ")
-		var sectionContent string
-		if nextSection >= 0 {
-			sectionContent = remaining[nextH2+1 : nextH2+1+nextSection]
-			remaining = remaining[nextH2+1+nextSection:]
+		nl := strings.IndexByte(body, '\n')
+		heading := strings.TrimSpace(body[3:])
+		if nl < 0 {
+			body = ""
 		} else {
-			sectionContent = remaining[nextH2+1:]
-			remaining = ""
+			body = body[nl+1:]
 		}
-		if strings.HasPrefix(strings.TrimSpace(heading), "## Body") {
-			accSection = ""
-		} else if strings.HasPrefix(strings.TrimSpace(heading), "## Acceptance Criteria") {
-			accSection = strings.TrimPrefix(sectionContent, heading)
-		} else if strings.HasPrefix(strings.TrimSpace(heading), "## Verification Plan") {
-			verSection = strings.TrimPrefix(sectionContent, heading)
+		nextIdx := strings.Index(body, "\n## ")
+		var content string
+		if nextIdx < 0 {
+			content = body
+			body = ""
+		} else {
+			content = body[:nextIdx]
+			body = body[nextIdx+1:]
 		}
-		if remaining == "" {
-			break
+		content = strings.TrimSpace(content)
+		switch heading {
+		case "Body":
+			mainBody = content
+		case "Acceptance Criteria":
+			accSection = content
+		case "Verification Plan":
+			verSection = content
 		}
 	}
-	if mainBody == "" {
-		mainBody = remaining
-	}
-	if strings.TrimSpace(mainBody) == "" {
-		mainBody = ""
-	}
-	return strings.TrimSpace(mainBody), parseBulletList(accSection), parseBulletList(verSection)
+	return mainBody, parseBulletList(accSection), parseBulletList(verSection)
 }
 
 func parseBulletList(text string) []string {
