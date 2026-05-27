@@ -55,6 +55,29 @@ func TestFetchURLAliasRegistered(t *testing.T) {
 	}
 }
 
+func TestWebToolDescriptionsExposeEfficientWorkflow(t *testing.T) {
+	srv := New(&config.Config{AssistantGuidance: config.DefaultAssistantGuidance()})
+	checks := map[string][]string{
+		"web_search":       {"Step 1 of web research", "Search hits are not evidence", "Next: choose relevant URLs and call web_fetch", "unsupported providers fail closed"},
+		"web_fetch":        {"Step 2 of web research", "Returns doc_id", "never returns page body", "Next: call fetched_doc_find"},
+		"fetch_url":        {"Step 2 of web research", "Returns doc_id", "never returns page body", "Next: call fetched_doc_find"},
+		"fetched_doc_find": {"Step 3 of web research", "Use after web_fetch", "without loading the full page", "Next: call fetched_doc_read"},
+		"fetched_doc_read": {"Step 4 of web research", "after fetched_doc_find gives offsets", "do not request full pages", "cite doc_id/source/offset/snippet"},
+	}
+	for name, wants := range checks {
+		tool, ok := srv.ListTools()[name]
+		if !ok {
+			t.Fatalf("%s tool is not registered", name)
+		}
+		desc := tool.Tool.Description
+		for _, want := range wants {
+			if !strings.Contains(desc, want) {
+				t.Fatalf("%s description missing %q: %s", name, want, desc)
+			}
+		}
+	}
+}
+
 func TestFetchedDocReadAndFindToolsReturnBoundedFragments(t *testing.T) {
 	srvHTTP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")

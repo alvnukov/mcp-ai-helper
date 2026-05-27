@@ -23,28 +23,38 @@ const (
 
 const defaultAssistantGuidance = `mcp-ai-helper operating guidance:
 
-1. Prefer one long run_workflow or run_pipeline call when intermediate results are not needed by the calling model.
-2. Put command execution, output filters, deterministic conditions, guarded edits, checks, and commit into that workflow instead of making many low-level calls.
-3. Use low-level tools only for bootstrapping, schema discovery, or when the returned result must change the caller's next decision.
-4. Always pass repo_path. Treat cwd and file paths as repo-relative unless a tool explicitly says otherwise.
-5. Never use broad staging or destructive git operations. Commit only explicit owned files after relevant checks pass.
-6. Keep output compact and evidence-linked. Re-filter retained command history instead of rerunning commands or returning raw logs.
-7. MCP-ONLY: for repository work use only mcp-ai-helper MCP tools. Do not use direct filesystem, shell, git, grep, editor, or generic web tools for repo files when an mcp-ai-helper tool can do the operation.
-8. Web workflow: use web_search for compact hits only; then web_fetch selected URLs to create doc_id artifacts; then use fetched_doc_find or fetched_doc_read to search/read bounded fragments. Do not paste full pages into model context.
-9. For any repo task, first gather complete minimal sufficient context: use task_current for discovery, task_graph for overview/dependencies, task_context for selected-task execution context, task_packet for readiness/owned_files/gates when executing, then relevant read_file/snapshot_file calls and narrow run_pipeline/collect_command_output probes; do not build an execution pipeline before understanding the contract, architecture, integration points, test patterns, and existing changes.
-10. After context gathering, stop and state the decision: selected tasks, why they fit the current model, exact edits, owned_files, forbidden files, acceptance criteria to close, the minimal gate proving closure, and the end-to-end closeout path.
-11. Only after that, build one self-contained run_pipeline or run_workflow for the remaining implementation path: minimal edits, formatting, relevant checks, final task status transition, and explicit owned-files commit only if everything succeeds.
-12. For repo tasks with file changes, finalization must be atomic inside one run_workflow: after successful acceptance gates, perform the task-facing transition to the final status, then run git_commit_owned in the same workflow with owned_files covering both changed work files and the canonical task registry mutation. Do not commit code first and then record task status in a separate step or separate commit.
-13. Never set a task to done until its acceptance criteria, relevant gate, and required owned-files commit are actually closed; task status transition must also be closed in the same workflow. For a repo task with file changes, no such unified commit means the task is not done; no commit means the task is not done. A partial green test, timeout, evidence-only analysis success, skipped check, failed commit, post-hoc status commit, or unverified MCP/tool-facing path is not enough.
-14. If a workflow fails or times out, do not close the task. First inspect actual state, separate confirmed facts from assumptions, and choose the next minimal step with a new hypothesis.
-15. For migrated Lean/Lake repos, task_current, task_list, task_get, and task mutations require the Lean registry/exporter; legacy tasks/*.lean JSON-comment files are not fallback storage.
-16. Do not implement production task state by parsing or regex-mutating Lean registry source in Go; use Lean-owned lake serve/exporter/task tools and fail closed when that surface cannot express the mutation.
-17. For project memory, read task_current or task_list before work, then synchronize the backlog with one task_batch_upsert call whenever you already know the complete authoritative task set; use close_missing only intentionally.
-18. Never edit tasks by modifying task registry/source/projection files directly. Do not change MCPAIHelperProject/ActiveTasks.lean, tasks/*.lean, task JSON comments, or legacy task files to update task title/body/status/priority/tags/criteria/verification; use task_upsert, task_batch_upsert, task_set_status, task_delete, or another explicit task-facing helper tool only.
-19. If task tools cannot express the needed task mutation, stop with a surface mismatch/blocker; do not bypass the helper with file edits, scripts, guarded_replace, shell, or direct git operations.
-20. Use task statuses consistently: todo for planned work, in_progress for the current owner, blocked when external input is needed, and done for completed or intentionally closed work.
-21. Prefer task_update or task_set_status for one targeted change; avoid long sequences of task_add calls when batch_upsert can express the desired state.
-22. If a workflow cannot express the needed operation, improve the workflow DSL instead of normalizing repeated manual tool calls.
+## MCP-ONLY
+
+1. For repo work, use only mcp-ai-helper MCP tools. Do not use direct filesystem, shell, git, grep, editor, browser, or generic web/search tools when an MCP helper tool can do the job.
+2. If a required helper tool is missing, denied, or underspecified, stop with surface_mismatch/blocker. Do not bypass MCP with raw files, scripts, direct git, or generic tools.
+3. Keep context small: ask for ids, hashes, snippets, offsets, and focused command evidence. Never load full files, full logs, or full web pages unless the specific tool returns a bounded fragment.
+
+## Repo Task Protocol
+
+1. Discover: call task_current first. Pick one executable task whose model_level fits the current model; do not execute blocked parent/epic tasks.
+2. Focus: call task_context for the chosen task when available. Use task_graph only for dependency/parent context. If unavailable, say surface_mismatch/blocker or proceed only with confirmed task_current facts.
+3. Inspect: use read_file/snapshot_file for exact files/ranges. Use collect_command_output or run_workflow command steps only for narrow commands with filters.
+4. Decide before editing: state selected task, exact owned_files, forbidden files, acceptance criteria, minimal gate, and finalization path.
+5. Execute: prefer one self-contained run_workflow: minimal edits -> formatting -> focused checks -> task status transition -> git_commit_owned. Never split code commit and task status into a post-hoc status commit.
+6. Close only when acceptance criteria, relevant gate, task transition, and owned-files commit all succeeded. If there is no such unified commit means the task is not done.
+7. On failure: inspect actual state once, form a new hypothesis, and run the next minimal check. Do not repeat the same failed command without new information.
+
+## Web Research Protocol
+
+1. Search -> Fetch -> Find -> Read. Start with web_search for compact hits only. A search hit is not evidence.
+2. Choose a few relevant URLs from web_search, then call web_fetch for each selected URL. web_fetch returns doc_id, URL metadata, hashes, cache status, completeness, and diagnostics; it does not return page content.
+3. Use fetched_doc_find on doc_id to search the complete normalized fetched document and get bounded snippets with offsets.
+4. Use fetched_doc_read only after fetched_doc_find or a known offset, and request a bounded fragment around the evidence. Do not request full pages.
+5. Cite evidence by doc_id, URL/source, offsets, and snippet. If fetched evidence is missing or blocked, say insufficient_evidence instead of relying on search snippets.
+6. For Google, use web_search with provider=google_cse and configured web_policy.google_cse_id plus google_api_key_env/google_api_key. Do not scrape Google HTML results.
+
+## Hard Rules
+
+1. Never use broad staging or destructive git operations. Commit only explicit owned files after relevant checks pass.
+2. Never set a task to done until acceptance criteria, focused gate, task status transition, and owned-files commit have all succeeded in the same workflow/closeout.
+3. Never edit task registry/source/projection files directly. Do not change MCPAIHelperProject/ActiveTasks.lean, tasks/*.lean, task JSON comments, or legacy task files to update task title/body/status/priority/tags/criteria/verification; use task_upsert, task_batch_upsert, task_set_status, task_delete, or another explicit task-facing helper tool only.
+4. For migrated Lean/Lake repos, task_current, task_list, task_get, and task mutations require the configured registry/exporter; legacy tasks/*.lean JSON-comment files are not fallback storage.
+5. If task tools cannot express the needed mutation, stop with a surface mismatch/blocker; do not work around with file edits, scripts, guarded_replace, shell, or direct git operations.
 
 This guidance is configurable in the server config through assistant_guidance; generated default config and configs/config.example.yaml show the same field.`
 

@@ -132,19 +132,19 @@ func TestLoadCreatesDefaultConfigInHomeDir(t *testing.T) {
 	if cfg.CommandPolicy.DefaultTimeoutSeconds != 300 {
 		t.Fatalf("default command timeout = %d, want 300", cfg.CommandPolicy.DefaultTimeoutSeconds)
 	}
-	if !strings.Contains(cfg.AssistantGuidance, "one long run_workflow") {
+	if !strings.Contains(cfg.AssistantGuidance, "Repo Task Protocol") || !strings.Contains(cfg.AssistantGuidance, "one self-contained run_workflow") {
 		t.Fatal("loaded config guidance is missing workflow policy")
 	}
-	if !strings.Contains(cfg.AssistantGuidance, "no such unified commit means the task is not done") {
+	if !strings.Contains(cfg.AssistantGuidance, "Never set a task to done") {
 		t.Fatal("loaded config guidance is missing atomic commit closeout policy")
 	}
-	if !strings.Contains(cfg.AssistantGuidance, "post-hoc status commit") {
-		t.Fatal("loaded config guidance is missing post-hoc status commit prohibition")
+	if !strings.Contains(cfg.AssistantGuidance, "post-hoc status commit") || !strings.Contains(cfg.AssistantGuidance, "no such unified commit means the task is not done") {
+		t.Fatal("loaded config guidance is missing unified closeout prohibition")
 	}
-	if !strings.Contains(cfg.AssistantGuidance, "MCP-ONLY") || !strings.Contains(cfg.AssistantGuidance, "Do not use direct filesystem, shell, git") {
-		t.Fatal("loaded config guidance is missing MCP-only repo tool policy")
+	if !strings.Contains(cfg.AssistantGuidance, "MCP-ONLY") || !strings.Contains(cfg.AssistantGuidance, "Do not use direct filesystem, shell, git") || !strings.Contains(cfg.AssistantGuidance, "surface_mismatch/blocker") {
+		t.Fatal("loaded config guidance is missing MCP-only fail-closed repo policy")
 	}
-	if !strings.Contains(cfg.AssistantGuidance, "web_search for compact hits") || !strings.Contains(cfg.AssistantGuidance, "fetched_doc_find or fetched_doc_read") {
+	if !strings.Contains(cfg.AssistantGuidance, "Search -> Fetch -> Find -> Read") || !strings.Contains(cfg.AssistantGuidance, "web_search for compact hits") || !strings.Contains(cfg.AssistantGuidance, "A search hit is not evidence") || !strings.Contains(cfg.AssistantGuidance, "fetched_doc_find") || !strings.Contains(cfg.AssistantGuidance, "fetched_doc_read") {
 		t.Fatal("loaded config guidance is missing bounded web workflow")
 	}
 }
