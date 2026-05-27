@@ -19,6 +19,102 @@ go run ./cmd/mcp-ai-helper
 
 On first run the server creates `~/.mcp-ai-helper/config.yaml` with safe local-command defaults, assistant guidance, retention settings, disabled production issues, and commented provider/model placeholders. For real model calls, add providers/models there or run with `--config ./configs/config.example.yaml`.
 
+## MCP client setup
+
+`mcp-ai-helper` is a stdio MCP server. Configure your client to start the helper command directly; do not run it as a long-lived HTTP service.
+
+Build the production binary first:
+
+```sh
+go build -o bin/mcp-ai-helper ./cmd/mcp-ai-helper
+```
+
+Use `CONFIG_PATH` below for the helper config file described in the `Run` section.
+
+Production command:
+
+```sh
+/path/to/mcp-ai-helper/bin/mcp-ai-helper --config CONFIG_PATH
+```
+
+For local development of this repository, use the stable wrapper instead:
+
+```sh
+/path/to/mcp-ai-helper/bin/mcp-ai-helper-dev --repo /path/to/mcp-ai-helper --config CONFIG_PATH
+```
+
+After connecting, restart or rediscover MCP tools in the client and call `server_setup_guidance`, then `assistant_guidance`, then `list_models`. If a tool layer is enabled or disabled in config, restart the MCP client because tool visibility is discovered at session startup.
+
+### opencode
+
+Add the server to `opencode.json` or the opencode config file you use for the project:
+
+```json
+{
+  "mcp": {
+    "mcp-ai-helper": {
+      "type": "local",
+      "enabled": true,
+      "command": [
+        "/path/to/mcp-ai-helper/bin/mcp-ai-helper",
+        "--config",
+        "CONFIG_PATH"
+      ]
+    }
+  }
+}
+```
+
+For repo development, replace `command` with:
+
+```json
+[
+  "/path/to/mcp-ai-helper/bin/mcp-ai-helper-dev",
+  "--repo",
+  "/path/to/mcp-ai-helper",
+  "--config",
+  "CONFIG_PATH"
+]
+```
+
+### Codex
+
+Add the server to `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.mcp-ai-helper]
+command = "/path/to/mcp-ai-helper/bin/mcp-ai-helper"
+args = ["--config", "CONFIG_PATH"]
+```
+
+For repo development, use the wrapper command:
+
+```toml
+[mcp_servers.mcp-ai-helper]
+command = "/path/to/mcp-ai-helper/bin/mcp-ai-helper-dev"
+args = ["--repo", "/path/to/mcp-ai-helper", "--config", "CONFIG_PATH"]
+```
+
+### Claude Code
+
+Register the server with the Claude Code MCP command:
+
+```sh
+claude mcp add mcp-ai-helper /path/to/mcp-ai-helper/bin/mcp-ai-helper --config CONFIG_PATH
+```
+
+For repo development, register the wrapper instead:
+
+```sh
+claude mcp add mcp-ai-helper /path/to/mcp-ai-helper/bin/mcp-ai-helper-dev --repo /path/to/mcp-ai-helper --config CONFIG_PATH
+```
+
+If your Claude Code version requires a separator before server args, put `--` before the helper command arguments. Example:
+
+```sh
+claude mcp add mcp-ai-helper /path/to/mcp-ai-helper/bin/mcp-ai-helper -- --config CONFIG_PATH
+```
+
 ## MCP tools
 
 - `config_schema`
