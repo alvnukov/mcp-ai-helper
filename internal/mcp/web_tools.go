@@ -33,6 +33,33 @@ type fetchedDocFindRequest struct {
 	ContextChars int    `json:"context_chars"`
 }
 
+type webSearchRequest struct {
+	RepoPath   string `json:"repo_path"`
+	Query      string `json:"query"`
+	MaxResults int    `json:"max_results"`
+	Provider   string `json:"provider"`
+}
+
+type webSearchHit struct {
+	Title       string `json:"title"`
+	URL         string `json:"url"`
+	DisplayURL  string `json:"display_url,omitempty"`
+	Snippet     string `json:"snippet,omitempty"`
+	Rank        int    `json:"rank"`
+	Provider    string `json:"provider"`
+	FetchedHint string `json:"fetched_hint,omitempty"`
+}
+
+type webSearchResult struct {
+	Status      string                `json:"status"`
+	Query       string                `json:"query"`
+	Provider    string                `json:"provider,omitempty"`
+	Total       int                   `json:"total"`
+	Hits        []webSearchHit        `json:"hits"`
+	Truncated   bool                  `json:"truncated"`
+	Diagnostics []webfetch.Diagnostic `json:"diagnostics"`
+}
+
 func webPolicyForRequest(deps *Server, repoPath string, toolName string) (config.WebPolicy, error) {
 	cfg, _, _, _, _ := deps.loadDeps()
 	if repoPath == "" {
@@ -85,6 +112,24 @@ func registerWebTools(srv *server.MCPServer, deps *Server) {
 	}
 	registerFetchTool("web_fetch")
 	registerFetchTool("fetch_url")
+
+	srv.AddTool(basemcp.NewTool("web_search",
+		basemcp.WithDescription("Return compact web search results without fetching page bodies. Fails closed until an explicit search provider adapter is configured."),
+		basemcp.WithString("query", basemcp.Required()),
+		basemcp.WithString("repo_path", basemcp.Description("Optional repository root used only for repo-local tool deny policy.")),
+		basemcp.WithString("provider", basemcp.Description("Search provider id. No implicit provider is used.")),
+		basemcp.WithNumber("max_results", basemcp.Description("Maximum compact hits requested.")),
+	), func(_ context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+		var args webSearchRequest
+		if err := bind(req, &args); err != nil {
+			return nil, err
+		}
+		if _, err := webPolicyForRequest(deps, args.RepoPath, "web_search"); err != nil {
+			return safeError(deps, err), nil
+		}
+		result := webSearchResult{Status: "blocked", Query: args.Query, Provider: args.Provider, Hits: []webSearchHit{}, Diagnostics: []webfetch.Diagnostic{{Code: "search_provider_not_configured", Message: "web_search requires an explicit search provider adapter; no implicit external search service is used"}}}
+		return structured(result)
+	})
 
 	srv.AddTool(basemcp.NewTool("fetched_doc_read",
 		basemcp.WithDescription("Read a bounded fragment from a fetched web document by doc_id. Returns selected content only with offsets and truncation metadata."),

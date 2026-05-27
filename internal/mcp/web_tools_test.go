@@ -91,3 +91,21 @@ func TestFetchedDocReadAndFindToolsReturnBoundedFragments(t *testing.T) {
 		t.Fatalf("find = %#v", findMap)
 	}
 }
+
+func TestWebSearchFailsClosedWithoutProvider(t *testing.T) {
+	srv := New(&config.Config{AssistantGuidance: config.DefaultAssistantGuidance()})
+	st, ok := srv.ListTools()["web_search"]
+	if !ok {
+		t.Fatal("web_search tool is not registered")
+	}
+	req := basemcp.CallToolRequest{}
+	req.Params.Arguments = map[string]any{"query": "bounded fetch"}
+	res, err := st.Handler(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := resultMap(t, res)
+	if m["status"] != "blocked" || len(m["diagnostics"].([]any)) == 0 {
+		t.Fatalf("result = %#v", m)
+	}
+}

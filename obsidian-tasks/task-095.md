@@ -1,20 +1,20 @@
 ---
 id: task-095
 title: Реализовать compact search result contract после design approval
-status: todo
+status: done
 priority: medium
 model_level: medium
 parent_id: task-068
 tags:
-  - feature
-  - network
-  - search
-  - evidence
-  - implementation
-  - tests
+    - feature
+    - network
+    - search
+    - evidence
+    - implementation
+    - tests
 worktree_path: .worktrees/task-095
-created_at: 2026-05-14T09:15:25.487384Z
-updated_at: 2026-05-14T09:15:25.487384Z
+created_at: "2026-05-14T09:15:25.487384Z"
+updated_at: "2026-05-27T09:44:52.514416Z"
 ---
 
 ## Body
