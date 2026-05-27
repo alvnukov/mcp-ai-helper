@@ -162,6 +162,16 @@ func TestRunWorkflowSchemaIncludesWorkflowFields(t *testing.T) {
 	}
 }
 
+func TestCommandGetToolIsRegistered(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{AssistantGuidance: config.DefaultAssistantGuidance()}
+	srv := New(cfg)
+	if _, ok := srv.ListTools()["command_get"]; !ok {
+		t.Fatal("command_get tool is not registered")
+	}
+}
+
 func TestRunPipelineSchemaIncludesTaskStatusFields(t *testing.T) {
 	t.Parallel()
 

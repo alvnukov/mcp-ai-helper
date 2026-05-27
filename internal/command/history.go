@@ -155,9 +155,10 @@ func (h *History) Put(record Record) error {
 
 // Filter returns a previously executed command record with a new output filter applied.
 func (h *History) Filter(commandID string, filter Filter) (Result, error) {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	record, ok := h.records[commandID]
+	record, ok, err := h.getRecord(commandID)
+	if err != nil {
+		return Result{}, err
+	}
 	if !ok {
 		return Result{}, fmt.Errorf("command history entry %q not found", commandID)
 	}
@@ -184,6 +185,26 @@ func (h *History) Filter(commandID string, filter Filter) (Result, error) {
 		OutputHash:    record.OutputHash,
 		NextCall:      nextCallForStatus(record.Status, commandID),
 	}, nil
+}
+
+func (h *History) getRecord(commandID string) (Record, bool, error) {
+	h.mu.RLock()
+	record, ok := h.records[commandID]
+	h.mu.RUnlock()
+	if ok || h.root == "" {
+		return record, ok, nil
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if record, ok := h.records[commandID]; ok {
+		return record, true, nil
+	}
+	if err := h.loadIndex(); err != nil {
+		return Record{}, false, err
+	}
+	record, ok = h.records[commandID]
+	return record, ok, nil
 }
 
 // Cleanup removes records outside retention policy and rewrites the search indexes.
