@@ -141,6 +141,12 @@ func TestLoadCreatesDefaultConfigInHomeDir(t *testing.T) {
 	if !strings.Contains(cfg.AssistantGuidance, "post-hoc status commit") {
 		t.Fatal("loaded config guidance is missing post-hoc status commit prohibition")
 	}
+	if !strings.Contains(cfg.AssistantGuidance, "MCP-ONLY") || !strings.Contains(cfg.AssistantGuidance, "Do not use direct filesystem, shell, git") {
+		t.Fatal("loaded config guidance is missing MCP-only repo tool policy")
+	}
+	if !strings.Contains(cfg.AssistantGuidance, "web_search for compact hits") || !strings.Contains(cfg.AssistantGuidance, "fetched_doc_find or fetched_doc_read") {
+		t.Fatal("loaded config guidance is missing bounded web workflow")
+	}
 }
 
 func TestLayerEnabledDefaultsAndOverrides(t *testing.T) {
