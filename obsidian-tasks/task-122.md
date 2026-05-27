@@ -21,7 +21,7 @@ verification_plan:
     - Run focused MCP web_search handler tests.
     - Run config tests only if config/schema behavior changes.
 created_at: "2026-05-14T09:15:25.490822Z"
-updated_at: "2026-05-27T10:09:09.7013Z"
+updated_at: "2026-05-27T10:09:09.910121Z"
 ---
 
 ## Body
