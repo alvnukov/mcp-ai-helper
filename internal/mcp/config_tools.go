@@ -115,39 +115,6 @@ func registerConfigTools(srv *server.MCPServer, deps *Server, reload configReloa
 		return structured(map[string]any{"config": loaded, "config_path": loaded.SourcePath, "source": "file"})
 	})
 
-	srv.AddTool(basemcp.NewTool("config_replace",
-		basemcp.WithDescription("Validate and atomically replace the complete YAML config. Reloads the running helper by default, without restarting Codex. Cannot write repo-local .mcp-ai-helper.yaml files."),
-		basemcp.WithString("config_yaml", basemcp.Required(), basemcp.Description("Complete YAML config document.")),
-		basemcp.WithString("path", basemcp.Description("Optional config path. Empty means the active config path.")),
-		basemcp.WithString("repo_path", basemcp.Description("Repository root from the calling LLM. Used to detect repo-local config writes.")),
-		basemcp.WithBoolean("reload", basemcp.Description("Reload runtime after writing. Defaults to true.")),
-	), func(_ context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
-		var args configReplaceRequest
-		if err := bind(req, &args); err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
-		}
-		cfg, _, _, _, _ := deps.loadDeps()
-		path := effectiveConfigPath(args.Path, cfg.SourcePath)
-
-		// Repo-local configs are user-editable only.
-		if config.IsRepoConfigPath(path) {
-			return basemcp.NewToolResultError("repo config (.mcp-ai-helper.yaml) is user-editable only; use config_read with repo_path to inspect it"), nil
-		}
-
-		loaded, err := writeValidatedConfig(path, args.ConfigYAML)
-		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
-		}
-		reloadNow := args.Reload == nil || *args.Reload
-		if reloadNow {
-			loaded, err = reload(path)
-			if err != nil {
-				return basemcp.NewToolResultError(err.Error()), nil
-			}
-		}
-		return structured(map[string]any{"status": "ok", "reloaded": reloadNow, "config_path": path, "config": loaded})
-	})
-
 	srv.AddTool(basemcp.NewTool("config_reload",
 		basemcp.WithDescription("Reload the running helper from config YAML without restarting Codex. Tool visibility still changes only on process restart."),
 		basemcp.WithString("path", basemcp.Description("Optional config path. Empty means the active config path.")),

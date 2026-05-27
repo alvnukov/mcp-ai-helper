@@ -348,10 +348,13 @@ func TestConfigToolsRegistered(t *testing.T) {
 	cfg := &config.Config{AssistantGuidance: config.DefaultAssistantGuidance()}
 	srv := New(cfg)
 	tools := srv.ListTools()
-	for _, name := range []string{"task_registry_init", "config_schema", "config_read", "config_replace", "config_reload", "config_option_set", "config_option_reset", "feature_list", "feature_get", "feature_enable", "feature_disable", "feature_reset"} {
+	for _, name := range []string{"task_registry_init", "config_schema", "config_read", "config_reload", "config_option_set", "config_option_reset", "feature_list", "feature_get", "feature_enable", "feature_disable", "feature_reset"} {
 		if _, ok := tools[name]; !ok {
 			t.Fatalf("%s tool is not registered", name)
 		}
+	}
+	if _, ok := tools["config_replace"]; ok {
+		t.Fatal("config_replace tool must stay hidden; full config replacement is disabled")
 	}
 }
 
