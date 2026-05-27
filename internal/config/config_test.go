@@ -362,19 +362,17 @@ func TestSchemaDocumentsModelDrivenConfig(t *testing.T) {
 func TestGuidanceDocumentsLeanTaskRegistry(t *testing.T) {
 	guidance := DefaultAssistantGuidance()
 	for _, want := range []string{
-		"Lean registry/exporter",
+		"Lean/Lake repos",
 		"not fallback storage",
-		"Do not implement production task state by parsing or regex-mutating Lean registry source in Go",
 	} {
 		if !strings.Contains(guidance, want) {
-			t.Fatalf("guidance does not document Lean task registry mode %q: %q", want, guidance)
+			t.Fatalf("guidance does not document default task registry mode %q: %q", want, guidance)
 		}
 	}
 	setup := SetupGuidance("")
 	for _, want := range []string{
-		"Lean registry/exporter",
-		"not fallback storage",
-		"Do not implement production task state by parsing or regex-mutating Lean registry source in Go",
+		"Lean/Lake task state is canonical",
+		"never parse or regex-mutate registry source as fallback",
 	} {
 		if !strings.Contains(setup["tasks"], want) {
 			t.Fatalf("setup guidance does not document task storage mode %q: %#v", want, setup)
@@ -389,6 +387,28 @@ func TestGuidanceDocumentsLeanTaskRegistry(t *testing.T) {
 		if !strings.Contains(setup["lean_task_registry_repair"], want) {
 			t.Fatalf("setup guidance does not document repair step %q: %#v", want, setup)
 		}
+	}
+}
+
+func TestObsidianBackendGuidanceDoesNotMentionLean(t *testing.T) {
+	cfg := &Config{AssistantGuidance: DefaultAssistantGuidance(), TaskRegistry: TaskRegistryConfig{Backend: "obsidian"}}
+	guidance := GuidanceForConfig(cfg)
+	for _, forbidden := range []string{"Lean", "Lake", "MCPAIHelperProject", ".lean", "tasks/*.lean"} {
+		if strings.Contains(guidance, forbidden) {
+			t.Fatalf("obsidian guidance mentions %q: %q", forbidden, guidance)
+		}
+	}
+	setup := SetupGuidanceForConfig(cfg)
+	for key, value := range setup {
+		combined := key + " " + value
+		for _, forbidden := range []string{"Lean", "Lake", "MCPAIHelperProject", ".lean", "tasks/*.lean"} {
+			if strings.Contains(combined, forbidden) {
+				t.Fatalf("obsidian setup guidance mentions %q in %s=%q", forbidden, key, value)
+			}
+		}
+	}
+	if _, ok := setup["lean_task_registry_repair"]; ok {
+		t.Fatalf("obsidian setup guidance must not include lean repair key: %#v", setup)
 	}
 }
 

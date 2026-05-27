@@ -254,6 +254,37 @@ func TestSearchFilesAllowsRegularLeanSourceFiles(t *testing.T) {
 	}
 }
 
+func TestSearchFilesSkipsTaskRegistryDirectories(t *testing.T) {
+	dir := t.TempDir()
+	for _, path := range []string{
+		filepath.Join("obsidian-tasks", "task-001.md"),
+		filepath.Join("tasks", "task-001.lean"),
+		filepath.Join("MCPAIHelperProject", "ActiveTasks.lean"),
+	} {
+		writePath := filepath.Join(dir, path)
+		if err := os.MkdirAll(filepath.Dir(writePath), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(writePath, []byte("hidden-task-needle\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	visiblePath := filepath.Join(dir, "internal", "visible.go")
+	if err := os.MkdirAll(filepath.Dir(visiblePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(visiblePath, []byte("package internal\n// hidden-task-needle\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := SearchFilesInRepo(dir, "", "hidden-task-needle", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Total != 1 || len(result.Matches) != 1 || result.Matches[0].File != "internal/visible.go" {
+		t.Fatalf("matches = %#v, want only non-task project files", result.Matches)
+	}
+}
+
 func TestRepoFileOpsAllowRegularLeanSourceFiles(t *testing.T) {
 	dir := t.TempDir()
 	leanRel := filepath.Join("src", "Module.lean")

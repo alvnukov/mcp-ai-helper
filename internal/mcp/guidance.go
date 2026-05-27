@@ -11,10 +11,7 @@ import (
 const guidanceURI = "mcp-ai-helper://guidance"
 
 func currentGuidance(cfg *config.Config) string {
-	if cfg == nil || cfg.AssistantGuidance == "" {
-		return config.DefaultAssistantGuidance()
-	}
-	return cfg.AssistantGuidance
+	return config.GuidanceForConfig(cfg)
 }
 
 func registerGuidance(srv *server.MCPServer, deps *Server) {
@@ -31,7 +28,7 @@ func registerGuidance(srv *server.MCPServer, deps *Server) {
 		basemcp.WithDescription("Return recommendations for configuring mcp-ai-helper and its repo-local config file."),
 	), func(_ context.Context, _ basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
 		cfg, _, _, _, _ := deps.loadDeps()
-		return structured(config.SetupGuidance(cfg.SourcePath))
+		return structured(config.SetupGuidanceForConfig(cfg))
 	})
 	srv.AddResource(basemcp.Resource{
 		URI:         guidanceURI,

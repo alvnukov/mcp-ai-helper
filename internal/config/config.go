@@ -602,6 +602,32 @@ func DefaultAssistantGuidance() string {
 	return defaultAssistantGuidance
 }
 
+// GuidanceForConfig returns guidance adjusted to the active task registry backend.
+func GuidanceForConfig(cfg *Config) string {
+	guidance := defaultAssistantGuidance
+	if cfg != nil && strings.TrimSpace(cfg.AssistantGuidance) != "" {
+		guidance = cfg.AssistantGuidance
+	}
+	if cfg != nil && strings.EqualFold(strings.TrimSpace(cfg.TaskRegistry.Backend), "obsidian") {
+		return stripLeanGuidanceLines(guidance)
+	}
+	return guidance
+}
+
+var leanGuidancePattern = regexp.MustCompile(`(?i)\b(lean|lake)\b|mcpaihelperproject|tasks/\*\.lean|\.lean`)
+
+func stripLeanGuidanceLines(text string) string {
+	lines := strings.Split(text, "\n")
+	kept := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if leanGuidancePattern.MatchString(line) {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.TrimSpace(strings.Join(kept, "\n"))
+}
+
 // SetupGuidance describes how a caller should configure the server.
 func SetupGuidance(configPath string) map[string]string {
 	if strings.TrimSpace(configPath) == "" {
@@ -617,6 +643,25 @@ func SetupGuidance(configPath string) map[string]string {
 		"tasks":                     "Read task_current first. Use task_graph for relationships and task_context for selected-task execution. Mutate tasks with task_batch_upsert/task_set_status; close_missing only with a complete authoritative set. Done requires acceptance criteria, focused gate, task transition, and owned-files commit in one run_workflow. Lean/Lake task state is canonical; never parse or regex-mutate registry source as fallback.",
 		"lean_task_registry_repair": "If task_current reports repair_required/action=repair_lean_task_registry_exporter, the repo has MCPAIHelperProject/ActiveTasks.lean but lacks the exporter surface. Repair by adding MCPAIHelperProject/TaskRegistryExport.lean from the mcp-ai-helper canonical exporter module, declaring a task_registry_export executable in lakefile.lean or lakefile.toml with root MCPAIHelperProject.TaskRegistryExport, then verifying with lake build, lake exe task_registry_export --list-active, and task_current. Do not fall back to legacy tasks/*.lean files.",
 	}
+}
+
+// SetupGuidanceForConfig returns setup guidance adjusted to the active task registry backend.
+func SetupGuidanceForConfig(cfg *Config) map[string]string {
+	configPath := ""
+	if cfg != nil {
+		configPath = cfg.SourcePath
+	}
+	setup := SetupGuidance(configPath)
+	if cfg == nil || !strings.EqualFold(strings.TrimSpace(cfg.TaskRegistry.Backend), "obsidian") {
+		return setup
+	}
+	setup["tasks"] = "Read task_current first. Use task_graph for relationships and task_context for selected-task execution. Mutate tasks with task_batch_upsert/task_set_status; close_missing only with a complete authoritative set. Done requires acceptance criteria, focused gate, task transition, and owned-files commit in one run_workflow. The configured Obsidian task registry is canonical; do not read or edit registry files through generic file/search/command tools."
+	for key, value := range setup {
+		if leanGuidancePattern.MatchString(key) || leanGuidancePattern.MatchString(value) {
+			delete(setup, key)
+		}
+	}
+	return setup
 }
 
 func defaultConfigYAML() string {

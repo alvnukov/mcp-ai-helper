@@ -302,7 +302,7 @@ func SearchFiles(root string, pattern string, maxMatches int) (SearchResult, err
 			if strings.HasPrefix(base, ".") && path != root {
 				return filepath.SkipDir
 			}
-			if base == "node_modules" || base == "__pycache__" || base == "vendor" {
+			if base == "node_modules" || base == "__pycache__" || base == "vendor" || isTaskRegistryDir(root, path) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -494,6 +494,15 @@ func isProtectedLeanPath(path string) bool {
 		return true
 	}
 	return strings.HasPrefix(clean, "tasks/") && strings.HasSuffix(clean, ".lean")
+}
+
+func isTaskRegistryDir(root string, path string) bool {
+	rel, err := filepath.Rel(root, path)
+	if err != nil || rel == "." {
+		return false
+	}
+	clean := strings.ToLower(filepath.ToSlash(filepath.Clean(rel)))
+	return clean == "obsidian-tasks" || clean == "tasks" || clean == "mcpaihelperproject"
 }
 
 func cleanPath(path string) (string, error) {
