@@ -227,6 +227,7 @@ func New(cfg *config.Config) *server.MCPServer {
 		registerCommandTools(srv, deps)
 		registerLakeTools(srv, deps)
 		registerPipelineTools(srv, deps)
+		registerWebTools(srv, deps)
 
 		if cfg.LayerEnabled("issues") {
 			registerIssueTools(srv, deps)

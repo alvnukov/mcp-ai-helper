@@ -56,6 +56,7 @@ type Config struct {
 	Routing           map[string]string         `yaml:"routing" json:"routing"`
 	CommandPolicy     CommandPolicy             `yaml:"command_policy" json:"command_policy"`
 	PipelinePolicy    PipelinePolicy            `yaml:"pipeline_policy" json:"pipeline_policy"`
+	WebPolicy         WebPolicy                 `yaml:"web_policy" json:"web_policy"`
 	Integrations      IntegrationsConfig        `yaml:"integrations" json:"integrations"`
 	TaskRegistry      TaskRegistryConfig        `yaml:"task_registry" json:"task_registry"`
 	Secrets           map[string]SecretConfig   `yaml:"secrets" json:"-"`
@@ -245,6 +246,23 @@ type PipelinePolicy struct {
 	MaxReturnChars             int  `yaml:"max_return_chars" json:"max_return_chars"`
 	RequireEvidenceForAnalysis bool `yaml:"require_evidence_for_analysis" json:"require_evidence_for_analysis"`
 }
+
+// WebPolicy defines bounded network fetch limits for model-facing web tools.
+type WebPolicy struct {
+	Enabled              *bool    `yaml:"enabled" json:"enabled"`
+	CacheDir             string   `yaml:"cache_dir" json:"cache_dir"`
+	MaxSourceBytes       int64    `yaml:"max_source_bytes" json:"max_source_bytes"`
+	TimeoutSeconds       int      `yaml:"timeout_seconds" json:"timeout_seconds"`
+	MaxRedirects         int      `yaml:"max_redirects" json:"max_redirects"`
+	AllowedSchemes       []string `yaml:"allowed_schemes" json:"allowed_schemes"`
+	AllowedHosts         []string `yaml:"allowed_hosts" json:"allowed_hosts"`
+	DeniedHosts          []string `yaml:"denied_hosts" json:"denied_hosts"`
+	AcceptedContentTypes []string `yaml:"accepted_content_types" json:"accepted_content_types"`
+	UserAgent            string   `yaml:"user_agent" json:"user_agent"`
+}
+
+// IsEnabled returns true unless web access is explicitly disabled.
+func (p WebPolicy) IsEnabled() bool { return p.Enabled == nil || *p.Enabled }
 
 // IntegrationsConfig holds third-party integration settings.
 type IntegrationsConfig struct {
@@ -643,6 +661,16 @@ pipeline_policy:
   max_return_chars: 4000
   require_evidence_for_analysis: true
 
+web_policy:
+  enabled: true
+  cache_dir: ~/.mcp-ai-helper/web
+  max_source_bytes: 1048576
+  timeout_seconds: 20
+  max_redirects: 5
+  allowed_schemes: [https, http]
+  accepted_content_types: [text/html, text/plain, application/json, application/xml, text/]
+  user_agent: mcp-ai-helper/0.1
+
 integrations:
   jira:
     # url: https://your-domain.atlassian.net
@@ -668,8 +696,24 @@ func defaultConfig() *Config {
 			MaxReturnChars:             4000,
 			RequireEvidenceForAnalysis: true,
 		},
+		WebPolicy: defaultWebPolicy(),
 	}
 	return cfg
+}
+
+func boolPtr(value bool) *bool { return &value }
+
+func defaultWebPolicy() WebPolicy {
+	return WebPolicy{
+		Enabled:              boolPtr(true),
+		CacheDir:             "~/.mcp-ai-helper/web",
+		MaxSourceBytes:       1048576,
+		TimeoutSeconds:       20,
+		MaxRedirects:         5,
+		AllowedSchemes:       []string{"https", "http"},
+		AcceptedContentTypes: []string{"text/html", "text/plain", "application/json", "application/xml", "text/"},
+		UserAgent:            "mcp-ai-helper/0.1",
+	}
 }
 
 // LayerEnabled reports whether an optional server layer is enabled. Unknown layers default to true.
@@ -700,6 +744,34 @@ func (c *Config) LayerEnabled(name string) bool {
 
 func layerEnabled(layer LayerConfig) bool {
 	return layer.Enabled == nil || *layer.Enabled
+}
+
+func applyWebPolicyDefaults(policy *WebPolicy) {
+	defaults := defaultWebPolicy()
+	if policy.Enabled == nil {
+		policy.Enabled = defaults.Enabled
+	}
+	if strings.TrimSpace(policy.CacheDir) == "" {
+		policy.CacheDir = defaults.CacheDir
+	}
+	if policy.MaxSourceBytes <= 0 {
+		policy.MaxSourceBytes = defaults.MaxSourceBytes
+	}
+	if policy.TimeoutSeconds <= 0 {
+		policy.TimeoutSeconds = defaults.TimeoutSeconds
+	}
+	if policy.MaxRedirects <= 0 {
+		policy.MaxRedirects = defaults.MaxRedirects
+	}
+	if len(policy.AllowedSchemes) == 0 {
+		policy.AllowedSchemes = defaults.AllowedSchemes
+	}
+	if len(policy.AcceptedContentTypes) == 0 {
+		policy.AcceptedContentTypes = defaults.AcceptedContentTypes
+	}
+	if strings.TrimSpace(policy.UserAgent) == "" {
+		policy.UserAgent = defaults.UserAgent
+	}
 }
 
 func applyDefaults(cfg *Config) {
@@ -734,6 +806,7 @@ func applyDefaults(cfg *Config) {
 	if cfg.PipelinePolicy.MaxReturnChars <= 0 {
 		cfg.PipelinePolicy.MaxReturnChars = 4000
 	}
+	applyWebPolicyDefaults(&cfg.WebPolicy)
 	cfg.TaskRegistry.Backend = strings.TrimSpace(cfg.TaskRegistry.Backend)
 	if cfg.TaskRegistry.Backend == "" {
 		cfg.TaskRegistry.Backend = "lean"

@@ -71,6 +71,12 @@ func TestNewExposesAssistantGuidance(t *testing.T) {
 	if _, ok := srv.ListTools()["reasoning_patterns"]; !ok {
 		t.Fatal("reasoning_patterns tool is not registered")
 	}
+	if _, ok := srv.ListTools()["web_fetch"]; !ok {
+		t.Fatal("web_fetch tool is not registered")
+	}
+	if _, ok := srv.ListTools()["fetch_url"]; !ok {
+		t.Fatal("fetch_url tool is not registered")
+	}
 	resource, ok := srv.ListResources()[guidanceURI]
 	if !ok {
 		t.Fatal("guidance resource is not registered")
@@ -103,7 +109,7 @@ func TestNewHidesDisabledLayers(t *testing.T) {
 	cfg.Layers.Workflows.Enabled = &disabled
 	srv := New(cfg)
 	tools := srv.ListTools()
-	for _, name := range []string{"assistant_guidance", "list_models", "collect_command_output", "run_workflow", "task_batch_upsert"} {
+	for _, name := range []string{"assistant_guidance", "list_models", "collect_command_output", "run_workflow", "task_batch_upsert", "web_fetch", "fetch_url"} {
 		if _, ok := tools[name]; ok {
 			t.Fatalf("tool %s should be hidden", name)
 		}
