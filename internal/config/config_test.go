@@ -79,11 +79,19 @@ func TestTaskRegistryBackendRequiresReadableObsidianPath(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "task_registry.obsidian.path is required") {
 		t.Fatalf("expected missing path error, got: %v", err)
 	}
+	if !strings.Contains(err.Error(), "next_call: server_setup_guidance") {
+		t.Fatalf("missing path error is not actionable: %v", err)
+	}
 
 	cfg.TaskRegistry.Obsidian.Path = filepath.Join(t.TempDir(), "missing")
 	err = cfg.Validate()
-	if err == nil || !strings.Contains(err.Error(), "task_registry.obsidian.path not readable") {
-		t.Fatalf("expected unreadable path error, got: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "task_registry.obsidian.path is not initialized") {
+		t.Fatalf("expected uninitialized path error, got: %v", err)
+	}
+	for _, want := range []string{"create the directory", "task_registry.backend: lean", "next_call: server_setup_guidance"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("uninitialized path error missing %q: %v", want, err)
+		}
 	}
 }
 

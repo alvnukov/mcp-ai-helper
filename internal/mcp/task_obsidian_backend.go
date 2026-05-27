@@ -272,7 +272,7 @@ func (b *obsidianTaskBackend) readAll() ([]tasks.Task, error) {
 	entries, err := os.ReadDir(b.dir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return nil, fmt.Errorf("obsidian task registry is not initialized: %s does not exist; create the directory configured by task_registry.obsidian.path, update .mcp-ai-helper.yaml, or set task_registry.backend: lean; next_call: server_setup_guidance", b.dir)
 		}
 		return nil, fmt.Errorf("read obsidian task dir: %w", err)
 	}
