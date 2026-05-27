@@ -128,6 +128,36 @@ func TestWebSearchReturnsCompactHits(t *testing.T) {
 	}
 }
 
+func TestWebSearchGoogleProviderThroughMCP(t *testing.T) {
+	srvHTTP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("cx") != "engine-id" || r.URL.Query().Get("key") != "secret-key" {
+			t.Fatalf("unexpected google query: %s", r.URL.RawQuery)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"searchInformation":{"totalResults":"1"},"items":[{"title":"Google result","link":"https://example.com/google","displayLink":"example.com","snippet":"google snippet"}]}`))
+	}))
+	defer srvHTTP.Close()
+	cfg := &config.Config{AssistantGuidance: config.DefaultAssistantGuidance(), WebPolicy: config.WebPolicy{GoogleCSEURL: srvHTTP.URL, GoogleCSEID: "engine-id", GoogleAPIKey: "secret-key", TimeoutSeconds: 2, AllowedSchemes: []string{"http"}, AllowedHosts: []string{"127.0.0.1"}, MaxSearchResults: 5}}
+	srv := New(cfg)
+	req := basemcp.CallToolRequest{}
+	req.Params.Arguments = map[string]any{"query": "bounded fetch", "provider": websearch.ProviderGoogleCSE}
+	res, err := srv.ListTools()["web_search"].Handler(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := resultMap(t, res)
+	if m["status"] != "complete" || len(m["hits"].([]any)) != 1 {
+		t.Fatalf("result = %#v", m)
+	}
+	data, err := json.Marshal(res.StructuredContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "secret-key") || !strings.Contains(string(data), "google snippet") {
+		t.Fatalf("unexpected google response: %s", data)
+	}
+}
+
 func TestWebSearchFailsClosedWithoutProvider(t *testing.T) {
 	srv := New(&config.Config{AssistantGuidance: config.DefaultAssistantGuidance()})
 	st, ok := srv.ListTools()["web_search"]

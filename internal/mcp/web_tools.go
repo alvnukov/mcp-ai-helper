@@ -98,7 +98,7 @@ func registerWebTools(srv *server.MCPServer, deps *Server) {
 		basemcp.WithDescription("Return compact web search results without fetching page bodies. Uses web_policy.search_provider or an explicit provider argument; unsupported or missing providers fail closed."),
 		basemcp.WithString("query", basemcp.Required()),
 		basemcp.WithString("repo_path", basemcp.Description("Optional repository root used only for repo-local tool deny policy.")),
-		basemcp.WithString("provider", basemcp.Description("Explicit search provider id. Supported: duckduckgo_html. Overrides web_policy.search_provider.")),
+		basemcp.WithString("provider", basemcp.Description("Explicit search provider id. Supported: duckduckgo_html, google_cse. Overrides web_policy.search_provider.")),
 		basemcp.WithNumber("max_results", basemcp.Description("Maximum compact hits requested.")),
 	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
 		var args webSearchRequest

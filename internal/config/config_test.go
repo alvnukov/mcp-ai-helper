@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,6 +34,21 @@ func TestValidateRejectsUnknownProvider(t *testing.T) {
 	applyDefaults(cfg)
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("expected validation error")
+	}
+}
+
+func TestWebPolicyGoogleAPIKeyIsOmittedFromJSON(t *testing.T) {
+	cfg := Config{WebPolicy: WebPolicy{GoogleAPIKey: "secret-value", GoogleAPIKeyEnv: "GOOGLE_CSE_API_KEY", GoogleCSEID: "engine-id"}}
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if strings.Contains(text, "secret-value") {
+		t.Fatalf("google api key leaked in JSON: %s", text)
+	}
+	if !strings.Contains(text, "GOOGLE_CSE_API_KEY") || !strings.Contains(text, "engine-id") {
+		t.Fatalf("google public config missing from JSON: %s", text)
 	}
 }
 

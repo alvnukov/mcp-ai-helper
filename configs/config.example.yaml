@@ -118,6 +118,10 @@ web_policy:
   search_provider: ""
   search_url: https://html.duckduckgo.com/html/
   max_search_results: 10
+  # Google Custom Search JSON API provider (provider: google_cse).
+  google_cse_id: ""
+  google_api_key_env: GOOGLE_CSE_API_KEY
+  google_cse_url: https://www.googleapis.com/customsearch/v1
 
 integrations:
   jira:

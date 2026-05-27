@@ -3,6 +3,7 @@ package websearch
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html"
@@ -10,7 +11,9 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,8 +24,11 @@ import (
 const (
 	// ProviderDuckDuckGoHTML is the explicit provider id for DuckDuckGo's HTML endpoint.
 	ProviderDuckDuckGoHTML = "duckduckgo_html"
+	// ProviderGoogleCSE is the explicit provider id for Google Custom Search JSON API.
+	ProviderGoogleCSE = "google_cse"
 
 	defaultSearchURL          = "https://html.duckduckgo.com/html/"
+	defaultGoogleCSEURL       = "https://www.googleapis.com/customsearch/v1"
 	defaultMaxSearchResults   = 10
 	hardMaxSearchResults      = 20
 	maxSearchResponseBodySize = int64(512 * 1024)
@@ -84,43 +90,33 @@ func Search(ctx context.Context, policy config.WebPolicy, req Request) Result {
 		result.Diagnostics = append(result.Diagnostics, diag("search_provider_not_configured", "set web_policy.search_provider or pass an explicit provider argument"))
 		return result
 	}
-	if provider != ProviderDuckDuckGoHTML {
+	switch provider {
+	case ProviderDuckDuckGoHTML:
+		return searchDuckDuckGoHTML(ctx, policy, req, result)
+	case ProviderGoogleCSE:
+		return searchGoogleCSE(ctx, policy, req, result)
+	default:
 		result.Diagnostics = append(result.Diagnostics, diag("unsupported_search_provider", fmt.Sprintf("unsupported web_search provider %q", provider)))
 		return result
 	}
-	endpoint, err := searchEndpoint(policy)
+}
+
+func searchDuckDuckGoHTML(ctx context.Context, policy config.WebPolicy, req Request, result Result) Result {
+	endpoint, err := searchEndpoint(policy.SearchURL, policy)
 	if err != nil {
 		result.Diagnostics = append(result.Diagnostics, diag("search_endpoint_invalid", err.Error()))
 		return result
 	}
 	searchURL := *endpoint
 	values := searchURL.Query()
-	values.Set("q", query)
+	values.Set("q", result.Query)
 	searchURL.RawQuery = values.Encode()
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, searchURL.String(), nil)
-	if err != nil {
-		result.Diagnostics = append(result.Diagnostics, diag("search_request_invalid", err.Error()))
+	body, bodyTruncated, ok := getSearchBody(ctx, policy, searchURL.String(), &result)
+	if !ok {
 		return result
 	}
-	httpReq.Header.Set("User-Agent", policy.UserAgent)
-	client := &http.Client{Timeout: time.Duration(policy.TimeoutSeconds) * time.Second}
-	resp, err := client.Do(httpReq)
-	if err != nil {
-		result.Diagnostics = append(result.Diagnostics, diag("search_failed", err.Error()))
-		return result
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		result.Diagnostics = append(result.Diagnostics, diag("search_http_status", fmt.Sprintf("unexpected HTTP status %d", resp.StatusCode)))
-		return result
-	}
-	body, bodyTruncated, err := readSearchBody(resp.Body)
-	if err != nil {
-		result.Diagnostics = append(result.Diagnostics, diag("search_read_failed", err.Error()))
-		return result
-	}
-	hits, total, hitsTruncated := parseDuckDuckGoHTML(string(body), endpoint, boundedMaxResults(policy, req.MaxResults), provider)
+	hits, total, hitsTruncated := parseDuckDuckGoHTML(string(body), endpoint, boundedMaxResults(policy, req.MaxResults), result.Provider)
 	result.Status = "complete"
 	result.Hits = hits
 	result.Total = total
@@ -131,11 +127,130 @@ func Search(ctx context.Context, policy config.WebPolicy, req Request) Result {
 	return result
 }
 
+type googleCSEResponse struct {
+	SearchInformation struct {
+		TotalResults string `json:"totalResults"`
+	} `json:"searchInformation"`
+	Items []googleCSEItem `json:"items"`
+}
+
+type googleCSEItem struct {
+	Title       string `json:"title"`
+	Link        string `json:"link"`
+	DisplayLink string `json:"displayLink"`
+	Snippet     string `json:"snippet"`
+}
+
+func searchGoogleCSE(ctx context.Context, policy config.WebPolicy, req Request, result Result) Result {
+	cx := strings.TrimSpace(policy.GoogleCSEID)
+	if cx == "" {
+		result.Diagnostics = append(result.Diagnostics, diag("google_cse_id_missing", "web_policy.google_cse_id is required for provider google_cse"))
+		return result
+	}
+	apiKey := googleAPIKey(policy)
+	if apiKey == "" {
+		result.Diagnostics = append(result.Diagnostics, diag("google_api_key_missing", "web_policy.google_api_key_env or google_api_key is required for provider google_cse"))
+		return result
+	}
+	endpoint, err := searchEndpoint(policy.GoogleCSEURL, policy)
+	if err != nil {
+		result.Diagnostics = append(result.Diagnostics, diag("search_endpoint_invalid", err.Error()))
+		return result
+	}
+	searchURL := *endpoint
+	values := searchURL.Query()
+	values.Set("q", result.Query)
+	values.Set("cx", cx)
+	values.Set("key", apiKey)
+	values.Set("num", strconv.Itoa(googleResultLimit(policy, req.MaxResults)))
+	searchURL.RawQuery = values.Encode()
+
+	body, bodyTruncated, ok := getSearchBody(ctx, policy, searchURL.String(), &result)
+	if !ok {
+		return result
+	}
+	var decoded googleCSEResponse
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		result.Diagnostics = append(result.Diagnostics, diag("search_decode_failed", err.Error()))
+		return result
+	}
+	hits := make([]Hit, 0, len(decoded.Items))
+	for _, item := range decoded.Items {
+		link := strings.TrimSpace(item.Link)
+		title := strings.TrimSpace(item.Title)
+		if link == "" || title == "" {
+			continue
+		}
+		hits = append(hits, Hit{Title: title, URL: link, DisplayURL: strings.TrimSpace(item.DisplayLink), Snippet: strings.TrimSpace(item.Snippet), Rank: len(hits) + 1, Provider: result.Provider, FetchedHint: "not_fetched"})
+	}
+	total := len(hits)
+	if parsed, err := strconv.Atoi(strings.TrimSpace(decoded.SearchInformation.TotalResults)); err == nil && parsed > total {
+		total = parsed
+	}
+	result.Status = "complete"
+	result.Hits = hits
+	result.Total = total
+	result.Truncated = bodyTruncated || total > len(hits)
+	if bodyTruncated {
+		result.Diagnostics = append(result.Diagnostics, diag("search_response_truncated", fmt.Sprintf("search response exceeded %d bytes", maxSearchResponseBodySize)))
+	}
+	return result
+}
+
+func googleAPIKey(policy config.WebPolicy) string {
+	if key := strings.TrimSpace(policy.GoogleAPIKey); key != "" {
+		return key
+	}
+	if envName := strings.TrimSpace(policy.GoogleAPIKeyEnv); envName != "" {
+		return strings.TrimSpace(os.Getenv(envName))
+	}
+	return ""
+}
+
+func googleResultLimit(policy config.WebPolicy, requested int) int {
+	limit := boundedMaxResults(policy, requested)
+	if limit > 10 {
+		return 10
+	}
+	return limit
+}
+
+func getSearchBody(ctx context.Context, policy config.WebPolicy, rawURL string, result *Result) ([]byte, bool, bool) {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		result.Diagnostics = append(result.Diagnostics, diag("search_request_invalid", err.Error()))
+		return nil, false, false
+	}
+	httpReq.Header.Set("User-Agent", policy.UserAgent)
+	client := &http.Client{Timeout: time.Duration(policy.TimeoutSeconds) * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		result.Diagnostics = append(result.Diagnostics, diag("search_failed", err.Error()))
+		return nil, false, false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		result.Diagnostics = append(result.Diagnostics, diag("search_http_status", fmt.Sprintf("unexpected HTTP status %d", resp.StatusCode)))
+		return nil, false, false
+	}
+	body, bodyTruncated, err := readSearchBody(resp.Body)
+	if err != nil {
+		result.Diagnostics = append(result.Diagnostics, diag("search_read_failed", err.Error()))
+		return nil, false, false
+	}
+	return body, bodyTruncated, true
+}
+
 func normalizePolicy(policy config.WebPolicy) config.WebPolicy {
 	policy.SearchProvider = strings.TrimSpace(policy.SearchProvider)
 	if strings.TrimSpace(policy.SearchURL) == "" {
 		policy.SearchURL = defaultSearchURL
 	}
+	if strings.TrimSpace(policy.GoogleCSEURL) == "" {
+		policy.GoogleCSEURL = defaultGoogleCSEURL
+	}
+	policy.GoogleCSEID = strings.TrimSpace(policy.GoogleCSEID)
+	policy.GoogleAPIKeyEnv = strings.TrimSpace(policy.GoogleAPIKeyEnv)
 	if policy.MaxSearchResults <= 0 {
 		policy.MaxSearchResults = defaultMaxSearchResults
 	}
@@ -171,8 +286,8 @@ func boundedMaxResults(policy config.WebPolicy, requested int) int {
 	return limit
 }
 
-func searchEndpoint(policy config.WebPolicy) (*url.URL, error) {
-	endpoint, err := url.Parse(strings.TrimSpace(policy.SearchURL))
+func searchEndpoint(rawURL string, policy config.WebPolicy) (*url.URL, error) {
+	endpoint, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil || endpoint.Scheme == "" || endpoint.Host == "" {
 		return nil, errors.New("web_policy.search_url must be an absolute http/https URL")
 	}

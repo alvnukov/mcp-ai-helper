@@ -133,6 +133,10 @@ func (c Config) SecretMask() *security.Mask {
 			add("", os.Getenv(provider.APIKeyEnv))
 		}
 	}
+	add("", c.WebPolicy.GoogleAPIKey)
+	if c.WebPolicy.GoogleAPIKeyEnv != "" {
+		add("", os.Getenv(c.WebPolicy.GoogleAPIKeyEnv))
+	}
 	return mask
 }
 
@@ -262,6 +266,10 @@ type WebPolicy struct {
 	SearchProvider       string   `yaml:"search_provider" json:"search_provider"`
 	SearchURL            string   `yaml:"search_url" json:"search_url"`
 	MaxSearchResults     int      `yaml:"max_search_results" json:"max_search_results"`
+	GoogleCSEID          string   `yaml:"google_cse_id" json:"google_cse_id"`
+	GoogleAPIKeyEnv      string   `yaml:"google_api_key_env" json:"google_api_key_env"`
+	GoogleAPIKey         string   `yaml:"google_api_key" json:"-"`
+	GoogleCSEURL         string   `yaml:"google_cse_url" json:"google_cse_url"`
 }
 
 // IsEnabled returns true unless web access is explicitly disabled.
@@ -678,6 +686,10 @@ web_policy:
   search_provider: ""
   search_url: https://html.duckduckgo.com/html/
   max_search_results: 10
+  # Google Custom Search JSON API provider (provider: google_cse).
+  google_cse_id: ""
+  google_api_key_env: GOOGLE_CSE_API_KEY
+  google_cse_url: https://www.googleapis.com/customsearch/v1
 
 integrations:
   jira:
@@ -723,6 +735,7 @@ func defaultWebPolicy() WebPolicy {
 		UserAgent:            "mcp-ai-helper/0.1",
 		SearchURL:            "https://html.duckduckgo.com/html/",
 		MaxSearchResults:     10,
+		GoogleCSEURL:         "https://www.googleapis.com/customsearch/v1",
 	}
 }
 
@@ -788,6 +801,11 @@ func applyWebPolicyDefaults(policy *WebPolicy) {
 	}
 	if policy.MaxSearchResults <= 0 {
 		policy.MaxSearchResults = defaults.MaxSearchResults
+	}
+	policy.GoogleCSEID = strings.TrimSpace(policy.GoogleCSEID)
+	policy.GoogleAPIKeyEnv = strings.TrimSpace(policy.GoogleAPIKeyEnv)
+	if strings.TrimSpace(policy.GoogleCSEURL) == "" {
+		policy.GoogleCSEURL = defaults.GoogleCSEURL
 	}
 }
 
