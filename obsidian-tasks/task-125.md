@@ -20,7 +20,7 @@ verification_plan:
     - Run focused config guidance tests.
     - Run focused MCP web tool metadata tests.
 created_at: "2026-05-14T09:15:25.491195Z"
-updated_at: "2026-05-27T11:31:34.065069Z"
+updated_at: "2026-05-27T11:31:34.265066Z"
 ---
 
 ## Body
