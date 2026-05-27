@@ -136,3 +136,41 @@ func TestFetchContentTypeDenied(t *testing.T) {
 		t.Fatalf("result = %#v", result)
 	}
 }
+
+func TestReadReturnsBoundedFragment(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte(strings.Repeat("abc ", 2000)))
+	}))
+	defer srv.Close()
+	policy := testPolicy(t)
+	policy.MaxSourceBytes = 10000
+	result, err := NewClient(policy).Fetch(context.Background(), FetchRequest{URL: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	read := Read(policy, ReadRequest{DocID: result.DocID, Offset: 4, Limit: 12})
+	if read.Status != "ok" || read.Content != "abc abc abc " || !read.Truncated || read.OmittedAfter <= 0 {
+		t.Fatalf("read = %#v", read)
+	}
+}
+
+func TestFindReturnsBoundedSnippets(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte("alpha needle beta needle gamma needle delta"))
+	}))
+	defer srv.Close()
+	policy := testPolicy(t)
+	result, err := NewClient(policy).Fetch(context.Background(), FetchRequest{URL: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := Find(policy, FindRequest{DocID: result.DocID, Query: "needle", MaxResults: 2, ContextChars: 3})
+	if found.Status != "ok" || len(found.Matches) != 2 || !found.Truncated || found.OmittedHits != 1 {
+		t.Fatalf("found = %#v", found)
+	}
+	if strings.Contains(found.Matches[0].Snippet, "gamma") {
+		t.Fatalf("snippet is not bounded: %#v", found.Matches[0])
+	}
+}

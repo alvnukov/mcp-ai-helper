@@ -17,6 +17,22 @@ type webFetchRequest struct {
 	TimeoutSeconds int    `json:"timeout_seconds"`
 }
 
+type fetchedDocReadRequest struct {
+	RepoPath string `json:"repo_path"`
+	DocID    string `json:"doc_id"`
+	Source   string `json:"source"`
+	Offset   int    `json:"offset"`
+	Limit    int    `json:"limit"`
+}
+
+type fetchedDocFindRequest struct {
+	RepoPath     string `json:"repo_path"`
+	DocID        string `json:"doc_id"`
+	Query        string `json:"query"`
+	MaxResults   int    `json:"max_results"`
+	ContextChars int    `json:"context_chars"`
+}
+
 func webPolicyForRequest(deps *Server, repoPath string, toolName string) (config.WebPolicy, error) {
 	cfg, _, _, _, _ := deps.loadDeps()
 	if repoPath == "" {
@@ -69,4 +85,42 @@ func registerWebTools(srv *server.MCPServer, deps *Server) {
 	}
 	registerFetchTool("web_fetch")
 	registerFetchTool("fetch_url")
+
+	srv.AddTool(basemcp.NewTool("fetched_doc_read",
+		basemcp.WithDescription("Read a bounded fragment from a fetched web document by doc_id. Returns selected content only with offsets and truncation metadata."),
+		basemcp.WithString("doc_id", basemcp.Required()),
+		basemcp.WithString("repo_path", basemcp.Description("Optional repository root used only for repo-local tool deny policy.")),
+		basemcp.WithString("source", basemcp.Description("Artifact source: normalized (default) or raw.")),
+		basemcp.WithNumber("offset", basemcp.Description("Zero-based byte offset.")),
+		basemcp.WithNumber("limit", basemcp.Description("Maximum bytes to return. Defaults to 4000, capped at 20000.")),
+	), func(_ context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+		var args fetchedDocReadRequest
+		if err := bind(req, &args); err != nil {
+			return nil, err
+		}
+		policy, err := webPolicyForRequest(deps, args.RepoPath, "fetched_doc_read")
+		if err != nil {
+			return safeError(deps, err), nil
+		}
+		return structured(webfetch.Read(policy, webfetch.ReadRequest{DocID: args.DocID, Source: args.Source, Offset: args.Offset, Limit: args.Limit}))
+	})
+
+	srv.AddTool(basemcp.NewTool("fetched_doc_find",
+		basemcp.WithDescription("Search the complete normalized text of a fetched web document and return bounded snippets with stable offsets."),
+		basemcp.WithString("doc_id", basemcp.Required()),
+		basemcp.WithString("query", basemcp.Required()),
+		basemcp.WithString("repo_path", basemcp.Description("Optional repository root used only for repo-local tool deny policy.")),
+		basemcp.WithNumber("max_results", basemcp.Description("Maximum matches. Defaults to 10, capped at 50.")),
+		basemcp.WithNumber("context_chars", basemcp.Description("Snippet context around each match. Defaults to 80, capped at 500.")),
+	), func(_ context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+		var args fetchedDocFindRequest
+		if err := bind(req, &args); err != nil {
+			return nil, err
+		}
+		policy, err := webPolicyForRequest(deps, args.RepoPath, "fetched_doc_find")
+		if err != nil {
+			return safeError(deps, err), nil
+		}
+		return structured(webfetch.Find(policy, webfetch.FindRequest{DocID: args.DocID, Query: args.Query, MaxResults: args.MaxResults, ContextChars: args.ContextChars}))
+	})
 }

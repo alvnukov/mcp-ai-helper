@@ -20,6 +20,7 @@ import (
 	"github.com/zol/mcp-ai-helper/internal/gitops"
 	"github.com/zol/mcp-ai-helper/internal/provider"
 	"github.com/zol/mcp-ai-helper/internal/tasks"
+	"github.com/zol/mcp-ai-helper/internal/webfetch"
 )
 
 // Runner executes analysis and edit workflows against a repository.
@@ -133,6 +134,8 @@ type WorkflowCommand struct {
 	CWD            string         `json:"cwd"`
 	TimeoutSeconds int            `json:"timeout_seconds"`
 	Filter         command.Filter `json:"filter"`
+	WebDocID       string         `json:"web_doc_id,omitempty"`
+	WebDocSource   string         `json:"web_doc_source,omitempty"`
 }
 
 // WorkflowCommit controls optional owned-file commit behavior.
@@ -196,6 +199,22 @@ func (missingTaskBackend) BatchUpsert(context.Context, tasks.BatchUpsertRequest)
 	return tasks.BatchUpsertResult{}, errors.New("task backend is required; legacy task file store is disabled")
 }
 
+func (r *Runner) withWebArtifact(args WorkflowCommand) (WorkflowCommand, error) {
+	if strings.TrimSpace(args.WebDocID) == "" {
+		return args, nil
+	}
+	source := strings.TrimSpace(args.WebDocSource)
+	if source == "" {
+		source = "normalized"
+	}
+	path, err := webfetch.ArtifactPath(r.cfg.WebPolicy, args.WebDocID, source)
+	if err != nil {
+		return WorkflowCommand{}, err
+	}
+	args.Command = "HELPER_WEB_DOC_PATH=" + strconv.Quote(path) + "; export HELPER_WEB_DOC_PATH; " + args.Command
+	return args, nil
+}
+
 // RunWorkflow executes either the stable steps DSL or the legacy edit/check/commit workflow.
 func (r *Runner) RunWorkflow(ctx context.Context, req WorkflowRequest) (result WorkflowResult, err error) {
 	if err := r.updateTaskStatus(ctx, req.CurrentTaskID, taskStatusOrDefault(req.TaskOnStart, "in_progress"), req.RepoPath); err != nil {
@@ -256,6 +275,10 @@ func (r *Runner) RunWorkflow(ctx context.Context, req WorkflowRequest) (result W
 		result.ChangedFiles = append(result.ChangedFiles, file)
 	}
 	for _, check := range req.Checks {
+		check, err := r.withWebArtifact(check)
+		if err != nil {
+			return WorkflowResult{}, err
+		}
 		checkResult, err := r.commands.RunFilteredInRepo(ctx, check.Command, req.RepoPath, check.CWD, check.TimeoutSeconds, check.Filter)
 		if err != nil {
 			return WorkflowResult{}, err
@@ -594,6 +617,10 @@ func (r *Runner) executeWorkflowStep(ctx context.Context, repoPath string, step 
 	case "command":
 		var args WorkflowCommand
 		if err := bindStepArgs(step.Args, &args); err != nil {
+			return WorkflowStepResult{}, err
+		}
+		args, err := r.withWebArtifact(args)
+		if err != nil {
 			return WorkflowStepResult{}, err
 		}
 		checkResult, err := r.commands.RunInRepo(ctx, args.Command, repoPath, args.CWD, args.TimeoutSeconds)

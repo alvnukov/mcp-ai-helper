@@ -321,3 +321,218 @@ func expandHome(path string) string {
 func diag(code string, message string) Diagnostic {
 	return Diagnostic{Code: code, Message: message}
 }
+
+// ReadRequest selects a bounded fragment from a fetched document artifact.
+type ReadRequest struct {
+	DocID  string `json:"doc_id"`
+	Source string `json:"source,omitempty"`
+	Offset int    `json:"offset,omitempty"`
+	Limit  int    `json:"limit,omitempty"`
+}
+
+// ReadResult is a bounded fragment response.
+type ReadResult struct {
+	Status       string       `json:"status"`
+	DocID        string       `json:"doc_id"`
+	Source       string       `json:"source"`
+	Offset       int          `json:"offset"`
+	EndOffset    int          `json:"end_offset"`
+	Content      string       `json:"content,omitempty"`
+	Truncated    bool         `json:"truncated"`
+	OmittedAfter int          `json:"omitted_after"`
+	Diagnostics  []Diagnostic `json:"diagnostics"`
+}
+
+// FindRequest searches a complete normalized fetched document artifact.
+type FindRequest struct {
+	DocID        string `json:"doc_id"`
+	Query        string `json:"query"`
+	MaxResults   int    `json:"max_results,omitempty"`
+	ContextChars int    `json:"context_chars,omitempty"`
+}
+
+// Match is one bounded document search hit.
+type Match struct {
+	Offset    int    `json:"offset"`
+	EndOffset int    `json:"end_offset"`
+	Snippet   string `json:"snippet"`
+}
+
+// FindResult is a bounded search response for a fetched document.
+type FindResult struct {
+	Status      string       `json:"status"`
+	DocID       string       `json:"doc_id"`
+	Source      string       `json:"source"`
+	Query       string       `json:"query"`
+	Matches     []Match      `json:"matches"`
+	Truncated   bool         `json:"truncated"`
+	OmittedHits int          `json:"omitted_hits"`
+	Diagnostics []Diagnostic `json:"diagnostics"`
+}
+
+var validDocID = regexp.MustCompile(`^web_[a-f0-9]{16}$`)
+
+// ArtifactPath resolves a fetched document artifact to a helper-managed cache path.
+func ArtifactPath(policy config.WebPolicy, docID string, source string) (string, error) {
+	policy = normalizePolicy(policy)
+	docID = strings.TrimSpace(docID)
+	if !validDocID.MatchString(docID) {
+		return "", fmt.Errorf("invalid doc_id %q", docID)
+	}
+	source = normalizeSource(source)
+	cacheRoot := expandHome(policy.CacheDir)
+	docDir := filepath.Join(cacheRoot, docID)
+	if !insideDir(cacheRoot, docDir) {
+		return "", errors.New("artifact path escapes web cache")
+	}
+	metaPath := filepath.Join(docDir, "metadata.json")
+	data, err := os.ReadFile(metaPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("unknown or expired doc_id %q", docID)
+		}
+		return "", err
+	}
+	var meta Result
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return "", err
+	}
+	if meta.Status != "complete" {
+		return "", fmt.Errorf("doc_id %q is %s, not complete", docID, meta.Status)
+	}
+	name := "normalized.txt"
+	if source == "raw" {
+		name = "source.bin"
+	}
+	path := filepath.Join(docDir, name)
+	if !insideDir(cacheRoot, path) {
+		return "", errors.New("artifact path escapes web cache")
+	}
+	if _, err := os.Stat(path); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// Read returns a bounded fragment from raw or normalized artifact content.
+func Read(policy config.WebPolicy, req ReadRequest) ReadResult {
+	source := normalizeSource(req.Source)
+	result := ReadResult{Status: "blocked", DocID: req.DocID, Source: source, Offset: req.Offset}
+	path, err := ArtifactPath(policy, req.DocID, source)
+	if err != nil {
+		result.Diagnostics = append(result.Diagnostics, diag("artifact_unavailable", err.Error()))
+		return result
+	}
+	if req.Offset < 0 {
+		result.Diagnostics = append(result.Diagnostics, diag("invalid_range", "offset must be non-negative"))
+		return result
+	}
+	limit := req.Limit
+	if limit <= 0 {
+		limit = 4000
+	}
+	if limit > 20000 {
+		limit = 20000
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		result.Diagnostics = append(result.Diagnostics, diag("read_failed", err.Error()))
+		return result
+	}
+	if req.Offset > len(data) {
+		result.Diagnostics = append(result.Diagnostics, diag("invalid_range", "offset exceeds artifact length"))
+		return result
+	}
+	end := req.Offset + limit
+	if end > len(data) {
+		end = len(data)
+	}
+	result.Status = "ok"
+	result.EndOffset = end
+	result.Content = string(data[req.Offset:end])
+	result.Truncated = end < len(data)
+	result.OmittedAfter = len(data) - end
+	return result
+}
+
+// Find searches complete normalized text and returns bounded snippets.
+func Find(policy config.WebPolicy, req FindRequest) FindResult {
+	query := strings.TrimSpace(req.Query)
+	result := FindResult{Status: "blocked", DocID: req.DocID, Source: "normalized", Query: query, Matches: []Match{}}
+	if query == "" {
+		result.Diagnostics = append(result.Diagnostics, diag("invalid_query", "query is required"))
+		return result
+	}
+	path, err := ArtifactPath(policy, req.DocID, "normalized")
+	if err != nil {
+		result.Diagnostics = append(result.Diagnostics, diag("artifact_unavailable", err.Error()))
+		return result
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		result.Diagnostics = append(result.Diagnostics, diag("read_failed", err.Error()))
+		return result
+	}
+	text := string(data)
+	lowerText := strings.ToLower(text)
+	lowerQuery := strings.ToLower(query)
+	maxResults := req.MaxResults
+	if maxResults <= 0 {
+		maxResults = 10
+	}
+	if maxResults > 50 {
+		maxResults = 50
+	}
+	contextChars := req.ContextChars
+	if contextChars < 0 {
+		contextChars = 0
+	}
+	if contextChars == 0 {
+		contextChars = 80
+	}
+	if contextChars > 500 {
+		contextChars = 500
+	}
+	searchFrom := 0
+	allHits := 0
+	for {
+		idx := strings.Index(lowerText[searchFrom:], lowerQuery)
+		if idx < 0 {
+			break
+		}
+		start := searchFrom + idx
+		end := start + len(query)
+		allHits++
+		if len(result.Matches) < maxResults {
+			snippetStart := max(0, start-contextChars)
+			snippetEnd := min(len(text), end+contextChars)
+			result.Matches = append(result.Matches, Match{Offset: start, EndOffset: end, Snippet: text[snippetStart:snippetEnd]})
+		}
+		searchFrom = end
+	}
+	result.Status = "ok"
+	result.Truncated = allHits > len(result.Matches)
+	result.OmittedHits = allHits - len(result.Matches)
+	return result
+}
+
+func normalizeSource(source string) string {
+	switch strings.ToLower(strings.TrimSpace(source)) {
+	case "raw":
+		return "raw"
+	default:
+		return "normalized"
+	}
+}
+
+func insideDir(root string, child string) bool {
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		return false
+	}
+	childAbs, err := filepath.Abs(child)
+	if err != nil {
+		return false
+	}
+	return childAbs == rootAbs || strings.HasPrefix(childAbs, rootAbs+string(os.PathSeparator))
+}

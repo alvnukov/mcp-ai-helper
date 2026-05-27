@@ -25,9 +25,11 @@ func registerPipelineTools(srv *server.MCPServer, deps *Server) {
 					"type":        "command",
 					"description": "Run a shell command. Workflow stops on non-zero exit unless on_failure is 'continue'.",
 					"fields": map[string]string{
-						"command":    "Shell command to run (string, required).",
-						"cwd":        "Optional repo-relative working directory (string).",
-						"on_failure": "Optional: 'stop' (default) or 'continue'.",
+						"command":        "Shell command to run (string, required).",
+						"cwd":            "Optional repo-relative working directory (string).",
+						"web_doc_id":     "Optional fetched document id. When set, command receives HELPER_WEB_DOC_PATH pointing to the selected helper-managed artifact.",
+						"web_doc_source": "Optional artifact source for web_doc_id: normalized (default) or raw.",
+						"on_failure":     "Optional: 'stop' (default) or 'continue'.",
 					},
 				},
 				{
