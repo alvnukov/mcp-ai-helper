@@ -226,18 +226,18 @@ func TestRepoFileOpsRejectLeanSourceFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := ReadFileContentInRepo(dir, leanRel); err == nil || !strings.Contains(err.Error(), "Lean source files") {
-		t.Fatalf("ReadFileContentInRepo error = %v, want Lean source denial", err)
+	if _, err := ReadFileContentInRepo(dir, leanRel); err == nil || !strings.Contains(err.Error(), "policy_denied") || strings.Contains(err.Error(), "task-owned") {
+		t.Fatalf("ReadFileContentInRepo error = %v, want local policy denial", err)
 	}
-	if _, err := ReadSnapshotInRepo(dir, leanRel); err == nil || !strings.Contains(err.Error(), "Lean source files") {
-		t.Fatalf("ReadSnapshotInRepo error = %v, want Lean source denial", err)
+	if _, err := ReadSnapshotInRepo(dir, leanRel); err == nil || !strings.Contains(err.Error(), "protected task registry source") || strings.Contains(err.Error(), "task-owned") {
+		t.Fatalf("ReadSnapshotInRepo error = %v, want local policy denial", err)
 	}
-	if _, err := ApplyGuardedReplace(ReplaceRequest{RepoPath: dir, Path: leanRel, ExpectedHash: "deadbeef", Old: "def", New: "theorem"}); err == nil || !strings.Contains(err.Error(), "Lean source files") {
-		t.Fatalf("ApplyGuardedReplace error = %v, want Lean source denial", err)
+	if _, err := ApplyGuardedReplace(ReplaceRequest{RepoPath: dir, Path: leanRel, ExpectedHash: "deadbeef", Old: "def", New: "theorem"}); err == nil || !strings.Contains(err.Error(), "protected task registry source") || strings.Contains(err.Error(), "task-owned") {
+		t.Fatalf("ApplyGuardedReplace error = %v, want local policy denial", err)
 	}
 }
 
-func TestSearchFilesSkipsLeanSourceFiles(t *testing.T) {
+func TestSearchFilesAllowsRegularLeanSourceFiles(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "Visible.go"), []byte("package p\n// needle\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -249,8 +249,27 @@ func TestSearchFilesSkipsLeanSourceFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Total != 1 || len(result.Matches) != 1 || result.Matches[0].File != "Visible.go" {
-		t.Fatalf("matches = %#v, want only Visible.go", result.Matches)
+	if result.Total != 2 || len(result.Matches) != 2 {
+		t.Fatalf("matches = %#v, want Go and regular Lean matches", result.Matches)
+	}
+}
+
+func TestRepoFileOpsAllowRegularLeanSourceFiles(t *testing.T) {
+	dir := t.TempDir()
+	leanRel := filepath.Join("src", "Module.lean")
+	writePath := filepath.Join(dir, leanRel)
+	if err := os.MkdirAll(filepath.Dir(writePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(writePath, []byte("def visible := 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fc, err := ReadFileContentInRepo(dir, leanRel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fc.Exists || fc.RelativePath != filepath.ToSlash(leanRel) {
+		t.Fatalf("file content = %#v", fc)
 	}
 }
 

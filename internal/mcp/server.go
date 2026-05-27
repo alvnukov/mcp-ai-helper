@@ -234,7 +234,6 @@ func New(cfg *config.Config) *server.MCPServer {
 		}
 		registerTaskTools(srv, deps)
 		registerTaskUITools(srv, deps)
-		registerPlanningTools(srv, deps)
 	}
 
 	if cfg.Integrations.Jira != nil && cfg.Integrations.Jira.IsEnabled() {

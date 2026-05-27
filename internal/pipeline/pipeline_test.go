@@ -462,8 +462,8 @@ func TestRunWorkflowCommandRejectsLeanSourceAccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Status != "failed" || !strings.Contains(result.Reason, "Lean source files") {
-		t.Fatalf("result status=%q reason=%q, want Lean source denial", result.Status, result.Reason)
+	if result.Status != "failed" || !strings.Contains(result.Reason, "policy_denied") || strings.Contains(result.Reason, "task-owned") {
+		t.Fatalf("result status=%q reason=%q, want local policy denial", result.Status, result.Reason)
 	}
 }
 

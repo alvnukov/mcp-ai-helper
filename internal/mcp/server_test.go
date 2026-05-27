@@ -14,16 +14,14 @@ import (
 	"github.com/zol/mcp-ai-helper/internal/tasks"
 )
 
-func TestNewCanDisableReasoningPatterns(t *testing.T) {
-	disabled := false
-	cfg := &config.Config{AssistantGuidance: config.DefaultAssistantGuidance()}
-	cfg.Layers.ReasoningPatterns.Enabled = &disabled
-	srv := New(cfg)
-	if _, ok := srv.ListTools()["reasoning_patterns"]; ok {
-		t.Fatal("reasoning_patterns tool should not be registered when disabled")
-	}
-	if _, ok := srv.ListTools()["task_packet"]; !ok {
-		t.Fatal("task_packet should remain registered when reasoning patterns are disabled")
+func TestNewOmitsLegacyPlanningToolsFromStartupSurface(t *testing.T) {
+	t.Parallel()
+
+	srv := New(&config.Config{AssistantGuidance: config.DefaultAssistantGuidance()})
+	for _, name := range []string{"reasoning_patterns", "task_packet", "plan_task_execution"} {
+		if _, ok := srv.ListTools()[name]; ok {
+			t.Fatalf("legacy planning tool %s should not be in startup surface", name)
+		}
 	}
 }
 
@@ -47,35 +45,10 @@ func TestCurrentTasksReturnsOnlyActiveStatuses(t *testing.T) {
 func TestNewExposesAssistantGuidance(t *testing.T) {
 	cfg := &config.Config{AssistantGuidance: config.DefaultAssistantGuidance()}
 	srv := New(cfg)
-	if _, ok := srv.ListTools()["assistant_guidance"]; !ok {
-		t.Fatal("assistant_guidance tool is not registered")
-	}
-	if _, ok := srv.ListTools()["server_setup_guidance"]; !ok {
-		t.Fatal("server_setup_guidance tool is not registered")
-	}
-	if _, ok := srv.ListTools()["task_batch_upsert"]; !ok {
-		t.Fatal("task_batch_upsert tool is not registered")
-	}
-	if _, ok := srv.ListTools()["task_update"]; !ok {
-		t.Fatal("task_update tool is not registered")
-	}
-	if _, ok := srv.ListTools()["task_set_status"]; !ok {
-		t.Fatal("task_set_status tool is not registered")
-	}
-	if _, ok := srv.ListTools()["plan_task_execution"]; !ok {
-		t.Fatal("plan_task_execution tool is not registered")
-	}
-	if _, ok := srv.ListTools()["task_packet"]; !ok {
-		t.Fatal("task_packet tool is not registered")
-	}
-	if _, ok := srv.ListTools()["reasoning_patterns"]; !ok {
-		t.Fatal("reasoning_patterns tool is not registered")
-	}
-	if _, ok := srv.ListTools()["web_fetch"]; !ok {
-		t.Fatal("web_fetch tool is not registered")
-	}
-	if _, ok := srv.ListTools()["fetch_url"]; !ok {
-		t.Fatal("fetch_url tool is not registered")
+	for _, name := range []string{"assistant_guidance", "server_setup_guidance", "task_batch_upsert", "task_set_status", "task_graph", "task_context", "web_fetch"} {
+		if _, ok := srv.ListTools()[name]; !ok {
+			t.Fatalf("%s tool is not registered", name)
+		}
 	}
 	resource, ok := srv.ListResources()[guidanceURI]
 	if !ok {
@@ -91,11 +64,53 @@ func TestNewExposesAssistantGuidance(t *testing.T) {
 	if !strings.Contains(prompt.Prompt.Description, "calling LLM") {
 		t.Fatalf("guidance prompt description = %q", prompt.Prompt.Description)
 	}
-	if !strings.Contains(cfg.AssistantGuidance, "Prefer one long run_workflow or run_pipeline call") {
+	if !strings.Contains(cfg.AssistantGuidance, "one self-contained run_workflow") {
 		t.Fatal("guidance text does not describe workflow-first policy")
 	}
-	if !strings.Contains(cfg.AssistantGuidance, "no commit means the task is not done") {
+	if !strings.Contains(cfg.AssistantGuidance, "no such unified commit means the task is not done") {
 		t.Fatal("guidance text does not describe commit closeout policy")
+	}
+}
+
+func TestStartupSurfaceBudgetStaysCompact(t *testing.T) {
+	t.Parallel()
+
+	srv := New(&config.Config{AssistantGuidance: config.DefaultAssistantGuidance()})
+	tools := make([]map[string]any, 0, len(srv.ListTools()))
+	for name, tool := range srv.ListTools() {
+		tools = append(tools, map[string]any{
+			"name":         name,
+			"description":  tool.Tool.Description,
+			"input_schema": tool.Tool.InputSchema,
+		})
+	}
+	resources := make([]map[string]string, 0, len(srv.ListResources()))
+	for name, resource := range srv.ListResources() {
+		resources = append(resources, map[string]string{
+			"name":        name,
+			"description": resource.Resource.Description,
+			"uri":         resource.Resource.URI,
+		})
+	}
+	prompts := make([]map[string]string, 0, len(srv.ListPrompts()))
+	for name, prompt := range srv.ListPrompts() {
+		prompts = append(prompts, map[string]string{
+			"name":        name,
+			"description": prompt.Prompt.Description,
+		})
+	}
+	payload := map[string]any{"tools": tools, "resources": resources, "prompts": prompts}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal startup surface: %v", err)
+	}
+	if len(data) > 48000 {
+		t.Fatalf("startup surface too large: %d bytes", len(data))
+	}
+	for _, name := range []string{"fetch_url", "task_add", "task_update", "task_tree", "reasoning_patterns", "task_packet", "plan_task_execution"} {
+		if _, ok := srv.ListTools()[name]; ok {
+			t.Fatalf("duplicate/legacy tool %s should not be registered", name)
+		}
 	}
 }
 
@@ -109,7 +124,7 @@ func TestNewHidesDisabledLayers(t *testing.T) {
 	cfg.Layers.Workflows.Enabled = &disabled
 	srv := New(cfg)
 	tools := srv.ListTools()
-	for _, name := range []string{"assistant_guidance", "list_models", "collect_command_output", "command_get", "run_workflow", "task_batch_upsert", "web_fetch", "fetch_url"} {
+	for _, name := range []string{"assistant_guidance", "list_models", "collect_command_output", "command_get", "run_workflow", "task_batch_upsert", "web_fetch"} {
 		if _, ok := tools[name]; ok {
 			t.Fatalf("tool %s should be hidden", name)
 		}
@@ -338,8 +353,8 @@ func TestNewHidesDisabledIssuesLayer(t *testing.T) {
 			t.Fatalf("tool %s should be hidden", name)
 		}
 	}
-	if _, ok := tools["task_add"]; !ok {
-		t.Fatal("task_add should stay visible when only issues layer is disabled")
+	if _, ok := tools["task_current"]; !ok {
+		t.Fatal("task_current should stay visible when only issues layer is disabled")
 	}
 }
 

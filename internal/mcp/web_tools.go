@@ -69,7 +69,7 @@ func (e *toolDeniedError) Error() string {
 func registerWebTools(srv *server.MCPServer, deps *Server) {
 	registerFetchTool := func(name string) {
 		srv.AddTool(basemcp.NewTool(name,
-			basemcp.WithDescription("Step 2 of web research, after web_search selects a URL. Fetch one URL into the helper web cache. Returns doc_id, URL metadata, hashes, completeness, cache status, and diagnostics only; never returns page body. Next: call fetched_doc_find to locate evidence, then fetched_doc_read for bounded fragments by offset."),
+			basemcp.WithDescription("Step 2 after web_search. Fetch URL to cache; returns doc_id and metadata only, never page body. Next: fetched_doc_find, then fetched_doc_read."),
 			basemcp.WithString("url", basemcp.Required(), basemcp.Description("Absolute http/https URL to fetch.")),
 			basemcp.WithString("repo_path", basemcp.Description("Optional repository root used only for repo-local tool deny policy.")),
 			basemcp.WithNumber("max_source_bytes", basemcp.Description("Optional per-call source byte cap, bounded by web_policy.max_source_bytes.")),
@@ -92,10 +92,9 @@ func registerWebTools(srv *server.MCPServer, deps *Server) {
 		})
 	}
 	registerFetchTool("web_fetch")
-	registerFetchTool("fetch_url")
 
 	srv.AddTool(basemcp.NewTool("web_search",
-		basemcp.WithDescription("Step 1 of web research. Return compact candidate hits only: title, URL, display URL, snippet, rank, provider, diagnostics. Search hits are not evidence and page bodies are not fetched. Next: choose relevant URLs and call web_fetch. Use provider=google_cse only with configured cx/key; unsupported providers fail closed."),
+		basemcp.WithDescription("Step 1 of web research. Return compact hits only; search hits are not evidence. Next: choose URLs and call web_fetch. Unsupported providers fail closed."),
 		basemcp.WithString("query", basemcp.Required()),
 		basemcp.WithString("repo_path", basemcp.Description("Optional repository root used only for repo-local tool deny policy.")),
 		basemcp.WithString("provider", basemcp.Description("Explicit search provider id. Supported: duckduckgo_html, google_cse. Overrides web_policy.search_provider.")),
@@ -114,7 +113,7 @@ func registerWebTools(srv *server.MCPServer, deps *Server) {
 	})
 
 	srv.AddTool(basemcp.NewTool("fetched_doc_read",
-		basemcp.WithDescription("Step 4 of web research. Read one bounded fragment from a fetched doc_id, usually after fetched_doc_find gives offsets. Returns selected content only with offsets/truncation metadata; do not request full pages. Next: cite doc_id/source/offset/snippet or fetch/read another selected URL."),
+		basemcp.WithDescription("Step 4. Read one bounded fragment after fetched_doc_find gives offsets; do not request full pages. Cite doc_id/source/offset/snippet."),
 		basemcp.WithString("doc_id", basemcp.Required()),
 		basemcp.WithString("repo_path", basemcp.Description("Optional repository root used only for repo-local tool deny policy.")),
 		basemcp.WithString("source", basemcp.Description("Artifact source: normalized (default) or raw.")),
@@ -133,7 +132,7 @@ func registerWebTools(srv *server.MCPServer, deps *Server) {
 	})
 
 	srv.AddTool(basemcp.NewTool("fetched_doc_find",
-		basemcp.WithDescription("Step 3 of web research. Search the complete normalized text of a fetched doc_id. Use after web_fetch to find evidence without loading the full page. Returns bounded snippets with stable offsets. Next: call fetched_doc_read for exact surrounding fragments."),
+		basemcp.WithDescription("Step 3. Search fetched normalized text without loading the full page. Returns bounded snippets with offsets. Next: fetched_doc_read."),
 		basemcp.WithString("doc_id", basemcp.Required()),
 		basemcp.WithString("query", basemcp.Required()),
 		basemcp.WithString("repo_path", basemcp.Description("Optional repository root used only for repo-local tool deny policy.")),

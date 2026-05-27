@@ -476,7 +476,7 @@ func Hash(data []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-const protectedLeanGenericToolMessage = "Lean source files are task-owned; use task-facing Lean/Lake tools instead of generic file tools"
+const protectedLeanGenericToolMessage = "policy_denied: generic file access to protected task registry source is disabled for this path only; continue with task_current/task_get/task_graph/task_context or use a focused search that skips protected registry files"
 
 func rejectProtectedLeanPath(path string) error {
 	if isProtectedLeanPath(path) {
@@ -486,8 +486,14 @@ func rejectProtectedLeanPath(path string) error {
 }
 
 func isProtectedLeanPath(path string) bool {
-	clean := filepath.ToSlash(filepath.Clean(strings.TrimSpace(path)))
-	return strings.HasSuffix(strings.ToLower(clean), ".lean")
+	clean := strings.ToLower(filepath.ToSlash(filepath.Clean(strings.TrimSpace(path))))
+	if clean == "mcpaihelperproject/activetasks.lean" {
+		return true
+	}
+	if strings.HasPrefix(clean, "mcpaihelperproject/taskregistry") && strings.HasSuffix(clean, ".lean") {
+		return true
+	}
+	return strings.HasPrefix(clean, "tasks/") && strings.HasSuffix(clean, ".lean")
 }
 
 func cleanPath(path string) (string, error) {

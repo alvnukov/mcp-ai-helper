@@ -131,8 +131,8 @@ func TestLoadCreatesDefaultConfigInHomeDir(t *testing.T) {
 	if !strings.Contains(text, "issues:\n    enabled: false") {
 		t.Fatal("generated config should disable issues layer by default")
 	}
-	if !strings.Contains(text, "reasoning_patterns:\n    enabled: true") {
-		t.Fatal("generated config should expose reasoning_patterns layer")
+	if !strings.Contains(text, "reasoning_patterns:\n    enabled: false") {
+		t.Fatal("generated config should keep legacy reasoning_patterns out of the startup surface")
 	}
 	if !strings.Contains(text, "default_timeout_seconds: 300") {
 		t.Fatal("generated config should default command timeout to 300 seconds")
@@ -395,20 +395,16 @@ func TestGuidanceDocumentsLeanTaskRegistry(t *testing.T) {
 func TestGuidanceDocumentsStrictRepoTaskWorkflow(t *testing.T) {
 	guidance := DefaultAssistantGuidance()
 	for _, want := range []string{
-		"first gather complete minimal sufficient context",
-		"After context gathering, stop and state the decision",
-		"selected tasks, why they fit the current model",
-		"task_graph for overview/dependencies",
-		"task_context for selected-task execution context",
-		"task_packet for readiness/owned_files/gates",
-		"one self-contained run_pipeline or run_workflow",
-		"Never set a task to done until its acceptance criteria, relevant gate, and required owned-files commit are actually closed",
-		"evidence-only analysis success",
-		"If a workflow fails or times out, do not close the task",
-		"complete authoritative task set",
-		"Never edit tasks by modifying task registry/source/projection files directly",
+		"MCP-ONLY",
+		"task_current first",
+		"task_graph",
+		"task_context",
+		"one self-contained run_workflow",
+		"Never set a task to done",
+		"post-hoc status commit",
+		"Never edit task registry/source/projection files directly",
 		"use task_upsert, task_batch_upsert, task_set_status, task_delete",
-		"stop with a surface mismatch/blocker",
+		"surface_mismatch/blocker",
 		"configurable in the server config through assistant_guidance",
 	} {
 		if !strings.Contains(guidance, want) {
@@ -416,7 +412,7 @@ func TestGuidanceDocumentsStrictRepoTaskWorkflow(t *testing.T) {
 		}
 	}
 	setup := SetupGuidance("")
-	for _, want := range []string{"task_graph for dependency overview", "task_context for selected-task execution context", "task_packet for readiness/owned_files/gates", "batch task updates", "close_missing only intentionally", "because it can close omitted active tasks", "acceptance criteria, gates, and required owned-files commit pass", "no commit means the task is not done", "evidence-only analysis"} {
+	for _, want := range []string{"task_current first", "task_graph", "task_context", "task_batch_upsert/task_set_status", "complete authoritative set", "owned-files commit in one run_workflow", "Lean/Lake task state is canonical"} {
 		if !strings.Contains(setup["tasks"], want) {
 			t.Fatalf("setup guidance missing %q in %#v", want, setup)
 		}

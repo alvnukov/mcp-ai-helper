@@ -395,7 +395,7 @@ func (r *Runner) FilterHistory(commandID string, filter Filter) (Result, error) 
 	return r.history.Filter(commandID, filter)
 }
 
-const protectedLeanCommandMessage = "Lean source files are task-owned; use task-facing Lean/Lake tools instead of generic command/pipeline tools"
+const protectedLeanCommandMessage = "policy_denied: command appears to access protected task registry source; this is a local command denial, not a global task blocker; use task tools or exclude protected registry files"
 
 const protectedConfigCommandMessage = "current helper config cannot be edited from pipeline/command tools; use config_read/config_replace/config_reload config tools instead"
 
@@ -423,10 +423,21 @@ func protectedConfigMarkers(protectedPath string) []string {
 
 func rejectProtectedLeanCommand(cmd string) error {
 	normalized := normalizeCommandPath(cmd)
-	for _, marker := range []string{".lean", "mcpaihelperproject", "tasks/"} {
-		if strings.Contains(normalized, marker) {
-			return fmt.Errorf("%s: command references %q", protectedLeanCommandMessage, marker)
-		}
+	for _, marker := range protectedLeanCommandMarkers(normalized) {
+		return fmt.Errorf("%s: command references %q", protectedLeanCommandMessage, marker)
+	}
+	return nil
+}
+
+func protectedLeanCommandMarkers(normalized string) []string {
+	if strings.Contains(normalized, "mcpaihelperproject/activetasks.lean") {
+		return []string{"mcpaihelperproject/activetasks.lean"}
+	}
+	if strings.Contains(normalized, "mcpaihelperproject/taskregistry") && strings.Contains(normalized, ".lean") {
+		return []string{"mcpaihelperproject/taskregistry*.lean"}
+	}
+	if strings.Contains(normalized, "tasks/") && strings.Contains(normalized, ".lean") {
+		return []string{"tasks/*.lean"}
 	}
 	return nil
 }

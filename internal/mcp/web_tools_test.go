@@ -48,21 +48,13 @@ func TestWebFetchToolReturnsBoundedMetadata(t *testing.T) {
 	}
 }
 
-func TestFetchURLAliasRegistered(t *testing.T) {
-	srv := New(&config.Config{AssistantGuidance: config.DefaultAssistantGuidance()})
-	if _, ok := srv.ListTools()["fetch_url"]; !ok {
-		t.Fatal("fetch_url alias is not registered")
-	}
-}
-
 func TestWebToolDescriptionsExposeEfficientWorkflow(t *testing.T) {
 	srv := New(&config.Config{AssistantGuidance: config.DefaultAssistantGuidance()})
 	checks := map[string][]string{
-		"web_search":       {"Step 1 of web research", "Search hits are not evidence", "Next: choose relevant URLs and call web_fetch", "unsupported providers fail closed"},
-		"web_fetch":        {"Step 2 of web research", "Returns doc_id", "never returns page body", "Next: call fetched_doc_find"},
-		"fetch_url":        {"Step 2 of web research", "Returns doc_id", "never returns page body", "Next: call fetched_doc_find"},
-		"fetched_doc_find": {"Step 3 of web research", "Use after web_fetch", "without loading the full page", "Next: call fetched_doc_read"},
-		"fetched_doc_read": {"Step 4 of web research", "after fetched_doc_find gives offsets", "do not request full pages", "cite doc_id/source/offset/snippet"},
+		"web_search":       {"Step 1 of web research", "search hits are not evidence", "Next: choose URLs and call web_fetch", "Unsupported providers fail closed"},
+		"web_fetch":        {"Step 2 after web_search", "returns doc_id", "never page body", "Next: fetched_doc_find"},
+		"fetched_doc_find": {"Step 3", "without loading the full page", "Next: fetched_doc_read"},
+		"fetched_doc_read": {"Step 4", "after fetched_doc_find gives offsets", "do not request full pages", "Cite doc_id/source/offset/snippet"},
 	}
 	for name, wants := range checks {
 		tool, ok := srv.ListTools()[name]

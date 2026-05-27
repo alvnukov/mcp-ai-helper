@@ -145,8 +145,21 @@ func TestRunnerRunInRepoRejectsLeanSourceCommand(t *testing.T) {
 	dir := t.TempDir()
 	runner := NewRunner(config.CommandPolicy{AllowedCWDs: []string{dir}, DefaultTimeoutSeconds: 1, MaxOutputBytes: 1000, MaxLines: 20})
 	_, err := runner.RunInRepo(t.Context(), "cat MCPAIHelperProject/ActiveTasks.lean", dir, "", 1)
-	if err == nil || !strings.Contains(err.Error(), "Lean source files") {
-		t.Fatalf("error = %v, want Lean source denial", err)
+	if err == nil || !strings.Contains(err.Error(), "policy_denied") || strings.Contains(err.Error(), "task-owned") {
+		t.Fatalf("error = %v, want local policy denial", err)
+	}
+}
+
+func TestRunnerRunInRepoAllowsProtectedPathSearchTerm(t *testing.T) {
+	dir := t.TempDir()
+	runner := NewRunner(config.CommandPolicy{AllowedCWDs: []string{dir}, DefaultTimeoutSeconds: 1, MaxOutputBytes: 1000, MaxLines: 20})
+	result, err := runner.RunInRepo(t.Context(), "printf '%s\\n' MCPAIHelperProject", dir, "", 1)
+	if err != nil {
+		t.Fatalf("search-term command should not be denied: %v", err)
+	}
+	joined := strings.Join(result.StdoutTail, "\n")
+	if !strings.Contains(joined, "MCPAIHelperProject") {
+		t.Fatalf("stdout = %q", joined)
 	}
 }
 
