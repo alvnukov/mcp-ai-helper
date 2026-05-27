@@ -259,6 +259,9 @@ type WebPolicy struct {
 	DeniedHosts          []string `yaml:"denied_hosts" json:"denied_hosts"`
 	AcceptedContentTypes []string `yaml:"accepted_content_types" json:"accepted_content_types"`
 	UserAgent            string   `yaml:"user_agent" json:"user_agent"`
+	SearchProvider       string   `yaml:"search_provider" json:"search_provider"`
+	SearchURL            string   `yaml:"search_url" json:"search_url"`
+	MaxSearchResults     int      `yaml:"max_search_results" json:"max_search_results"`
 }
 
 // IsEnabled returns true unless web access is explicitly disabled.
@@ -670,6 +673,11 @@ web_policy:
   allowed_schemes: [https, http]
   accepted_content_types: [text/html, text/plain, application/json, application/xml, text/]
   user_agent: mcp-ai-helper/0.1
+  # Leave empty to require an explicit web_search provider argument per call.
+  # Set to duckduckgo_html to make that provider the default.
+  search_provider: ""
+  search_url: https://html.duckduckgo.com/html/
+  max_search_results: 10
 
 integrations:
   jira:
@@ -713,6 +721,8 @@ func defaultWebPolicy() WebPolicy {
 		AllowedSchemes:       []string{"https", "http"},
 		AcceptedContentTypes: []string{"text/html", "text/plain", "application/json", "application/xml", "text/"},
 		UserAgent:            "mcp-ai-helper/0.1",
+		SearchURL:            "https://html.duckduckgo.com/html/",
+		MaxSearchResults:     10,
 	}
 }
 
@@ -771,6 +781,13 @@ func applyWebPolicyDefaults(policy *WebPolicy) {
 	}
 	if strings.TrimSpace(policy.UserAgent) == "" {
 		policy.UserAgent = defaults.UserAgent
+	}
+	policy.SearchProvider = strings.TrimSpace(policy.SearchProvider)
+	if strings.TrimSpace(policy.SearchURL) == "" {
+		policy.SearchURL = defaults.SearchURL
+	}
+	if policy.MaxSearchResults <= 0 {
+		policy.MaxSearchResults = defaults.MaxSearchResults
 	}
 }
 

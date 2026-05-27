@@ -104,6 +104,21 @@ pipeline_policy:
   max_return_chars: 4000
   require_evidence_for_analysis: true
 
+web_policy:
+  enabled: true
+  cache_dir: ~/.mcp-ai-helper/web
+  max_source_bytes: 1048576
+  timeout_seconds: 20
+  max_redirects: 5
+  allowed_schemes: [https, http]
+  accepted_content_types: [text/html, text/plain, application/json, application/xml, text/]
+  user_agent: mcp-ai-helper/0.1
+  # Leave empty to require an explicit web_search provider argument per call.
+  # Set to duckduckgo_html to make that provider the default.
+  search_provider: ""
+  search_url: https://html.duckduckgo.com/html/
+  max_search_results: 10
+
 integrations:
   jira:
     url: https://your-domain.atlassian.net

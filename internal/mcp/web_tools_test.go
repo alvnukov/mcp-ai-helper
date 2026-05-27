@@ -11,6 +11,7 @@ import (
 	basemcp "github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/zol/mcp-ai-helper/internal/config"
+	"github.com/zol/mcp-ai-helper/internal/websearch"
 )
 
 func TestWebFetchToolReturnsBoundedMetadata(t *testing.T) {
@@ -89,6 +90,41 @@ func TestFetchedDocReadAndFindToolsReturnBoundedFragments(t *testing.T) {
 	findMap := resultMap(t, findRes)
 	if findMap["truncated"] != true || len(findMap["matches"].([]any)) != 1 {
 		t.Fatalf("find = %#v", findMap)
+	}
+}
+
+func TestWebSearchReturnsCompactHits(t *testing.T) {
+	srvHTTP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("q"); got != "bounded fetch" {
+			t.Fatalf("query = %q", got)
+		}
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte(`<html><body><div class="result"><a class="result__a" href="/l/?uddg=https%3A%2F%2Fexample.com%2Falpha">Alpha result</a><a class="result__snippet">compact snippet</a></div><script>raw search markup must not leak</script></body></html>`))
+	}))
+	defer srvHTTP.Close()
+	cfg := &config.Config{AssistantGuidance: config.DefaultAssistantGuidance(), WebPolicy: config.WebPolicy{SearchProvider: websearch.ProviderDuckDuckGoHTML, SearchURL: srvHTTP.URL, TimeoutSeconds: 2, AllowedSchemes: []string{"http"}, AllowedHosts: []string{"127.0.0.1"}, UserAgent: "test-agent", MaxSearchResults: 5}}
+	srv := New(cfg)
+	st, ok := srv.ListTools()["web_search"]
+	if !ok {
+		t.Fatal("web_search tool is not registered")
+	}
+	req := basemcp.CallToolRequest{}
+	req.Params.Arguments = map[string]any{"query": "bounded fetch"}
+	res, err := st.Handler(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := resultMap(t, res)
+	if m["status"] != "complete" || len(m["hits"].([]any)) != 1 {
+		t.Fatalf("result = %#v", m)
+	}
+	data, err := json.Marshal(res.StructuredContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if strings.Contains(text, "raw search markup") || !strings.Contains(text, "compact snippet") {
+		t.Fatalf("unexpected search response: %s", text)
 	}
 }
 
