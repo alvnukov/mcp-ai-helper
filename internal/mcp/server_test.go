@@ -348,10 +348,65 @@ func TestConfigToolsRegistered(t *testing.T) {
 	cfg := &config.Config{AssistantGuidance: config.DefaultAssistantGuidance()}
 	srv := New(cfg)
 	tools := srv.ListTools()
-	for _, name := range []string{"config_schema", "config_read", "config_replace", "config_reload", "config_option_set", "config_option_reset", "feature_list", "feature_get", "feature_enable", "feature_disable", "feature_reset"} {
+	for _, name := range []string{"task_registry_init", "config_schema", "config_read", "config_replace", "config_reload", "config_option_set", "config_option_reset", "feature_list", "feature_get", "feature_enable", "feature_disable", "feature_reset"} {
 		if _, ok := tools[name]; !ok {
 			t.Fatalf("%s tool is not registered", name)
 		}
+	}
+}
+
+func TestTaskRegistryInitDryRunDoesNotWrite(t *testing.T) {
+	t.Parallel()
+	repo := t.TempDir()
+	result, err := initTaskRegistry(taskRegistryInitRequest{RepoPath: repo, DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result["status"] != "would_initialize" || result["next_call"] != "task_current" {
+		t.Fatalf("unexpected dry-run result: %#v", result)
+	}
+	if _, err := os.Stat(filepath.Join(repo, "obsidian-tasks")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("dry-run created registry dir, stat err = %v", err)
+	}
+}
+
+func TestTaskRegistryInitCreatesObsidianRegistryAndRepoConfig(t *testing.T) {
+	t.Parallel()
+	repo := t.TempDir()
+	result, err := initTaskRegistry(taskRegistryInitRequest{RepoPath: repo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result["status"] != "ok" || result["next_call"] != "task_current" {
+		t.Fatalf("unexpected init result: %#v", result)
+	}
+	if info, err := os.Stat(filepath.Join(repo, "obsidian-tasks")); err != nil || !info.IsDir() {
+		t.Fatalf("registry dir was not created: info=%#v err=%v", info, err)
+	}
+	data, err := os.ReadFile(filepath.Join(repo, ".mcp-ai-helper.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	for _, want := range []string{"task_registry:", "backend: obsidian", "path: obsidian-tasks"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("repo config missing %q: %s", want, text)
+		}
+	}
+	backend, err := (&Server{cfg: &config.Config{TaskRegistry: config.TaskRegistryConfig{Backend: "lean"}}}).loadTaskBackendForRepo(repo)
+	if err != nil {
+		t.Fatalf("load initialized backend: %v", err)
+	}
+	if _, _, err := backend.ListCurrent(context.Background(), repo); err != nil {
+		t.Fatalf("initialized backend ListCurrent: %v", err)
+	}
+}
+
+func TestTaskRegistryInitRejectsEscapingPath(t *testing.T) {
+	t.Parallel()
+	_, err := initTaskRegistry(taskRegistryInitRequest{RepoPath: t.TempDir(), Path: "../tasks"})
+	if err == nil || !strings.Contains(err.Error(), "escapes repo_path") {
+		t.Fatalf("expected escape error, got %v", err)
 	}
 }
 

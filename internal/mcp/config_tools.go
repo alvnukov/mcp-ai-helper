@@ -43,8 +43,35 @@ type configOptionResetRequest struct {
 	Reload     *bool  `json:"reload"`
 }
 
+type taskRegistryInitRequest struct {
+	RepoPath        string `json:"repo_path"`
+	Backend         string `json:"backend"`
+	Path            string `json:"path"`
+	DryRun          bool   `json:"dry_run"`
+	WriteRepoConfig *bool  `json:"write_repo_config"`
+}
+
 func registerConfigTools(srv *server.MCPServer, deps *Server, reload configReloadFunc) {
 	registerConfigOptionTools(srv, deps, reload)
+	srv.AddTool(basemcp.NewTool("task_registry_init",
+		basemcp.WithDescription("Initialize a repository task registry through MCP-only setup. For backend=obsidian, creates the configured task directory and optionally writes repo-local .mcp-ai-helper.yaml. Use dry_run first when the caller needs to review actions."),
+		basemcp.WithString("repo_path", basemcp.Required(), basemcp.Description("Repository root to initialize.")),
+		basemcp.WithString("backend", basemcp.Description("Task registry backend to initialize. Currently supports obsidian. Defaults to obsidian.")),
+		basemcp.WithString("path", basemcp.Description("Repo-relative Obsidian task directory. Defaults to obsidian-tasks.")),
+		basemcp.WithBoolean("write_repo_config", basemcp.Description("Write/update repo-local .mcp-ai-helper.yaml. Defaults to true.")),
+		basemcp.WithBoolean("dry_run", basemcp.Description("Return planned actions without creating files/directories.")),
+	), func(_ context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+		var args taskRegistryInitRequest
+		if err := bind(req, &args); err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
+		result, err := initTaskRegistry(args)
+		if err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
+		return structured(result)
+	})
+
 	srv.AddTool(basemcp.NewTool("config_schema",
 		basemcp.WithDescription("Return machine-readable documentation for every mcp-ai-helper config field and the safe model-driven setup workflow."),
 	), func(_ context.Context, _ basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
@@ -137,6 +164,110 @@ func registerConfigTools(srv *server.MCPServer, deps *Server, reload configReloa
 		}
 		return structured(map[string]any{"status": "ok", "config_path": path, "config": loaded})
 	})
+}
+
+func initTaskRegistry(args taskRegistryInitRequest) (map[string]any, error) {
+	repo, err := filepath.Abs(strings.TrimSpace(args.RepoPath))
+	if err != nil {
+		return nil, fmt.Errorf("resolve repo_path: %w", err)
+	}
+	if repo == "" {
+		return nil, errors.New("repo_path is required")
+	}
+	backend := strings.TrimSpace(args.Backend)
+	if backend == "" {
+		backend = "obsidian"
+	}
+	if backend != "obsidian" {
+		return nil, fmt.Errorf("unsupported task registry init backend %q; supported: obsidian", backend)
+	}
+	registryPath := strings.TrimSpace(args.Path)
+	if registryPath == "" {
+		registryPath = "obsidian-tasks"
+	}
+	if filepath.IsAbs(registryPath) {
+		return nil, errors.New("task registry path must be repo-relative")
+	}
+	registryDir := filepath.Join(repo, registryPath)
+	if !pathInsideDir(repo, registryDir) {
+		return nil, fmt.Errorf("task registry path %q escapes repo_path", registryPath)
+	}
+	writeRepoConfig := args.WriteRepoConfig == nil || *args.WriteRepoConfig
+	configPath := filepath.Join(repo, ".mcp-ai-helper.yaml")
+	planned := []string{"create_directory:" + registryDir}
+	if writeRepoConfig {
+		planned = append(planned, "write_repo_config:"+configPath)
+	}
+	result := map[string]any{
+		"backend":            backend,
+		"repo_path":          repo,
+		"task_registry_path": registryPath,
+		"resolved_path":      registryDir,
+		"repo_config_path":   configPath,
+		"write_repo_config":  writeRepoConfig,
+		"actions":            planned,
+		"next_call":          "task_current",
+	}
+	if args.DryRun {
+		result["status"] = "would_initialize"
+		return result, nil
+	}
+	if err := os.MkdirAll(registryDir, 0o700); err != nil {
+		return nil, fmt.Errorf("create obsidian task registry directory: %w", err)
+	}
+	if writeRepoConfig {
+		if err := writeRepoTaskRegistryConfig(configPath, registryPath); err != nil {
+			return nil, err
+		}
+	}
+	repoCfg, err := config.LoadRepoConfig(repo)
+	if err != nil {
+		return nil, err
+	}
+	_, err = config.MergeRepoConfig(&config.Config{TaskRegistry: config.TaskRegistryConfig{Backend: "lean"}}, repoCfg, repo)
+	if err != nil {
+		return nil, fmt.Errorf("validate initialized task registry config: %w", err)
+	}
+	result["status"] = "ok"
+	result["created_dirs"] = []string{registryDir}
+	if writeRepoConfig {
+		result["changed_files"] = []string{configPath}
+	}
+	return result, nil
+}
+
+func writeRepoTaskRegistryConfig(path string, registryPath string) error {
+	var root map[string]any
+	if data, err := os.ReadFile(path); err == nil {
+		if err := yaml.Unmarshal(data, &root); err != nil {
+			return fmt.Errorf("parse repo config: %w", err)
+		}
+	} else if errors.Is(err, os.ErrNotExist) {
+		root = map[string]any{}
+	} else {
+		return fmt.Errorf("read repo config: %w", err)
+	}
+	if root == nil {
+		root = map[string]any{}
+	}
+	root["task_registry"] = map[string]any{
+		"backend": "obsidian",
+		"obsidian": map[string]any{
+			"path": registryPath,
+		},
+	}
+	data, err := yaml.Marshal(root)
+	if err != nil {
+		return fmt.Errorf("marshal repo config: %w", err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return fmt.Errorf("write repo config: %w", err)
+	}
+	return nil
+}
+
+func pathInsideDir(root string, child string) bool {
+	return child == root || strings.HasPrefix(child, root+string(os.PathSeparator))
 }
 
 func registerConfigOptionTools(srv *server.MCPServer, deps *Server, reload configReloadFunc) {
