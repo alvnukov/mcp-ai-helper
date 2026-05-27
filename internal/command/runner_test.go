@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zol/mcp-ai-helper/internal/config"
 	"github.com/zol/mcp-ai-helper/internal/project"
@@ -175,6 +176,42 @@ func TestRunnerRunInRepoAllowsRestrictedSubdir(t *testing.T) {
 	}
 	if _, err := runner.RunInRepo(t.Context(), "pwd", dir, "blocked", 1); err == nil {
 		t.Fatal("blocked subdir should be rejected")
+	}
+}
+
+func TestRunnerReturnsRunningAndPersistsResultAfterWaitBudget(t *testing.T) {
+	repoPath := t.TempDir()
+	logRoot := t.TempDir()
+	runner := NewRunner(config.CommandPolicy{AllowedCWDs: []string{repoPath}, DefaultTimeoutSeconds: 5, MaxOutputBytes: 1000, MaxLines: 20, LogDir: logRoot})
+
+	result, err := runner.RunFilteredInRepoWithWait(t.Context(), "sleep 2; printf 'done\n'", repoPath, "", 5, 1, Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "running" {
+		t.Fatalf("status = %q, want running", result.Status)
+	}
+	if result.CommandID == "" || result.NextCall == nil || result.NextCall.Tool != "command_get" {
+		t.Fatalf("missing durable lookup metadata: %#v", result)
+	}
+
+	deadline := time.Now().Add(4 * time.Second)
+	var completed Result
+	for time.Now().Before(deadline) {
+		completed, err = runner.FilterHistory(result.CommandID, Filter{Include: "done"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if completed.Status != "running" {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if completed.Status != "ok" || completed.ExitCode != 0 {
+		t.Fatalf("completed result = %#v, want ok exit 0", completed)
+	}
+	if len(completed.FilteredLines) != 1 || completed.FilteredLines[0] != "done" {
+		t.Fatalf("filtered lines = %#v", completed.FilteredLines)
 	}
 }
 

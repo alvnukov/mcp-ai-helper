@@ -49,6 +49,7 @@ type Request struct {
 	RepoPath       string   `json:"repo_path"`
 	CWD            string   `json:"cwd"`
 	TimeoutSeconds int      `json:"timeout_seconds"`
+	MCPWaitSeconds int      `json:"mcp_wait_seconds"`
 	Analyze        bool     `json:"analyze"`
 	Task           string   `json:"task"`
 	ModelID        string   `json:"model_id"`
@@ -133,6 +134,7 @@ type WorkflowCommand struct {
 	Command        string         `json:"command"`
 	CWD            string         `json:"cwd"`
 	TimeoutSeconds int            `json:"timeout_seconds"`
+	MCPWaitSeconds int            `json:"mcp_wait_seconds"`
 	Filter         command.Filter `json:"filter"`
 	WebDocID       string         `json:"web_doc_id,omitempty"`
 	WebDocSource   string         `json:"web_doc_source,omitempty"`
@@ -222,7 +224,9 @@ func (r *Runner) RunWorkflow(ctx context.Context, req WorkflowRequest) (result W
 	}
 	defer func() {
 		finalStatus := taskStatusOrDefault(req.TaskOnSuccess, "done")
-		if !workflowTaskCloseoutSucceeded(req, result, err) {
+		if result.Status == "running" {
+			finalStatus = taskStatusOrDefault(req.TaskOnStart, "in_progress")
+		} else if !workflowTaskCloseoutSucceeded(req, result, err) {
 			finalStatus = taskStatusOrDefault(req.TaskOnFailure, "blocked")
 		}
 		if updateErr := r.updateTaskStatus(ctx, req.CurrentTaskID, finalStatus, req.RepoPath); updateErr != nil && err == nil {
@@ -279,11 +283,16 @@ func (r *Runner) RunWorkflow(ctx context.Context, req WorkflowRequest) (result W
 		if err != nil {
 			return WorkflowResult{}, err
 		}
-		checkResult, err := r.commands.RunFilteredInRepo(ctx, check.Command, req.RepoPath, check.CWD, check.TimeoutSeconds, check.Filter)
+		checkResult, err := r.commands.RunFilteredInRepoWithWait(ctx, check.Command, req.RepoPath, check.CWD, check.TimeoutSeconds, check.MCPWaitSeconds, check.Filter)
 		if err != nil {
 			return WorkflowResult{}, err
 		}
 		result.CheckResults = append(result.CheckResults, checkResult)
+		if checkResult.Status == "running" {
+			result.Status = "running"
+			result.Reason = "check still running: " + check.Command
+			return result, nil
+		}
 		if checkResult.ExitCode != 0 {
 			result.Status = "failed"
 			result.Reason = "check failed: " + check.Command
@@ -623,12 +632,15 @@ func (r *Runner) executeWorkflowStep(ctx context.Context, repoPath string, step 
 		if err != nil {
 			return WorkflowStepResult{}, err
 		}
-		checkResult, err := r.commands.RunInRepo(ctx, args.Command, repoPath, args.CWD, args.TimeoutSeconds)
+		checkResult, err := r.commands.RunInRepoWithWait(ctx, args.Command, repoPath, args.CWD, args.TimeoutSeconds, args.MCPWaitSeconds)
 		if err != nil {
 			return WorkflowStepResult{}, err
 		}
 		base.Output = checkResult
-		if checkResult.ExitCode != 0 {
+		if checkResult.Status == "running" {
+			base.Status = "running"
+			base.Reason = "command still running: " + args.Command
+		} else if checkResult.ExitCode != 0 {
 			base.Status = "failed"
 			base.Reason = "command failed: " + args.Command
 		}
@@ -1126,7 +1138,9 @@ func (r *Runner) Run(ctx context.Context, req Request) (result Result, err error
 	}
 	defer func() {
 		finalStatus := taskStatusOrDefault(req.TaskOnSuccess, "done")
-		if !pipelineTaskCloseoutSucceeded(result, err) {
+		if result.Status == "running" {
+			finalStatus = taskStatusOrDefault(req.TaskOnStart, "in_progress")
+		} else if !pipelineTaskCloseoutSucceeded(result, err) {
 			finalStatus = taskStatusOrDefault(req.TaskOnFailure, "blocked")
 		}
 		if updateErr := r.updateTaskStatus(ctx, req.CurrentTaskID, finalStatus, req.RepoPath); updateErr != nil && err == nil {
@@ -1141,9 +1155,13 @@ func (r *Runner) Run(ctx context.Context, req Request) (result Result, err error
 		ctx = command.ContextWithSecrets(ctx, envs, mask)
 	}
 
-	cmdResult, err := r.commands.RunInRepo(ctx, req.Command, req.RepoPath, req.CWD, req.TimeoutSeconds)
+	cmdResult, err := r.commands.RunInRepoWithWait(ctx, req.Command, req.RepoPath, req.CWD, req.TimeoutSeconds, req.MCPWaitSeconds)
 	if err != nil {
 		return Result{}, err
+	}
+	compact := req.CompactOutput == nil || *req.CompactOutput
+	if cmdResult.Status == "running" {
+		return Result{Status: "running", Compact: compact, Command: cmdResult, Summary: evidence.Summary{Truncated: cmdResult.Truncated}, Analysis: "command still running; use command_get with command_id", Validation: evidence.Validation{Valid: false, Status: "running"}, Handoff: runningHandoff(cmdResult)}, nil
 	}
 	summary := evidence.Summary{EvidenceLines: cmdResult.EvidenceLines, Truncated: cmdResult.Truncated}
 	analysis := deterministicAnalysis(req.Task, cmdResult)
@@ -1175,7 +1193,6 @@ func (r *Runner) Run(ctx context.Context, req Request) (result Result, err error
 	if !validation.Valid {
 		status = "INSUFFICIENT_DATA"
 	}
-	compact := req.CompactOutput == nil || *req.CompactOutput
 	handoff := composeHandoff(status, cmdResult, summary, analysis, validation, r.cfg.PipelinePolicy.MaxReturnChars)
 	if compact && status == "ok" && cmdResult.ExitCode == 0 {
 		handoff = compactHandoff(status, cmdResult)
@@ -1208,6 +1225,15 @@ func buildAnalysisPrompt(task string, result command.Result, summary evidence.Su
 		b.WriteString("\n")
 	}
 	b.WriteString("\nReturn concise analysis. Cite evidence ids like [E1]. If evidence is insufficient, return INSUFFICIENT_DATA.")
+	return b.String()
+}
+
+func runningHandoff(result command.Result) string {
+	var b strings.Builder
+	b.WriteString("status: running")
+	fmt.Fprintf(&b, "\ncommand_id: %s", result.CommandID)
+	fmt.Fprintf(&b, "\nelapsed_ms: %d", result.DurationMS)
+	b.WriteString("\nnext_call: command_get")
 	return b.String()
 }
 

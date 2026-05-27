@@ -15,12 +15,15 @@ func registerCommandTools(srv *server.MCPServer, deps *Server) {
 		basemcp.WithString("command", basemcp.Required(), basemcp.Description("Shell command.")),
 		basemcp.WithString("repo_path", basemcp.Required(), basemcp.Description("Repository root from the calling LLM.")),
 		basemcp.WithString("cwd", basemcp.Description("Optional repo-relative working directory.")),
+		basemcp.WithNumber("timeout_seconds", basemcp.Description("Optional execution timeout in seconds.")),
+		basemcp.WithNumber("mcp_wait_seconds", basemcp.Description("Optional MCP wait budget before returning running + command_id.")),
 	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
 		var args struct {
 			Command        string         `json:"command"`
 			RepoPath       string         `json:"repo_path"`
 			CWD            string         `json:"cwd"`
 			TimeoutSeconds int            `json:"timeout_seconds"`
+			MCPWaitSeconds int            `json:"mcp_wait_seconds"`
 			Filter         command.Filter `json:"filter"`
 		}
 		if err := bind(req, &args); err != nil {
@@ -30,7 +33,7 @@ func registerCommandTools(srv *server.MCPServer, deps *Server) {
 		if err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
-		result, err := cmds.RunFilteredInRepo(ctx, args.Command, args.RepoPath, args.CWD, args.TimeoutSeconds, args.Filter)
+		result, err := cmds.RunFilteredInRepoWithWait(ctx, args.Command, args.RepoPath, args.CWD, args.TimeoutSeconds, args.MCPWaitSeconds, args.Filter)
 		if err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
@@ -45,6 +48,27 @@ func registerCommandTools(srv *server.MCPServer, deps *Server) {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
 		return basemcp.NewToolResultText("cleanup complete"), nil
+	})
+
+	srv.AddTool(basemcp.NewTool("command_get",
+		basemcp.WithDescription("Return durable command status/result by command_id without rerunning the command."),
+		basemcp.WithString("command_id", basemcp.Required()),
+		basemcp.WithString("mode", basemcp.Description("Optional mode: status, result, tail, or evidence. Output remains bounded.")),
+	), func(_ context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+		var args struct {
+			CommandID string         `json:"command_id"`
+			Mode      string         `json:"mode"`
+			Filter    command.Filter `json:"filter"`
+		}
+		if err := bind(req, &args); err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
+		_, _, cmds, _, _ := deps.loadDeps()
+		result, err := cmds.FilterHistory(args.CommandID, args.Filter)
+		if err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
+		return structured(result)
 	})
 
 	srv.AddTool(basemcp.NewTool("filter_command_history",

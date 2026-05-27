@@ -4,6 +4,7 @@ package command
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -14,6 +15,7 @@ import (
 	"regexp"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -53,6 +55,7 @@ type Runner struct {
 
 // Result is the compact, redacted command execution record returned to callers.
 type Result struct {
+	Status        string          `json:"status,omitempty"`
 	CommandID     string          `json:"command_id"`
 	Command       string          `json:"command"`
 	CWD           string          `json:"cwd"`
@@ -64,6 +67,14 @@ type Result struct {
 	FilteredLines []string        `json:"filtered_lines,omitempty"`
 	EvidenceLines []evidence.Line `json:"evidence_lines"`
 	OutputHash    string          `json:"output_hash"`
+	NextCall      *NextCall       `json:"next_call,omitempty"`
+}
+
+// NextCall tells the caller how to inspect a still-running durable command.
+type NextCall struct {
+	Tool      string `json:"tool"`
+	CommandID string `json:"command_id"`
+	Mode      string `json:"mode,omitempty"`
 }
 
 // Filter selects a compact slice from command output before it reaches the caller.
@@ -104,14 +115,26 @@ func (r *Runner) Run(ctx context.Context, cmd string, cwd string, timeoutSeconds
 
 // RunFiltered executes cmd and applies a deterministic grep-like output filter.
 func (r *Runner) RunFiltered(ctx context.Context, cmd string, cwd string, timeoutSeconds int, filter Filter) (Result, error) {
-	return r.runFiltered(ctx, cmd, cwd, timeoutSeconds, filter, "")
+	return r.RunFilteredWithWait(ctx, cmd, cwd, timeoutSeconds, 0, filter)
 }
 
-func (r *Runner) runFiltered(
+// RunFilteredWithWait runs a command with a separate MCP wait budget.
+// If mcpWaitSeconds is exceeded, the process keeps running under its execution timeout
+// and the caller receives a durable command_id for command_get/filter_command_history.
+func (r *Runner) RunFilteredWithWait(ctx context.Context, cmd string, cwd string, timeoutSeconds int, mcpWaitSeconds int, filter Filter) (Result, error) {
+	return r.runFilteredWithWait(ctx, cmd, cwd, timeoutSeconds, mcpWaitSeconds, filter, "")
+}
+
+func (r *Runner) runFiltered(ctx context.Context, cmd string, cwd string, timeoutSeconds int, filter Filter, repoPath string) (Result, error) {
+	return r.runFilteredWithWait(ctx, cmd, cwd, timeoutSeconds, 0, filter, repoPath)
+}
+
+func (r *Runner) runFilteredWithWait(
 	ctx context.Context,
 	cmd string,
 	cwd string,
 	timeoutSeconds int,
+	mcpWaitSeconds int,
 	filter Filter,
 	repoPath string,
 ) (Result, error) {
@@ -125,6 +148,61 @@ func (r *Runner) runFiltered(
 	if timeoutSeconds <= 0 {
 		timeoutSeconds = r.policy.DefaultTimeoutSeconds
 	}
+	return r.runPreparedWithWait(ctx, cmd, runCWD, timeoutSeconds, mcpWaitSeconds, filter, repoPath)
+}
+
+func (r *Runner) runPreparedWithWait(ctx context.Context, cmd string, runCWD string, timeoutSeconds int, mcpWaitSeconds int, filter Filter, repoPath string) (Result, error) {
+	commandID := newCommandID()
+	started := time.Now().UTC()
+	if mcpWaitSeconds > 0 {
+		if err := r.history.Put(Record{
+			CommandID: commandID,
+			Status:    "running",
+			RepoPath:  repoPath,
+			Command:   r.maskText(ctx, cmd),
+			CWD:       runCWD,
+			ExitCode:  -1,
+			StartedAt: started,
+			CreatedAt: started,
+		}); err != nil {
+			return Result{}, err
+		}
+	}
+
+	execute := func(execCtx context.Context) (Result, error) {
+		return r.executePrepared(execCtx, commandID, cmd, runCWD, timeoutSeconds, filter, repoPath, started)
+	}
+	if mcpWaitSeconds <= 0 {
+		return execute(ctx)
+	}
+
+	done := make(chan struct{})
+	var result Result
+	var err error
+	go func() {
+		result, err = execute(context.WithoutCancel(ctx))
+		close(done)
+	}()
+
+	timer := time.NewTimer(time.Duration(mcpWaitSeconds) * time.Second)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return result, err
+	case <-timer.C:
+		return Result{
+			Status:     "running",
+			CommandID:  commandID,
+			Command:    r.maskText(ctx, cmd),
+			CWD:        runCWD,
+			ExitCode:   -1,
+			DurationMS: time.Since(started).Milliseconds(),
+			NextCall:   nextCallForStatus("running", commandID),
+		}, nil
+	}
+}
+
+func (r *Runner) executePrepared(ctx context.Context, commandID string, cmd string, runCWD string, timeoutSeconds int, filter Filter, repoPath string, started time.Time) (Result, error) {
 	runCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
 	defer cancel()
 
@@ -138,7 +216,6 @@ func (r *Runner) runFiltered(
 	if len(envs) > 0 {
 		command.Env = append(os.Environ(), envs...)
 	}
-	// Kill process group on context cancellation so no orphans survive.
 	stop := context.AfterFunc(runCtx, func() {
 		if command.Process != nil {
 			_ = syscall.Kill(-command.Process.Pid, syscall.SIGKILL)
@@ -148,21 +225,27 @@ func (r *Runner) runFiltered(
 	command.Stdout = stdout
 	command.Stderr = stderr
 
-	started := time.Now()
-	err = command.Run()
-	duration := time.Since(started)
+	err := command.Run()
+	completed := time.Now().UTC()
+	duration := completed.Sub(started)
 
 	exitCode := 0
+	status := "ok"
 	if err != nil {
 		var exitErr *exec.ExitError
 		switch {
-		case errors.As(err, &exitErr):
-			exitCode = exitErr.ExitCode()
 		case errors.Is(runCtx.Err(), context.DeadlineExceeded):
 			exitCode = 124
+			status = "timeout"
+		case errors.As(err, &exitErr):
+			exitCode = exitErr.ExitCode()
+			status = "failed"
 		default:
 			return Result{}, err
 		}
+	}
+	if exitCode != 0 && status == "ok" {
+		status = "failed"
 	}
 
 	stdoutText := redact(stdout.String())
@@ -189,36 +272,35 @@ func (r *Runner) runFiltered(
 	if err != nil {
 		return Result{}, err
 	}
-	commandID := hex.EncodeToString(sum[:8])
 	outputHash := hex.EncodeToString(sum[:])
+	commandStr := r.maskText(ctx, cmd)
+	truncated := stdout.Truncated() || stderr.Truncated() || truncatedLines
 	if err := r.history.Put(Record{
-		CommandID:  commandID,
-		RepoPath:   repoPath,
-		Command:    cmd,
-		CWD:        runCWD,
-		ExitCode:   exitCode,
-		Truncated:  stdout.Truncated() || stderr.Truncated() || truncatedLines,
-		Stdout:     stdoutLines,
-		Stderr:     stderrLines,
-		Combined:   combined,
-		OutputHash: outputHash,
+		CommandID:   commandID,
+		Status:      status,
+		RepoPath:    repoPath,
+		Command:     commandStr,
+		CWD:         runCWD,
+		ExitCode:    exitCode,
+		DurationMS:  duration.Milliseconds(),
+		Truncated:   truncated,
+		Stdout:      stdoutLines,
+		Stderr:      stderrLines,
+		Combined:    combined,
+		OutputHash:  outputHash,
+		StartedAt:   started,
+		CompletedAt: completed,
 	}); err != nil {
 		return Result{}, err
 	}
-	commandStr := cmd
-	if r.baseMask != nil {
-		commandStr = r.baseMask.Apply(commandStr)
-	}
-	if cmdMask != nil {
-		commandStr = cmdMask.Apply(commandStr)
-	}
 	return Result{
+		Status:        status,
 		CommandID:     commandID,
 		Command:       commandStr,
 		CWD:           runCWD,
 		ExitCode:      exitCode,
 		DurationMS:    duration.Milliseconds(),
-		Truncated:     stdout.Truncated() || stderr.Truncated() || truncatedLines || filterTruncated,
+		Truncated:     truncated || filterTruncated,
 		StdoutTail:    tail80(stdoutLines),
 		StderrTail:    tail80(stderrLines),
 		FilteredLines: filteredLines,
@@ -227,15 +309,56 @@ func (r *Runner) runFiltered(
 	}, nil
 }
 
+func (r *Runner) maskText(ctx context.Context, text string) string {
+	out := text
+	_, cmdMask := secretsFromContext(ctx)
+	if r.baseMask != nil {
+		out = r.baseMask.Apply(out)
+	}
+	if cmdMask != nil {
+		out = cmdMask.Apply(out)
+	}
+	return out
+}
+
+func newCommandID() string {
+	var buf [16]byte
+	if _, err := rand.Read(buf[:]); err == nil {
+		return hex.EncodeToString(buf[:])
+	}
+	sum := sha256.Sum256([]byte(strconv.FormatInt(time.Now().UnixNano(), 10)))
+	return hex.EncodeToString(sum[:8])
+}
+
+func nextCallForStatus(status string, commandID string) *NextCall {
+	if status != "running" || commandID == "" {
+		return nil
+	}
+	return &NextCall{Tool: "command_get", CommandID: commandID, Mode: "status"}
+}
+
 // RunInRepo executes cmd in repoPath or a repo-relative cwd without allowing path escape.
 func (r *Runner) RunInRepo(ctx context.Context, cmd string, repoPath string, cwd string, timeoutSeconds int) (Result, error) {
 	return r.RunFilteredInRepo(ctx, cmd, repoPath, cwd, timeoutSeconds, Filter{})
 }
 
+// RunInRepoWithWait executes cmd in a repo with a separate MCP wait budget.
+func (r *Runner) RunInRepoWithWait(ctx context.Context, cmd string, repoPath string, cwd string, timeoutSeconds int, mcpWaitSeconds int) (Result, error) {
+	return r.RunFilteredInRepoWithWait(ctx, cmd, repoPath, cwd, timeoutSeconds, mcpWaitSeconds, Filter{})
+}
+
 // RunFilteredInRepo executes cmd in a repo and applies a deterministic output filter.
 func (r *Runner) RunFilteredInRepo(ctx context.Context, cmd string, repoPath string, cwd string, timeoutSeconds int, filter Filter) (Result, error) {
+	return r.RunFilteredInRepoWithWait(ctx, cmd, repoPath, cwd, timeoutSeconds, 0, filter)
+}
+
+// RunFilteredInRepoWithWait executes cmd in a repo with bounded MCP wait and durable lookup.
+func (r *Runner) RunFilteredInRepoWithWait(ctx context.Context, cmd string, repoPath string, cwd string, timeoutSeconds int, mcpWaitSeconds int, filter Filter) (Result, error) {
 	if strings.TrimSpace(repoPath) == "" {
 		return Result{}, errors.New("repo_path is required")
+	}
+	if strings.TrimSpace(cmd) == "" {
+		return Result{}, errors.New("command is required")
 	}
 	if err := rejectProtectedConfigCommand(cmd, r.policy.ProtectedConfigPath); err != nil {
 		return Result{}, err
@@ -257,7 +380,14 @@ func (r *Runner) RunFilteredInRepo(ctx context.Context, cmd string, repoPath str
 			return Result{}, fmt.Errorf("cwd %q escapes repo_path", cwd)
 		}
 	}
-	return r.runFiltered(ctx, cmd, runCWD, timeoutSeconds, filter, repo)
+	runCWD, err = r.safeCWD(runCWD)
+	if err != nil {
+		return Result{}, err
+	}
+	if timeoutSeconds <= 0 {
+		timeoutSeconds = r.policy.DefaultTimeoutSeconds
+	}
+	return r.runPreparedWithWait(ctx, cmd, runCWD, timeoutSeconds, mcpWaitSeconds, filter, repo)
 }
 
 // FilterHistory applies filter to a retained command output record.

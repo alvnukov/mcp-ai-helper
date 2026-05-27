@@ -20,6 +20,7 @@ type lakeSmokeRequest struct {
 	Mode           string `json:"mode"`
 	File           string `json:"file"`
 	TimeoutSeconds int    `json:"timeout_seconds"`
+	MCPWaitSeconds int    `json:"mcp_wait_seconds"`
 }
 
 type lakeInitRequest struct {
@@ -43,6 +44,7 @@ func registerLakeTools(srv *server.MCPServer, deps *Server) {
 		basemcp.WithString("mode", basemcp.Description("Smoke mode: build or check. Defaults to build.")),
 		basemcp.WithString("file", basemcp.Description("Repo-relative Lean file for check mode.")),
 		basemcp.WithNumber("timeout_seconds", basemcp.Description("Optional command timeout in seconds.")),
+		basemcp.WithNumber("mcp_wait_seconds", basemcp.Description("Optional MCP wait budget before returning running + command_id.")),
 	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
 		var args lakeSmokeRequest
 		if err := bind(req, &args); err != nil {
@@ -80,7 +82,7 @@ func registerLakeTools(srv *server.MCPServer, deps *Server) {
 }
 
 func runLakeSmoke(ctx context.Context, req lakeSmokeRequest, commands *command.Runner) (lake.CommandResult, error) {
-	runner := lake.CommandRunner{Commands: commands, TimeoutSeconds: req.TimeoutSeconds}
+	runner := lake.CommandRunner{Commands: commands, TimeoutSeconds: req.TimeoutSeconds, MCPWaitSeconds: req.MCPWaitSeconds}
 	switch strings.TrimSpace(req.Mode) {
 	case "", "build":
 		return lake.Build(ctx, req.RepoPath, runner)

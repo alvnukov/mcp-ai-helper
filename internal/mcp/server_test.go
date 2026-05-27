@@ -109,7 +109,7 @@ func TestNewHidesDisabledLayers(t *testing.T) {
 	cfg.Layers.Workflows.Enabled = &disabled
 	srv := New(cfg)
 	tools := srv.ListTools()
-	for _, name := range []string{"assistant_guidance", "list_models", "collect_command_output", "run_workflow", "task_batch_upsert", "web_fetch", "fetch_url"} {
+	for _, name := range []string{"assistant_guidance", "list_models", "collect_command_output", "command_get", "run_workflow", "task_batch_upsert", "web_fetch", "fetch_url"} {
 		if _, ok := tools[name]; ok {
 			t.Fatalf("tool %s should be hidden", name)
 		}
@@ -178,7 +178,7 @@ func TestRunPipelineSchemaIncludesTaskStatusFields(t *testing.T) {
 		t.Fatalf("marshal schema: %v", err)
 	}
 	schema := string(schemaBytes)
-	for _, field := range []string{"timeout_seconds", "current_task_id", "task_on_start", "task_on_success", "task_on_failure"} {
+	for _, field := range []string{"timeout_seconds", "mcp_wait_seconds", "current_task_id", "task_on_start", "task_on_success", "task_on_failure"} {
 		if !strings.Contains(schema, field) {
 			t.Fatalf("run_pipeline schema does not contain %q: %s", field, schema)
 		}

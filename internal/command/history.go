@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zol/mcp-ai-helper/internal/evidence"
@@ -31,6 +32,7 @@ type HistoryPolicy struct {
 
 // History stores bounded command output so callers can re-filter it later.
 type History struct {
+	mu       sync.RWMutex
 	root     string
 	policy   HistoryPolicy
 	projects *project.Store
@@ -39,21 +41,26 @@ type History struct {
 
 // Record is one retained command execution artifact.
 type Record struct {
-	CommandID  string    `json:"command_id"`
-	RepoPath   string    `json:"repo_path"`
-	Command    string    `json:"command"`
-	CWD        string    `json:"cwd"`
-	ExitCode   int       `json:"exit_code"`
-	Truncated  bool      `json:"truncated"`
-	Stdout     []string  `json:"stdout"`
-	Stderr     []string  `json:"stderr"`
-	Combined   []string  `json:"combined"`
-	OutputHash string    `json:"output_hash"`
-	CreatedAt  time.Time `json:"created_at"`
+	CommandID   string    `json:"command_id"`
+	Status      string    `json:"status"`
+	RepoPath    string    `json:"repo_path"`
+	Command     string    `json:"command"`
+	CWD         string    `json:"cwd"`
+	ExitCode    int       `json:"exit_code"`
+	DurationMS  int64     `json:"duration_ms,omitempty"`
+	Truncated   bool      `json:"truncated"`
+	Stdout      []string  `json:"stdout"`
+	Stderr      []string  `json:"stderr"`
+	Combined    []string  `json:"combined"`
+	OutputHash  string    `json:"output_hash"`
+	StartedAt   time.Time `json:"started_at,omitempty"`
+	CompletedAt time.Time `json:"completed_at,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 type indexEntry struct {
 	CommandID  string    `json:"command_id"`
+	Status     string    `json:"status"`
 	RepoPath   string    `json:"repo_path"`
 	Project    string    `json:"project"`
 	Command    string    `json:"command"`
@@ -98,6 +105,8 @@ func NewInMemoryHistory() *History {
 
 // Put stores record in memory and on disk.
 func (h *History) Put(record Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	if strings.TrimSpace(record.CommandID) == "" {
 		return errors.New("command_id is required")
 	}
@@ -126,6 +135,7 @@ func (h *History) Put(record Record) error {
 	}
 	entry := indexEntry{
 		CommandID:  record.CommandID,
+		Status:     record.Status,
 		RepoPath:   record.RepoPath,
 		Project:    projectName,
 		Command:    record.Command,
@@ -145,6 +155,8 @@ func (h *History) Put(record Record) error {
 
 // Filter returns a previously executed command record with a new output filter applied.
 func (h *History) Filter(commandID string, filter Filter) (Result, error) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
 	record, ok := h.records[commandID]
 	if !ok {
 		return Result{}, fmt.Errorf("command history entry %q not found", commandID)
@@ -153,22 +165,31 @@ func (h *History) Filter(commandID string, filter Filter) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	durationMS := record.DurationMS
+	if record.Status == "running" && !record.StartedAt.IsZero() {
+		durationMS = time.Since(record.StartedAt).Milliseconds()
+	}
 	return Result{
+		Status:        record.Status,
 		CommandID:     commandID,
 		Command:       record.Command,
 		CWD:           record.CWD,
 		ExitCode:      record.ExitCode,
+		DurationMS:    durationMS,
 		Truncated:     record.Truncated || filterTruncated,
 		StdoutTail:    tail80(record.Stdout),
 		StderrTail:    tail80(record.Stderr),
 		FilteredLines: filteredLines,
 		EvidenceLines: evidenceFromLines(record.Combined),
 		OutputHash:    record.OutputHash,
+		NextCall:      nextCallForStatus(record.Status, commandID),
 	}, nil
 }
 
 // Cleanup removes records outside retention policy and rewrites the search indexes.
 func (h *History) Cleanup() error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	if h.root == "" {
 		return nil
 	}

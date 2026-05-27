@@ -27,13 +27,16 @@ type Workspace struct {
 
 // CommandResult is the compact, MCP-facing shape returned by the backend.
 type CommandResult struct {
-	WorkspaceDetected bool     `json:"workspace_detected"`
-	WorkspaceDir      string   `json:"workspace_dir,omitempty"`
-	Command           []string `json:"command,omitempty"`
-	ExitCode          int      `json:"exit_code"`
-	Output            []string `json:"output,omitempty"`
-	Diagnostics       []string `json:"diagnostics,omitempty"`
-	Blocker           string   `json:"blocker,omitempty"`
+	Status            string            `json:"status,omitempty"`
+	CommandID         string            `json:"command_id,omitempty"`
+	NextCall          *command.NextCall `json:"next_call,omitempty"`
+	WorkspaceDetected bool              `json:"workspace_detected"`
+	WorkspaceDir      string            `json:"workspace_dir,omitempty"`
+	Command           []string          `json:"command,omitempty"`
+	ExitCode          int               `json:"exit_code"`
+	Output            []string          `json:"output,omitempty"`
+	Diagnostics       []string          `json:"diagnostics,omitempty"`
+	Blocker           string            `json:"blocker,omitempty"`
 }
 
 // Runner executes a Lake command through the helper's bounded command layer.
@@ -64,6 +67,7 @@ type RPCResult struct {
 type CommandRunner struct {
 	Commands       *command.Runner
 	TimeoutSeconds int
+	MCPWaitSeconds int
 }
 
 func ResolveWorkspace(repoPath string) (Workspace, error) {
@@ -435,15 +439,18 @@ func (r CommandRunner) Run(ctx context.Context, workspaceDir string, args []stri
 	if len(args) == 0 {
 		return CommandResult{WorkspaceDetected: true, WorkspaceDir: workspaceDir, ExitCode: -1, Blocker: "empty Lake command"}, nil
 	}
-	result, err := r.Commands.RunFilteredInRepo(ctx, shellQuote(args), workspaceDir, "", r.TimeoutSeconds, command.Filter{Keywords: []string{"error", "warning", "failed", "unknown", "invalid", "not found"}, CaseInsensitive: true, MaxLines: 40})
+	result, err := r.Commands.RunFilteredInRepoWithWait(ctx, shellQuote(args), workspaceDir, "", r.TimeoutSeconds, r.MCPWaitSeconds, command.Filter{Keywords: []string{"error", "warning", "failed", "unknown", "invalid", "not found"}, CaseInsensitive: true, MaxLines: 40})
 	if err != nil {
 		return CommandResult{}, err
+	}
+	if result.Status == "running" {
+		return CommandResult{Status: "running", CommandID: result.CommandID, NextCall: result.NextCall, WorkspaceDetected: true, WorkspaceDir: workspaceDir, Command: append([]string(nil), args...), ExitCode: -1, Diagnostics: []string{"command still running"}}, nil
 	}
 	diagnostics := result.FilteredLines
 	if len(diagnostics) == 0 {
 		diagnostics = FilterDiagnostics(strings.Join(append(result.StdoutTail, result.StderrTail...), "\n"))
 	}
-	return CommandResult{WorkspaceDetected: true, WorkspaceDir: workspaceDir, Command: append([]string(nil), args...), ExitCode: result.ExitCode, Output: append([]string(nil), result.StdoutTail...), Diagnostics: diagnostics}, nil
+	return CommandResult{Status: result.Status, CommandID: result.CommandID, WorkspaceDetected: true, WorkspaceDir: workspaceDir, Command: append([]string(nil), args...), ExitCode: result.ExitCode, Output: append([]string(nil), result.StdoutTail...), Diagnostics: diagnostics}, nil
 }
 
 func FilterDiagnostics(output string) []string {
