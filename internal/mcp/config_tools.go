@@ -205,7 +205,7 @@ func initTaskRegistry(args taskRegistryInitRequest) (map[string]any, error) {
 
 func writeRepoTaskRegistryConfig(path string, registryPath string) error {
 	var root map[string]any
-	if data, err := os.ReadFile(path); err == nil {
+	if data, err := os.ReadFile(path); err == nil { // #nosec G304 -- path is the fixed repo-local .mcp-ai-helper.yaml from initTaskRegistry.
 		if err := yaml.Unmarshal(data, &root); err != nil {
 			return fmt.Errorf("parse repo config: %w", err)
 		}
@@ -369,6 +369,8 @@ func applyConfigOption(cfg *config.Config, optionPath string, value string) erro
 		cfg.PipelinePolicy.MaxReturnChars = positiveIntValue(optionPath, value)
 	case "pipeline_policy.require_evidence_for_analysis":
 		cfg.PipelinePolicy.RequireEvidenceForAnalysis = derefBool(boolValue(value))
+	case "web_policy.timeout_seconds":
+		cfg.WebPolicy.TimeoutSeconds = positiveIntValue(optionPath, value)
 	case "task_registry.backend":
 		cfg.TaskRegistry.Backend = registryBackendValue(value)
 	case "task_registry.obsidian.path":
@@ -444,7 +446,7 @@ func validateConfigOptionValue(optionPath string, value string) error {
 		if _, err := strconv.ParseBool(value); err != nil {
 			return fmt.Errorf("config option %s requires a boolean value", optionPath)
 		}
-	case "command_policy.default_timeout_seconds", "command_policy.max_output_bytes", "command_policy.max_lines", "command_policy.log_retention_days", "command_policy.log_max_records", "pipeline_policy.max_return_chars":
+	case "command_policy.default_timeout_seconds", "command_policy.max_output_bytes", "command_policy.max_lines", "command_policy.log_retention_days", "command_policy.log_max_records", "pipeline_policy.max_return_chars", "web_policy.timeout_seconds":
 		parsed, err := strconv.Atoi(value)
 		if err != nil || parsed <= 0 {
 			return fmt.Errorf("config option %s requires a positive integer value", optionPath)

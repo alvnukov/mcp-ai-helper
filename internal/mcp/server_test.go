@@ -584,6 +584,13 @@ secrets:
 	if loaded.CommandPolicy.MaxLines != 77 {
 		t.Fatalf("max_lines = %d, want 77", loaded.CommandPolicy.MaxLines)
 	}
+	loaded, err = setConfigOption(path, "web_policy.timeout_seconds", "600")
+	if err != nil {
+		t.Fatalf("set web timeout option: %v", err)
+	}
+	if loaded.WebPolicy.TimeoutSeconds != 600 {
+		t.Fatalf("web timeout = %d, want 600", loaded.WebPolicy.TimeoutSeconds)
+	}
 	loaded, err = resetConfigOption(path, "layers.tasks.enabled")
 	if err != nil {
 		t.Fatalf("reset option: %v", err)
