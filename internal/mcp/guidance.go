@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"sort"
 	"strings"
 
 	basemcp "github.com/mark3labs/mcp-go/mcp"
@@ -15,14 +16,14 @@ const toolDiscoveryGuidance = `## Tool Discovery Hints
 
 1. Retained command output: use command_get(command_id, mode=status|result|tail|evidence) or filter_command_history(command_id) instead of rerunning commands or reading raw log files.
 2. Feedback intake: use issue_add to record cross-repository feedback, issue_list to inspect open feedback issues, and issue_accept to move one issue into in_progress when taking ownership.
-3. If these tool names are not visible after assistant_guidance, request MCP client rediscovery/restart; do not replace them with shell/file/git fallbacks.`
+3. If these tool names are not visible after assistant_guidance, call tool_manifest to compare helper-registered tools with the client-visible surface, then request MCP client rediscovery/restart; do not replace them with shell/file/git fallbacks.`
 
 func currentGuidance(cfg *config.Config) string {
 	return withToolDiscoveryGuidance(config.GuidanceForConfig(cfg))
 }
 
 func withToolDiscoveryGuidance(guidance string) string {
-	if strings.Contains(guidance, "command_get") && strings.Contains(guidance, "filter_command_history") && strings.Contains(guidance, "issue_add") {
+	if strings.Contains(guidance, "tool_manifest") && strings.Contains(guidance, "command_get") && strings.Contains(guidance, "filter_command_history") && strings.Contains(guidance, "issue_add") {
 		return guidance
 	}
 	guidance = strings.TrimSpace(guidance)
@@ -30,6 +31,15 @@ func withToolDiscoveryGuidance(guidance string) string {
 		return toolDiscoveryGuidance
 	}
 	return guidance + "\n\n" + toolDiscoveryGuidance
+}
+
+func toolManifest(srv *server.MCPServer) map[string]any {
+	names := make([]string, 0, len(srv.ListTools()))
+	for name := range srv.ListTools() {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return map[string]any{"count": len(names), "tools": names}
 }
 
 func registerGuidance(srv *server.MCPServer, deps *Server) {
@@ -47,6 +57,11 @@ func registerGuidance(srv *server.MCPServer, deps *Server) {
 	), func(_ context.Context, _ basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
 		cfg, _, _, _, _ := deps.loadDeps()
 		return structured(config.SetupGuidanceForConfig(cfg))
+	})
+	srv.AddTool(basemcp.NewTool("tool_manifest",
+		basemcp.WithDescription("Return a compact sorted list of helper-registered MCP tools for surface mismatch diagnostics."),
+	), func(_ context.Context, _ basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+		return structured(toolManifest(srv))
 	})
 	srv.AddResource(basemcp.Resource{
 		URI:         guidanceURI,

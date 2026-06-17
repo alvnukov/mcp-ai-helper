@@ -45,7 +45,7 @@ func TestCurrentTasksReturnsOnlyActiveStatuses(t *testing.T) {
 func TestNewExposesAssistantGuidance(t *testing.T) {
 	cfg := &config.Config{AssistantGuidance: config.DefaultAssistantGuidance()}
 	srv := New(cfg)
-	for _, name := range []string{"assistant_guidance", "server_setup_guidance", "task_batch_upsert", "task_set_status", "task_graph", "task_context", "web_fetch"} {
+	for _, name := range []string{"assistant_guidance", "server_setup_guidance", "tool_manifest", "task_batch_upsert", "task_set_status", "task_graph", "task_context", "web_fetch"} {
 		if _, ok := srv.ListTools()[name]; !ok {
 			t.Fatalf("%s tool is not registered", name)
 		}
@@ -70,7 +70,7 @@ func TestNewExposesAssistantGuidance(t *testing.T) {
 	if !strings.Contains(cfg.AssistantGuidance, "no such unified commit means the task is not done") {
 		t.Fatal("guidance text does not describe commit closeout policy")
 	}
-	for _, want := range []string{"command_get", "filter_command_history", "issue_add", "issue_list", "issue_accept"} {
+	for _, want := range []string{"tool_manifest", "command_get", "filter_command_history", "issue_add", "issue_list", "issue_accept"} {
 		if !strings.Contains(currentGuidance(cfg), want) {
 			t.Fatalf("guidance text does not describe tool discovery for %q", want)
 		}
@@ -179,6 +179,24 @@ func TestRunWorkflowSchemaIncludesWorkflowFields(t *testing.T) {
 	}
 	if got := items["type"]; got != "object" {
 		t.Fatalf("run_workflow steps must advertise object items, got %v: %s", got, schema)
+	}
+}
+
+func TestToolManifestListsFeedbackAndCommandTools(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{AssistantGuidance: config.DefaultAssistantGuidance()}
+	srv := New(cfg)
+	manifest := toolManifest(srv)
+	tools, ok := manifest["tools"].([]string)
+	if !ok {
+		t.Fatalf("tool_manifest tools field = %#v", manifest["tools"])
+	}
+	joined := " " + strings.Join(tools, " ") + " "
+	for _, want := range []string{"command_get", "filter_command_history", "issue_add", "issue_list", "issue_accept"} {
+		if !strings.Contains(joined, " "+want+" ") {
+			t.Fatalf("tool_manifest missing %q: %#v", want, tools)
+		}
 	}
 }
 
