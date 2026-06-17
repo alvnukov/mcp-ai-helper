@@ -739,7 +739,7 @@ web_policy:
   enabled: true
   cache_dir: ~/.mcp-ai-helper/web
   max_source_bytes: 1048576
-  timeout_seconds: 20
+  timeout_seconds: 600
   max_redirects: 5
   allowed_schemes: [https, http]
   accepted_content_types: [text/html, text/plain, application/json, application/xml, text/]
@@ -791,7 +791,7 @@ func defaultWebPolicy() WebPolicy {
 		Enabled:              boolPtr(true),
 		CacheDir:             "~/.mcp-ai-helper/web",
 		MaxSourceBytes:       1048576,
-		TimeoutSeconds:       20,
+		TimeoutSeconds:       600,
 		MaxRedirects:         5,
 		AllowedSchemes:       []string{"https", "http"},
 		AcceptedContentTypes: []string{"text/html", "text/plain", "application/json", "application/xml", "text/"},

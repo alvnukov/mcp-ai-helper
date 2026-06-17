@@ -258,7 +258,7 @@ func normalizePolicy(policy config.WebPolicy) config.WebPolicy {
 		policy.MaxSearchResults = hardMaxSearchResults
 	}
 	if policy.TimeoutSeconds <= 0 {
-		policy.TimeoutSeconds = 20
+		policy.TimeoutSeconds = 600
 	}
 	if strings.TrimSpace(policy.UserAgent) == "" {
 		policy.UserAgent = "mcp-ai-helper/0.1"

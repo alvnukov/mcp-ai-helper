@@ -70,7 +70,7 @@ func Schema() map[string]any {
 			{Path: "web_policy.enabled", Type: "bool", Default: "true", Description: "Enables bounded web_fetch network access. Disable to fail closed."},
 			{Path: "web_policy.cache_dir", Type: "string", Default: "~/.mcp-ai-helper/web", Description: "Helper-managed cache for raw source bytes, normalized text, and metadata artifacts."},
 			{Path: "web_policy.max_source_bytes", Type: "int", Default: "1048576", Description: "Maximum accepted source body bytes. Larger responses return incomplete diagnostics, not complete artifacts."},
-			{Path: "web_policy.timeout_seconds", Type: "int", Default: "20", Description: "HTTP timeout for a bounded fetch."},
+			{Path: "web_policy.timeout_seconds", Type: "int", Default: "600", Description: "HTTP timeout for bounded fetch and search requests, in seconds."},
 			{Path: "web_policy.max_redirects", Type: "int", Default: "5", Description: "Maximum redirect count; redirects are validated against the same URL policy."},
 			{Path: "web_policy.allowed_schemes", Type: "[]string", Default: "https,http", Description: "Allowed URL schemes for web_fetch."},
 			{Path: "web_policy.allowed_hosts", Type: "[]string", Description: "Optional exact host allowlist. Empty allows public hosts subject to deny checks."},

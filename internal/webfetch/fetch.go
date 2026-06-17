@@ -87,7 +87,7 @@ func normalizePolicy(policy config.WebPolicy) config.WebPolicy {
 		policy.MaxSourceBytes = 1048576
 	}
 	if policy.TimeoutSeconds <= 0 {
-		policy.TimeoutSeconds = 20
+		policy.TimeoutSeconds = 600
 	}
 	if policy.MaxRedirects <= 0 {
 		policy.MaxRedirects = 5
@@ -386,7 +386,7 @@ func ArtifactPath(policy config.WebPolicy, docID string, source string) (string,
 		return "", errors.New("artifact path escapes web cache")
 	}
 	metaPath := filepath.Join(docDir, "metadata.json")
-	data, err := os.ReadFile(metaPath)
+	data, err := os.ReadFile(metaPath) // #nosec G304 -- docID is regex-validated and metaPath is checked inside the helper web cache.
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return "", fmt.Errorf("unknown or expired doc_id %q", docID)
@@ -434,7 +434,7 @@ func Read(policy config.WebPolicy, req ReadRequest) ReadResult {
 	if limit > 20000 {
 		limit = 20000
 	}
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- ArtifactPath only returns cache paths derived from a validated docID/source.
 	if err != nil {
 		result.Diagnostics = append(result.Diagnostics, diag("read_failed", err.Error()))
 		return result
@@ -468,7 +468,7 @@ func Find(policy config.WebPolicy, req FindRequest) FindResult {
 		result.Diagnostics = append(result.Diagnostics, diag("artifact_unavailable", err.Error()))
 		return result
 	}
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- ArtifactPath only returns cache paths derived from a validated docID/source.
 	if err != nil {
 		result.Diagnostics = append(result.Diagnostics, diag("read_failed", err.Error()))
 		return result

@@ -140,6 +140,12 @@ func TestLoadCreatesDefaultConfigInHomeDir(t *testing.T) {
 	if cfg.CommandPolicy.DefaultTimeoutSeconds != 300 {
 		t.Fatalf("default command timeout = %d, want 300", cfg.CommandPolicy.DefaultTimeoutSeconds)
 	}
+	if !strings.Contains(text, "timeout_seconds: 600") {
+		t.Fatal("generated config should default web timeout to 600 seconds")
+	}
+	if cfg.WebPolicy.TimeoutSeconds != 600 {
+		t.Fatalf("default web timeout = %d, want 600", cfg.WebPolicy.TimeoutSeconds)
+	}
 	if !strings.Contains(cfg.AssistantGuidance, "Repo Task Protocol") || !strings.Contains(cfg.AssistantGuidance, "one self-contained run_workflow") {
 		t.Fatal("loaded config guidance is missing workflow policy")
 	}
