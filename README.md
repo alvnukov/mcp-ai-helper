@@ -128,7 +128,9 @@ claude mcp add mcp-ai-helper /path/to/mcp-ai-helper/bin/mcp-ai-helper -- --confi
 - `server_setup_guidance`
 - `query_model`
 - `collect_command_output`
+- `command_get`
 - `filter_command_history`
+- `cleanup_command_history`
 - `run_pipeline`
 - `run_workflow`
 - `snapshot_file`
@@ -143,6 +145,9 @@ claude mcp add mcp-ai-helper /path/to/mcp-ai-helper/bin/mcp-ai-helper -- --confi
 - `task_current`
 - `task_get`
 - `task_delete`
+- `issue_add`
+- `issue_list`
+- `issue_accept`
 
 The server is intentionally policy-first. Local tools require `repo_path` from the caller; command `cwd` and file `path` are interpreted as repo-relative where applicable. It refuses unsafe command working directories, hash-mismatched file edits, repo path escapes, and broad git staging.
 

@@ -155,6 +155,9 @@ func TestLoadCreatesDefaultConfigInHomeDir(t *testing.T) {
 	if !strings.Contains(cfg.AssistantGuidance, "Search -> Fetch -> Find -> Read") || !strings.Contains(cfg.AssistantGuidance, "web_search for compact hits") || !strings.Contains(cfg.AssistantGuidance, "A search hit is not evidence") || !strings.Contains(cfg.AssistantGuidance, "fetched_doc_find") || !strings.Contains(cfg.AssistantGuidance, "fetched_doc_read") {
 		t.Fatal("loaded config guidance is missing bounded web workflow")
 	}
+	if !strings.Contains(cfg.AssistantGuidance, "command_get") || !strings.Contains(cfg.AssistantGuidance, "filter_command_history") || !strings.Contains(cfg.AssistantGuidance, "issue_add") {
+		t.Fatal("loaded config guidance is missing tool discovery hints")
+	}
 }
 
 func TestLayerEnabledDefaultsAndOverrides(t *testing.T) {

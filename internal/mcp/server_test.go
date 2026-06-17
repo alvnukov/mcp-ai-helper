@@ -70,6 +70,11 @@ func TestNewExposesAssistantGuidance(t *testing.T) {
 	if !strings.Contains(cfg.AssistantGuidance, "no such unified commit means the task is not done") {
 		t.Fatal("guidance text does not describe commit closeout policy")
 	}
+	for _, want := range []string{"command_get", "filter_command_history", "issue_add", "issue_list", "issue_accept"} {
+		if !strings.Contains(currentGuidance(cfg), want) {
+			t.Fatalf("guidance text does not describe tool discovery for %q", want)
+		}
+	}
 }
 
 func TestStartupSurfaceBudgetStaysCompact(t *testing.T) {
@@ -600,11 +605,11 @@ func TestLanguageToolsRegistered(t *testing.T) {
 func TestCurrentGuidanceUsesUpdatedConfig(t *testing.T) {
 	t.Parallel()
 	cfg := &config.Config{AssistantGuidance: "first guidance"}
-	if got := currentGuidance(cfg); got != "first guidance" {
+	if got := currentGuidance(cfg); !strings.Contains(got, "first guidance") || !strings.Contains(got, "command_get") {
 		t.Fatalf("guidance = %q", got)
 	}
 	cfg.AssistantGuidance = "second guidance"
-	if got := currentGuidance(cfg); got != "second guidance" {
+	if got := currentGuidance(cfg); !strings.Contains(got, "second guidance") || !strings.Contains(got, "issue_add") {
 		t.Fatalf("guidance after update = %q", got)
 	}
 }

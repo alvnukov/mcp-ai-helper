@@ -39,6 +39,12 @@ const defaultAssistantGuidance = `mcp-ai-helper operating guidance:
 6. Close only when acceptance criteria, relevant gate, task transition, and owned-files commit all succeeded. If there is no such unified commit means the task is not done.
 7. On failure: inspect actual state once, form a new hypothesis, and run the next minimal check. Do not repeat the same failed command without new information.
 
+## Tool Discovery Hints
+
+1. Retained command output: use command_get(command_id, mode=status|result|tail|evidence) or filter_command_history(command_id) instead of rerunning commands or reading raw log files.
+2. Feedback intake: use issue_add to record cross-repository feedback, issue_list to inspect open feedback issues, and issue_accept to move one issue into in_progress when taking ownership.
+3. If these tool names are not visible after assistant_guidance, request MCP client rediscovery/restart; do not replace them with shell/file/git fallbacks.
+
 ## Web Research Protocol
 
 1. Search -> Fetch -> Find -> Read. Start with web_search for compact hits only. A search hit is not evidence.

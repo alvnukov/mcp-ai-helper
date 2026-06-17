@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"strings"
 
 	basemcp "github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -10,8 +11,25 @@ import (
 
 const guidanceURI = "mcp-ai-helper://guidance"
 
+const toolDiscoveryGuidance = `## Tool Discovery Hints
+
+1. Retained command output: use command_get(command_id, mode=status|result|tail|evidence) or filter_command_history(command_id) instead of rerunning commands or reading raw log files.
+2. Feedback intake: use issue_add to record cross-repository feedback, issue_list to inspect open feedback issues, and issue_accept to move one issue into in_progress when taking ownership.
+3. If these tool names are not visible after assistant_guidance, request MCP client rediscovery/restart; do not replace them with shell/file/git fallbacks.`
+
 func currentGuidance(cfg *config.Config) string {
-	return config.GuidanceForConfig(cfg)
+	return withToolDiscoveryGuidance(config.GuidanceForConfig(cfg))
+}
+
+func withToolDiscoveryGuidance(guidance string) string {
+	if strings.Contains(guidance, "command_get") && strings.Contains(guidance, "filter_command_history") && strings.Contains(guidance, "issue_add") {
+		return guidance
+	}
+	guidance = strings.TrimSpace(guidance)
+	if guidance == "" {
+		return toolDiscoveryGuidance
+	}
+	return guidance + "\n\n" + toolDiscoveryGuidance
 }
 
 func registerGuidance(srv *server.MCPServer, deps *Server) {
