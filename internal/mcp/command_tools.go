@@ -3,7 +3,6 @@ package mcp
 import (
 	"context"
 	"errors"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -24,8 +23,8 @@ type projectHealthResult struct {
 	Errors   []string `json:"errors,omitempty"`
 }
 
-// checkProjectHealth runs build, vet, and test for a Go project.
-func checkProjectHealth(ctx context.Context, repoPath string) (projectHealthResult, error) {
+// checkProjectHealth runs build, vet, and test for a Go project using command.Runner.
+func checkProjectHealth(ctx context.Context, runner *command.Runner, repoPath string) (projectHealthResult, error) {
 	if strings.TrimSpace(repoPath) == "" {
 		return projectHealthResult{}, errors.New("repo_path is required")
 	}
@@ -43,36 +42,33 @@ func checkProjectHealth(ctx context.Context, repoPath string) (projectHealthResu
 	}
 
 	// Build
-	buildCtx, buildCancel := context.WithTimeout(ctx, 60*time.Second)
-	buildCmd := exec.CommandContext(buildCtx, "go", "build", "./...")
-	buildCmd.Dir = repo
-	buildOut, buildErr := buildCmd.CombinedOutput()
-	buildCancel()
+	buildRes, buildErr := runner.RunFilteredInRepoWithWait(ctx, "go build ./...", repo, "", 60, 0, command.Filter{})
 	if buildErr != nil {
+		return projectHealthResult{}, buildErr
+	}
+	if buildRes.ExitCode != 0 {
 		result.Build = "fail"
 		result.Status = "fail"
-		result.Errors = append(result.Errors, "build: "+strings.TrimSpace(string(buildOut)))
+		result.Errors = append(result.Errors, "build: "+strings.Join(buildRes.StderrTail, "\n"))
 	}
 
 	// Vet
-	vetCtx, vetCancel := context.WithTimeout(ctx, 60*time.Second)
-	vetCmd := exec.CommandContext(vetCtx, "go", "vet", "./...")
-	vetCmd.Dir = repo
-	vetOut, vetErr := vetCmd.CombinedOutput()
-	vetCancel()
+	vetRes, vetErr := runner.RunFilteredInRepoWithWait(ctx, "go vet ./...", repo, "", 60, 0, command.Filter{})
 	if vetErr != nil {
+		return projectHealthResult{}, vetErr
+	}
+	if vetRes.ExitCode != 0 {
 		result.Vet = "fail"
 		result.Status = "fail"
-		result.Errors = append(result.Errors, "vet: "+strings.TrimSpace(string(vetOut)))
+		result.Errors = append(result.Errors, "vet: "+strings.Join(vetRes.StderrTail, "\n"))
 	}
 
 	// Test
-	testCtx, testCancel := context.WithTimeout(ctx, 120*time.Second)
-	testCmd := exec.CommandContext(testCtx, "go", "test", "-count=1", "-timeout=60s", "./...")
-	testCmd.Dir = repo
-	_, testErr := testCmd.CombinedOutput()
-	testCancel()
+	testRes, testErr := runner.RunFilteredInRepoWithWait(ctx, "go test -count=1 -timeout=60s ./...", repo, "", 120, 0, command.Filter{})
 	if testErr != nil {
+		return projectHealthResult{}, testErr
+	}
+	if testRes.ExitCode != 0 {
 		result.Test = "fail"
 		result.Status = "fail"
 		result.Errors = append(result.Errors, "test: tests failed")
@@ -217,7 +213,11 @@ func registerCommandTools(srv *server.MCPServer, deps *Server) {
 		if err := bind(req, &args); err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
-		result, err := checkProjectHealth(ctx, args.RepoPath)
+		cmds, err := deps.commandRunnerForRepo(args.RepoPath, "project_health")
+		if err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
+		result, err := checkProjectHealth(ctx, cmds, args.RepoPath)
 		if err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
