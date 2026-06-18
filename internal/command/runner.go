@@ -224,16 +224,15 @@ func (r *Runner) executePrepared(ctx context.Context, commandID string, cmd stri
 	if len(envs) > 0 {
 		command.Env = append(os.Environ(), envs...)
 	}
-	stop := context.AfterFunc(runCtx, func() {
-		if command.Process != nil {
-			_ = syscall.Kill(-command.Process.Pid, syscall.SIGKILL)
-		}
-	})
-	defer stop()
 	command.Stdout = stdout
 	command.Stderr = stderr
 
 	err := command.Run()
+	// Kill the entire process group after the command finishes,
+	// in case child processes are still alive.
+	if command.Process != nil {
+		_ = syscall.Kill(-command.Process.Pid, syscall.SIGKILL)
+	}
 	completed := time.Now().UTC()
 	duration := completed.Sub(started)
 
@@ -422,10 +421,8 @@ func (r *Runner) Abort(commandID string) (AbortResult, error) {
 	if strings.TrimSpace(commandID) == "" {
 		return AbortResult{}, errors.New("command_id is required")
 	}
-	// Check if the command is still running.
 	val, ok := r.running.Load(commandID)
 	if !ok {
-		// Check if the command exists in history (completed).
 		_, found, err := r.history.getRecord(commandID)
 		if err != nil {
 			return AbortResult{}, err
@@ -441,11 +438,7 @@ func (r *Runner) Abort(commandID string) (AbortResult, error) {
 	}
 	cancel()
 	r.running.Delete(commandID)
-	// Update history record status.
-	if err := r.history.UpdateStatus(commandID, "aborted"); err != nil {
-		// Non-fatal: process was killed but status update failed.
-		return AbortResult{Status: "ok", CommandID: commandID, Reason: "process killed, status update failed: " + err.Error()}, nil
-	}
+	// The background goroutine will update history status when it detects the cancelled context.
 	return AbortResult{Status: "ok", CommandID: commandID}, nil
 }
 

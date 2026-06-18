@@ -498,14 +498,19 @@ func TestAbortKillsRunningCommand(t *testing.T) {
 		t.Fatalf("abort status = %q, want ok", abortResult.Status)
 	}
 
-	// Verify the command is no longer running.
-	completed, err := runner.FilterHistory(result.CommandID, Filter{})
-	if err != nil {
-		t.Fatal(err)
+	// Wait for the background goroutine to finish after cancel.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		completed, err := runner.FilterHistory(result.CommandID, Filter{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if completed.Status != "running" {
+			return // success
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
-	if completed.Status == "running" {
-		t.Fatal("command should no longer be running after abort")
-	}
+	t.Fatal("command should no longer be running after abort")
 }
 
 func TestAbortReturnsNotFoundForUnknownID(t *testing.T) {
