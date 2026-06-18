@@ -756,3 +756,148 @@ func TestDeleteExactBlockWithBase64(t *testing.T) {
 		t.Fatalf("content = %q", string(data))
 	}
 }
+
+// --- WriteFile tests ---
+
+func TestWriteFileCreatesNewFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sub", "new.txt")
+	result, err := WriteFile(WriteFileRequest{Path: path, Content: "hello\n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "ok" || !result.Changed {
+		t.Fatalf("result = %+v, want ok changed", result)
+	}
+	data, _ := os.ReadFile(path)
+	if string(data) != "hello\n" {
+		t.Fatalf("content = %q", string(data))
+	}
+}
+
+func TestWriteFileCreatesParentDirs(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a", "b", "c", "file.txt")
+	result, err := WriteFile(WriteFileRequest{Path: path, Content: "deep\n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "ok" || !result.Changed {
+		t.Fatalf("result = %+v, want ok changed", result)
+	}
+	data, _ := os.ReadFile(path)
+	if string(data) != "deep\n" {
+		t.Fatalf("content = %q", string(data))
+	}
+}
+
+func TestWriteFileOverwritesExistingFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.txt")
+	if err := os.WriteFile(path, []byte("old\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := WriteFile(WriteFileRequest{Path: path, Content: "new\n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "ok" || !result.Changed {
+		t.Fatalf("result = %+v, want ok changed", result)
+	}
+	data, _ := os.ReadFile(path)
+	if string(data) != "new\n" {
+		t.Fatalf("content = %q", string(data))
+	}
+}
+
+func TestWriteFileIdempotentWhenContentMatches(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.txt")
+	if err := os.WriteFile(path, []byte("same\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := WriteFile(WriteFileRequest{Path: path, Content: "same\n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "ok" || result.Changed {
+		t.Fatalf("result = %+v, want ok unchanged (idempotent)", result)
+	}
+}
+
+func TestWriteFileGuardsOnExpectedHash(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.txt")
+	if err := os.WriteFile(path, []byte("original\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, _ := ReadSnapshot(path)
+	result, err := WriteFile(WriteFileRequest{
+		Path:         path,
+		Content:      "overwritten\n",
+		ExpectedHash: snapshot.Hash,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "ok" || !result.Changed {
+		t.Fatalf("result = %+v, want ok changed", result)
+	}
+}
+
+func TestWriteFileConflictOnHashMismatch(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.txt")
+	if err := os.WriteFile(path, []byte("original\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := WriteFile(WriteFileRequest{
+		Path:         path,
+		Content:      "new\n",
+		ExpectedHash: "deadbeef",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "conflict" {
+		t.Fatalf("status = %q, want conflict", result.Status)
+	}
+	data, _ := os.ReadFile(path)
+	if string(data) != "original\n" {
+		t.Fatalf("file should be unchanged: %q", string(data))
+	}
+}
+
+func TestWriteFileWithBase64(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.txt")
+	result, err := WriteFile(WriteFileRequest{
+		Path:       path,
+		ContentB64: base64.StdEncoding.EncodeToString([]byte("encoded\n")),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "ok" || !result.Changed {
+		t.Fatalf("result = %+v, want ok changed", result)
+	}
+	data, _ := os.ReadFile(path)
+	if string(data) != "encoded\n" {
+		t.Fatalf("content = %q", string(data))
+	}
+}
+
+func TestWriteFileRequiresPath(t *testing.T) {
+	_, err := WriteFile(WriteFileRequest{Content: "x"})
+	if err == nil {
+		t.Fatal("expected error for empty path")
+	}
+}
+
+func TestWriteFileRequiresContent(t *testing.T) {
+	dir := t.TempDir()
+	_, err := WriteFile(WriteFileRequest{Path: filepath.Join(dir, "f.txt")})
+	if err == nil {
+		t.Fatal("expected error for empty content")
+	}
+}

@@ -692,6 +692,83 @@ func resolveContent(plain string, b64 string) (string, error) {
 	return plain, nil
 }
 
+// --- WriteFile ---
+
+// WriteFileRequest describes a file write with optional overwrite guard.
+type WriteFileRequest struct {
+	RepoPath     string `json:"repo_path"`
+	Path         string `json:"path"`
+	Content      string `json:"content,omitempty"`
+	ContentB64   string `json:"content_b64,omitempty"`
+	ExpectedHash string `json:"expected_hash,omitempty"`
+	Mode         int    `json:"mode,omitempty"`
+}
+
+// WriteFile writes content to a file, creating parent directories if needed.
+// If ExpectedHash is set and the file exists with a different hash, returns conflict.
+// If the file already has the desired content, returns ok with changed=false (idempotent).
+func WriteFile(req WriteFileRequest) (ReplaceResult, error) {
+	if strings.TrimSpace(req.Path) == "" {
+		return ReplaceResult{}, errors.New("path is required")
+	}
+	var clean string
+	if strings.TrimSpace(req.RepoPath) != "" {
+		var err error
+		clean, _, err = repoRelativePath(req.RepoPath, req.Path)
+		if err != nil {
+			return ReplaceResult{}, err
+		}
+	} else {
+		var err error
+		clean, err = cleanPath(req.Path)
+		if err != nil {
+			return ReplaceResult{}, err
+		}
+	}
+	content, err := resolveContent(req.Content, req.ContentB64)
+	if err != nil {
+		return ReplaceResult{}, err
+	}
+	if content == "" {
+		return ReplaceResult{}, errors.New("content is required (set content or content_b64)")
+	}
+	// Check if file exists.
+	// #nosec G304 -- clean is resolved from a validated local path or repo-relative path.
+	existing, readErr := os.ReadFile(clean)
+	if readErr == nil {
+		// File exists.
+		oldHash := Hash(existing)
+		if req.ExpectedHash != "" && oldHash != req.ExpectedHash {
+			return ReplaceResult{Status: "conflict", Path: clean, OldHash: oldHash, Reason: "file hash changed after snapshot"}, nil
+		}
+		newHash := Hash([]byte(content))
+		if oldHash == newHash {
+			return ReplaceResult{Status: "ok", Path: clean, Changed: false, OldHash: oldHash, NewHash: oldHash, Reason: "content already matches"}, nil
+		}
+		if err := os.WriteFile(clean, []byte(content), 0o600); err != nil {
+			return ReplaceResult{}, err
+		}
+		return ReplaceResult{Status: "ok", Path: clean, Changed: true, OldHash: oldHash, NewHash: newHash}, nil
+	}
+	if !errors.Is(readErr, os.ErrNotExist) {
+		return ReplaceResult{}, readErr
+	}
+	// File doesn't exist. Create parent dirs.
+	dir := filepath.Dir(clean)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return ReplaceResult{}, fmt.Errorf("create parent dirs: %w", err)
+	}
+	mode := os.FileMode(0o644)
+	if req.Mode != 0 {
+		mode = os.FileMode(req.Mode)
+	}
+	if err := os.WriteFile(clean, []byte(content), mode); err != nil {
+		return ReplaceResult{}, err
+	}
+	newHash := Hash([]byte(content))
+	return ReplaceResult{Status: "ok", Path: clean, Changed: true, NewHash: newHash}, nil
+}
+
 const protectedLeanGenericToolMessage = "policy_denied: generic file access to protected task registry source is disabled for this path only; continue with task_current/task_get/task_graph/task_context or use a focused search that skips protected registry files"
 
 func rejectProtectedLeanPath(path string) error {

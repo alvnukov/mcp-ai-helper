@@ -133,4 +133,37 @@ func registerFileTools(srv *server.MCPServer) {
 		}
 		return structured(result)
 	})
+	srv.AddTool(basemcp.NewTool("write_file",
+		basemcp.WithDescription("Write content to a file. Creates parent dirs if needed. Use content_b64 for text with backslashes or non-UTF8. Set expected_hash to guard overwrite of existing files."),
+		basemcp.WithString("repo_path", basemcp.Required()),
+		basemcp.WithString("path", basemcp.Required(), basemcp.Description("Repo-relative file path.")),
+		basemcp.WithString("content", basemcp.Description("File content as string. Omit when using content_b64.")),
+		basemcp.WithString("content_b64", basemcp.Description("Base64-encoded content. Use instead of content for safe transport.")),
+		basemcp.WithString("expected_hash", basemcp.Description("SHA-256 hash for overwrite guard. If set and file exists with different hash, returns conflict.")),
+		basemcp.WithNumber("mode", basemcp.Description("File permission mode (default 0644).")),
+	), func(_ context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+		var args struct {
+			RepoPath     string `json:"repo_path"`
+			Path         string `json:"path"`
+			Content      string `json:"content"`
+			ContentB64   string `json:"content_b64"`
+			ExpectedHash string `json:"expected_hash"`
+			Mode         int    `json:"mode"`
+		}
+		if err := bind(req, &args); err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
+		result, err := fileops.WriteFile(fileops.WriteFileRequest{
+			RepoPath:     args.RepoPath,
+			Path:         args.Path,
+			Content:      args.Content,
+			ContentB64:   args.ContentB64,
+			ExpectedHash: args.ExpectedHash,
+			Mode:         args.Mode,
+		})
+		if err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
+		return structured(result)
+	})
 }
