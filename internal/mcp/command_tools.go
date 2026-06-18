@@ -50,6 +50,32 @@ func registerCommandTools(srv *server.MCPServer, deps *Server) {
 		return basemcp.NewToolResultText("cleanup complete"), nil
 	})
 
+	srv.AddTool(basemcp.NewTool("command_list",
+		basemcp.WithDescription("List recent command history entries, optionally filtered by status and repo."),
+		basemcp.WithString("repo_path", basemcp.Description("Optional repo_path filter.")),
+		basemcp.WithString("status", basemcp.Description("Optional status filter: running, ok, error.")),
+		basemcp.WithNumber("limit", basemcp.Description("Max entries to return (default 50, max 200).")),
+	), func(_ context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+		var args struct {
+			RepoPath string `json:"repo_path"`
+			Status   string `json:"status"`
+			Limit    int    `json:"limit"`
+		}
+		if err := bind(req, &args); err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
+		_, _, cmds, _, _ := deps.loadDeps()
+		result, err := cmds.ListCommands(command.ListRequest{
+			Status:  args.Status,
+			RepoPath: args.RepoPath,
+			Limit:   args.Limit,
+		})
+		if err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
+		return structured(result)
+	})
+
 	srv.AddTool(basemcp.NewTool("command_get",
 		basemcp.WithDescription("Return durable command status/result by command_id without rerunning the command."),
 		basemcp.WithString("command_id", basemcp.Required()),

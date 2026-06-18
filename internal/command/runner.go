@@ -395,6 +395,11 @@ func (r *Runner) FilterHistory(commandID string, filter Filter) (Result, error) 
 	return r.history.Filter(commandID, filter)
 }
 
+// ListCommands returns a bounded list of command records from history.
+func (r *Runner) ListCommands(req ListRequest) (ListResult, error) {
+	return r.history.List(req)
+}
+
 const protectedLeanCommandMessage = "policy_denied: command appears to access protected task registry source; this is a local command denial, not a global task blocker; use task tools or exclude protected registry files"
 
 const protectedConfigCommandMessage = "current helper config cannot be edited from pipeline/command tools; use config_read/config_replace/config_reload config tools instead"

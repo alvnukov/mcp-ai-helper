@@ -240,6 +240,118 @@ func (h *History) Cleanup() error {
 	return rewriteIndexes(entries, kept)
 }
 
+// ListRequest controls which command records to return.
+type ListRequest struct {
+	Status  string `json:"status,omitempty"`
+	RepoPath string `json:"repo_path,omitempty"`
+	Limit   int    `json:"limit,omitempty"`
+}
+
+// ListEntry is a compact summary of one command record for listing.
+type ListEntry struct {
+	CommandID  string    `json:"command_id"`
+	Status     string    `json:"status"`
+	RepoPath   string    `json:"repo_path,omitempty"`
+	Command    string    `json:"command"`
+	CWD        string    `json:"cwd"`
+	ExitCode   int       `json:"exit_code"`
+	DurationMS int64     `json:"duration_ms,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+// ListResult holds the bounded result of a command list operation.
+type ListResult struct {
+	Entries []ListEntry `json:"entries"`
+	Total   int         `json:"total"`
+}
+
+// List returns a bounded, sorted (newest-first) list of command records.
+func (h *History) List(req ListRequest) (ListResult, error) {
+	if req.Limit <= 0 {
+		req.Limit = 50
+	}
+	if req.Limit > 200 {
+		req.Limit = 200
+	}
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	if h.root == "" {
+		// In-memory fallback: iterate records map.
+		entries := make([]ListEntry, 0, len(h.records))
+		for _, r := range h.records {
+			if !matchesFilter(r, req) {
+				continue
+			}
+			entries = append(entries, recordToEntry(r))
+		}
+		sort.Slice(entries, func(i, j int) bool {
+			return entries[i].CreatedAt.After(entries[j].CreatedAt)
+		})
+		if len(entries) > req.Limit {
+			entries = entries[:req.Limit]
+		}
+		return ListResult{Entries: entries, Total: len(entries)}, nil
+	}
+	// Persistent history: read index entries.
+	idxEntries, err := h.readEntries()
+	if err != nil {
+		return ListResult{}, err
+	}
+	entries := make([]ListEntry, 0, len(idxEntries))
+	for _, e := range idxEntries {
+		if req.Status != "" && e.Status != req.Status {
+			continue
+		}
+		if req.RepoPath != "" && e.RepoPath != req.RepoPath {
+			continue
+		}
+		entries = append(entries, ListEntry{
+			CommandID: e.CommandID,
+			Status:    e.Status,
+			RepoPath:  e.RepoPath,
+			Command:   e.Command,
+			CWD:       e.CWD,
+			ExitCode:  e.ExitCode,
+			CreatedAt: e.CreatedAt,
+		})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].CreatedAt.After(entries[j].CreatedAt)
+	})
+	total := len(entries)
+	if len(entries) > req.Limit {
+		entries = entries[:req.Limit]
+	}
+	return ListResult{Entries: entries, Total: total}, nil
+}
+
+func matchesFilter(r Record, req ListRequest) bool {
+	if req.Status != "" && r.Status != req.Status {
+		return false
+	}
+	if req.RepoPath != "" && r.RepoPath != req.RepoPath {
+		return false
+	}
+	return true
+}
+
+func recordToEntry(r Record) ListEntry {
+	e := ListEntry{
+		CommandID: r.CommandID,
+		Status:    r.Status,
+		RepoPath:  r.RepoPath,
+		Command:   r.Command,
+		CWD:       r.CWD,
+		ExitCode:  r.ExitCode,
+		DurationMS: r.DurationMS,
+		CreatedAt: r.CreatedAt,
+	}
+	if r.Status == "running" && !r.StartedAt.IsZero() {
+		e.DurationMS = time.Since(r.StartedAt).Milliseconds()
+	}
+	return e
+}
+
 func (h *History) logsDir(repoPath string) (string, string, error) {
 	if strings.TrimSpace(repoPath) == "" {
 		return filepath.Join(h.root, "logs"), "", nil

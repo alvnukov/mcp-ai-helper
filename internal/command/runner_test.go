@@ -320,3 +320,159 @@ func sameStrings(got []string, want []string) bool {
 	}
 	return true
 }
+
+func TestListCommandsReturnsRecentEntries(t *testing.T) {
+	dir := t.TempDir()
+	logDir := t.TempDir()
+	runner := NewRunner(config.CommandPolicy{AllowedCWDs: []string{dir}, DefaultTimeoutSeconds: 1, MaxOutputBytes: 1000, MaxLines: 20, LogDir: logDir})
+
+	for i := 0; i < 3; i++ {
+		_, err := runner.Run(t.Context(), "echo ok", dir, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	result, err := runner.ListCommands(ListRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Entries) != 3 {
+		t.Fatalf("entries = %d, want 3", len(result.Entries))
+	}
+	if result.Total != 3 {
+		t.Fatalf("total = %d, want 3", result.Total)
+	}
+	if result.Entries[0].Status != "ok" {
+		t.Fatalf("entry[0].status = %q, want ok", result.Entries[0].Status)
+	}
+	if result.Entries[0].CommandID == "" {
+		t.Fatal("entry[0].command_id is empty")
+	}
+}
+
+func TestListCommandsRespectsLimit(t *testing.T) {
+	dir := t.TempDir()
+	logDir := t.TempDir()
+	runner := NewRunner(config.CommandPolicy{AllowedCWDs: []string{dir}, DefaultTimeoutSeconds: 1, MaxOutputBytes: 1000, MaxLines: 20, LogDir: logDir})
+
+	for i := 0; i < 5; i++ {
+		_, err := runner.Run(t.Context(), "echo ok", dir, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	result, err := runner.ListCommands(ListRequest{Limit: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Entries) != 2 {
+		t.Fatalf("entries = %d, want 2 (limit)", len(result.Entries))
+	}
+	if result.Total != 5 {
+		t.Fatalf("total = %d, want 5 (all records)", result.Total)
+	}
+}
+
+func TestListCommandsFiltersByStatus(t *testing.T) {
+	dir := t.TempDir()
+	logDir := t.TempDir()
+	runner := NewRunner(config.CommandPolicy{AllowedCWDs: []string{dir}, DefaultTimeoutSeconds: 1, MaxOutputBytes: 1000, MaxLines: 20, LogDir: logDir})
+
+	_, err := runner.Run(t.Context(), "echo ok", dir, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runner.Run(t.Context(), "false", dir, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := runner.ListCommands(ListRequest{Status: "failed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Entries) != 1 {
+		t.Fatalf("entries = %d, want 1 (failed only)", len(result.Entries))
+	}
+	if result.Entries[0].ExitCode == 0 {
+		t.Fatal("expected non-zero exit code for failed entry")
+	}
+}
+
+func TestListCommandsFiltersByRepoPath(t *testing.T) {
+	dir1 := t.TempDir()
+	dir2 := t.TempDir()
+	logDir := t.TempDir()
+	runner := NewRunner(config.CommandPolicy{AllowedCWDs: []string{dir1, dir2}, DefaultTimeoutSeconds: 1, MaxOutputBytes: 1000, MaxLines: 20, LogDir: logDir})
+
+	_, err := runner.RunFilteredInRepo(t.Context(), "echo ok", dir1, "", 1, Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runner.RunFilteredInRepo(t.Context(), "echo ok", dir2, "", 1, Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := runner.ListCommands(ListRequest{RepoPath: dir1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Entries) != 1 {
+		t.Fatalf("entries = %d, want 1 (repo filter)", len(result.Entries))
+	}
+}
+
+func TestListCommandsInMemoryFallback(t *testing.T) {
+	dir := t.TempDir()
+	runner := NewRunner(config.CommandPolicy{AllowedCWDs: []string{dir}, DefaultTimeoutSeconds: 1, MaxOutputBytes: 1000, MaxLines: 20})
+
+	_, err := runner.Run(t.Context(), "echo in-memory-test-marker", dir, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := runner.ListCommands(ListRequest{Limit: 200})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Entries) == 0 {
+		t.Fatal("expected at least 1 entry from in-memory history")
+	}
+	found := false
+	for _, e := range result.Entries {
+		if strings.Contains(e.Command, "in-memory-test-marker") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("expected to find our command in the list")
+	}
+}
+
+func TestListCommandsReturnsNewestFirst(t *testing.T) {
+	dir := t.TempDir()
+	logDir := t.TempDir()
+	runner := NewRunner(config.CommandPolicy{AllowedCWDs: []string{dir}, DefaultTimeoutSeconds: 1, MaxOutputBytes: 1000, MaxLines: 20, LogDir: logDir})
+
+	for i := 0; i < 3; i++ {
+		_, err := runner.Run(t.Context(), "echo "+string(rune('a'+i)), dir, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	result, err := runner.ListCommands(ListRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Entries) < 2 {
+		t.Fatal("need at least 2 entries to check ordering")
+	}
+	if result.Entries[0].CreatedAt.Before(result.Entries[1].CreatedAt) {
+		t.Fatal("entries should be newest-first")
+	}
+}
