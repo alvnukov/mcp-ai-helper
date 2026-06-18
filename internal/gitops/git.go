@@ -376,11 +376,17 @@ func Status(ctx context.Context, req StatusRequest) (StatusResult, error) {
 			result.IsClean = false
 		case '1', '2':
 			parts := strings.Fields(line)
-			if len(parts) < 5 {
+			// Porcelain v2: 1 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <path>
+			// or for renames: 2 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <X><score> <path><tab><origPath>
+			if len(parts) < 9 {
 				continue
 			}
 			xy := parts[1]
-			path := parts[4]
+			path := parts[8]
+			// For renames, path may contain origPath after tab.
+			if tabIdx := strings.IndexByte(line, '\t'); tabIdx >= 0 {
+				path = line[tabIdx+1:]
+			}
 			x := xy[0]
 			y := xy[1]
 			fs := FileStatus{Path: path, XY: xy}
@@ -397,9 +403,10 @@ func Status(ctx context.Context, req StatusRequest) (StatusResult, error) {
 				result.IsClean = false
 			}
 		case 'u':
+			// Unmerged: u <XY> <sub> <m1> <m2> <m3> <mW> <h1> <h2> <h3> <path>
 			parts := strings.Fields(line)
-			if len(parts) >= 5 {
-				result.Modified = append(result.Modified, FileStatus{Path: parts[4], XY: "UU", Status: "conflict"})
+			if len(parts) >= 11 {
+				result.Modified = append(result.Modified, FileStatus{Path: parts[10], XY: parts[1], Status: "conflict"})
 				result.IsClean = false
 			}
 		}
