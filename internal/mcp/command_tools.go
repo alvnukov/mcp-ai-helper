@@ -2,12 +2,85 @@ package mcp
 
 import (
 	"context"
+	"errors"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
 
 	basemcp "github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/zol/mcp-ai-helper/internal/command"
 )
+
+// projectHealthResult holds structured project health check output.
+type projectHealthResult struct {
+	Status   string   `json:"status"` // ok, fail
+	Build    string   `json:"build"`  // ok, fail
+	Vet      string   `json:"vet"`    // ok, fail
+	Test     string   `json:"test"`   // ok, fail
+	Duration string   `json:"duration"`
+	Errors   []string `json:"errors,omitempty"`
+}
+
+// checkProjectHealth runs build, vet, and test for a Go project.
+func checkProjectHealth(ctx context.Context, repoPath string) (projectHealthResult, error) {
+	if strings.TrimSpace(repoPath) == "" {
+		return projectHealthResult{}, errors.New("repo_path is required")
+	}
+	repo, err := filepath.Abs(repoPath)
+	if err != nil {
+		return projectHealthResult{}, err
+	}
+
+	start := time.Now()
+	result := projectHealthResult{
+		Build:  "ok",
+		Vet:    "ok",
+		Test:   "ok",
+		Status: "ok",
+	}
+
+	// Build
+	buildCtx, buildCancel := context.WithTimeout(ctx, 60*time.Second)
+	buildCmd := exec.CommandContext(buildCtx, "go", "build", "./...")
+	buildCmd.Dir = repo
+	buildOut, buildErr := buildCmd.CombinedOutput()
+	buildCancel()
+	if buildErr != nil {
+		result.Build = "fail"
+		result.Status = "fail"
+		result.Errors = append(result.Errors, "build: "+strings.TrimSpace(string(buildOut)))
+	}
+
+	// Vet
+	vetCtx, vetCancel := context.WithTimeout(ctx, 60*time.Second)
+	vetCmd := exec.CommandContext(vetCtx, "go", "vet", "./...")
+	vetCmd.Dir = repo
+	vetOut, vetErr := vetCmd.CombinedOutput()
+	vetCancel()
+	if vetErr != nil {
+		result.Vet = "fail"
+		result.Status = "fail"
+		result.Errors = append(result.Errors, "vet: "+strings.TrimSpace(string(vetOut)))
+	}
+
+	// Test
+	testCtx, testCancel := context.WithTimeout(ctx, 120*time.Second)
+	testCmd := exec.CommandContext(testCtx, "go", "test", "-count=1", "-timeout=60s", "./...")
+	testCmd.Dir = repo
+	_, testErr := testCmd.CombinedOutput()
+	testCancel()
+	if testErr != nil {
+		result.Test = "fail"
+		result.Status = "fail"
+		result.Errors = append(result.Errors, "test: tests failed")
+	}
+
+	result.Duration = time.Since(start).Round(time.Millisecond).String()
+	return result, nil
+}
 
 func registerCommandTools(srv *server.MCPServer, deps *Server) {
 	srv.AddTool(basemcp.NewTool("collect_command_output",
@@ -128,6 +201,23 @@ func registerCommandTools(srv *server.MCPServer, deps *Server) {
 		}
 		_, _, cmds, _, _ := deps.loadDeps()
 		result, err := cmds.FilterHistory(args.CommandID, args.Filter)
+		if err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
+		return structured(result)
+	})
+
+	srv.AddTool(basemcp.NewTool("project_health",
+		basemcp.WithDescription("Quick project health check: build, vet, test. Returns structured pass/fail per step."),
+		basemcp.WithString("repo_path", basemcp.Required(), basemcp.Description("Repository root.")),
+	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+		var args struct {
+			RepoPath string `json:"repo_path"`
+		}
+		if err := bind(req, &args); err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
+		result, err := checkProjectHealth(ctx, args.RepoPath)
 		if err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}

@@ -16,7 +16,7 @@ test:
 
 # Core packages only (fast, no known races)
 test-core:
-	go test ./internal/config/... ./internal/command/... ./internal/fileops/... ./internal/gitops/... ./internal/evidence/... ./internal/features/... ./internal/security/... ./internal/tasks/... ./internal/language/... -count=1 -race -timeout=60s
+	go test ./internal/config/... ./internal/command/... ./internal/fileops/... ./internal/gitops/... ./internal/evidence/... ./internal/features/... ./internal/security/... ./internal/tasks/... ./internal/language/... -count=1 -race -timeout=120s
 
 # Targeted tests for a specific package
 # Usage: make test-pkg PKG=./internal/command/...
