@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -51,6 +52,9 @@ type Runner struct {
 	policy   config.CommandPolicy
 	history  *History
 	baseMask *security.Mask
+	// running tracks active command cancel functions keyed by commandID.
+	// Used by Abort to kill a running process.
+	running sync.Map // map[string]context.CancelFunc
 }
 
 // Result is the compact, redacted command execution record returned to callers.
@@ -176,11 +180,15 @@ func (r *Runner) runPreparedWithWait(ctx context.Context, cmd string, runCWD str
 		return execute(ctx)
 	}
 
+	cmdCtx, cmdCancel := context.WithCancel(context.WithoutCancel(ctx))
+	r.running.Store(commandID, cmdCancel)
+
 	done := make(chan struct{})
 	var result Result
 	var err error
 	go func() {
-		result, err = execute(context.WithoutCancel(ctx))
+		result, err = execute(cmdCtx)
+		r.running.Delete(commandID)
 		close(done)
 	}()
 
@@ -398,6 +406,47 @@ func (r *Runner) FilterHistory(commandID string, filter Filter) (Result, error) 
 // ListCommands returns a bounded list of command records from history.
 func (r *Runner) ListCommands(req ListRequest) (ListResult, error) {
 	return r.history.List(req)
+}
+
+// AbortResult reports the outcome of an abort attempt.
+type AbortResult struct {
+	Status  string `json:"status"`
+	CommandID string `json:"command_id"`
+	Reason  string `json:"reason,omitempty"`
+}
+
+// Abort kills a running command by its commandID.
+// Returns ok if the process was killed, not_found if no such running command exists,
+// or already_completed if the command already finished.
+func (r *Runner) Abort(commandID string) (AbortResult, error) {
+	if strings.TrimSpace(commandID) == "" {
+		return AbortResult{}, errors.New("command_id is required")
+	}
+	// Check if the command is still running.
+	val, ok := r.running.Load(commandID)
+	if !ok {
+		// Check if the command exists in history (completed).
+		_, found, err := r.history.getRecord(commandID)
+		if err != nil {
+			return AbortResult{}, err
+		}
+		if found {
+			return AbortResult{Status: "already_completed", CommandID: commandID, Reason: "command already finished"}, nil
+		}
+		return AbortResult{Status: "not_found", CommandID: commandID, Reason: "no such command"}, nil
+	}
+	cancel, ok := val.(context.CancelFunc)
+	if !ok {
+		return AbortResult{}, errors.New("invalid cancel function in process tracker")
+	}
+	cancel()
+	r.running.Delete(commandID)
+	// Update history record status.
+	if err := r.history.UpdateStatus(commandID, "aborted"); err != nil {
+		// Non-fatal: process was killed but status update failed.
+		return AbortResult{Status: "ok", CommandID: commandID, Reason: "process killed, status update failed: " + err.Error()}, nil
+	}
+	return AbortResult{Status: "ok", CommandID: commandID}, nil
 }
 
 const protectedLeanCommandMessage = "policy_denied: command appears to access protected task registry source; this is a local command denial, not a global task blocker; use task tools or exclude protected registry files"

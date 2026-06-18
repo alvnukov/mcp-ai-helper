@@ -476,3 +476,74 @@ func TestListCommandsReturnsNewestFirst(t *testing.T) {
 		t.Fatal("entries should be newest-first")
 	}
 }
+
+func TestAbortKillsRunningCommand(t *testing.T) {
+	repoPath := t.TempDir()
+	logRoot := t.TempDir()
+	runner := NewRunner(config.CommandPolicy{AllowedCWDs: []string{repoPath}, DefaultTimeoutSeconds: 10, MaxOutputBytes: 1000, MaxLines: 20, LogDir: logRoot})
+
+	result, err := runner.RunFilteredInRepoWithWait(t.Context(), "sleep 30", repoPath, "", 10, 1, Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "running" {
+		t.Fatalf("status = %q, want running", result.Status)
+	}
+
+	abortResult, err := runner.Abort(result.CommandID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if abortResult.Status != "ok" {
+		t.Fatalf("abort status = %q, want ok", abortResult.Status)
+	}
+
+	// Verify the command is no longer running.
+	completed, err := runner.FilterHistory(result.CommandID, Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completed.Status == "running" {
+		t.Fatal("command should no longer be running after abort")
+	}
+}
+
+func TestAbortReturnsNotFoundForUnknownID(t *testing.T) {
+	runner := NewRunner(config.CommandPolicy{AllowedCWDs: []string{t.TempDir()}, DefaultTimeoutSeconds: 1, MaxOutputBytes: 1000, MaxLines: 20})
+
+	result, err := runner.Abort("nonexistent-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "not_found" {
+		t.Fatalf("status = %q, want not_found", result.Status)
+	}
+}
+
+func TestAbortReturnsAlreadyCompletedForFinishedCommand(t *testing.T) {
+	dir := t.TempDir()
+	logDir := t.TempDir()
+	runner := NewRunner(config.CommandPolicy{AllowedCWDs: []string{dir}, DefaultTimeoutSeconds: 1, MaxOutputBytes: 1000, MaxLines: 20, LogDir: logDir})
+
+	completed, err := runner.Run(t.Context(), "echo done", dir, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := runner.Abort(completed.CommandID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "already_completed" {
+		t.Fatalf("status = %q, want already_completed", result.Status)
+	}
+}
+
+func TestAbortRequiresCommandID(t *testing.T) {
+	runner := NewRunner(config.CommandPolicy{AllowedCWDs: []string{t.TempDir()}, DefaultTimeoutSeconds: 1, MaxOutputBytes: 1000, MaxLines: 20})
+
+	_, err := runner.Abort("")
+	if err == nil {
+		t.Fatal("expected error for empty command_id")
+	}
+}

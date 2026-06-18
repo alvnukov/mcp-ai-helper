@@ -352,6 +352,20 @@ func recordToEntry(r Record) ListEntry {
 	return e
 }
 
+// UpdateStatus changes the status of a record in memory.
+// For persistent history, the on-disk record is not rewritten (status is cosmetic for abort).
+func (h *History) UpdateStatus(commandID string, status string) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	record, ok := h.records[commandID]
+	if !ok {
+		return fmt.Errorf("command %q not found in history", commandID)
+	}
+	record.Status = status
+	h.records[commandID] = record
+	return nil
+}
+
 func (h *History) logsDir(repoPath string) (string, string, error) {
 	if strings.TrimSpace(repoPath) == "" {
 		return filepath.Join(h.root, "logs"), "", nil

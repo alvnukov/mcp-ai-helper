@@ -50,6 +50,24 @@ func registerCommandTools(srv *server.MCPServer, deps *Server) {
 		return basemcp.NewToolResultText("cleanup complete"), nil
 	})
 
+	srv.AddTool(basemcp.NewTool("command_abort",
+		basemcp.WithDescription("Abort a running command by command_id. Kills the process group."),
+		basemcp.WithString("command_id", basemcp.Required(), basemcp.Description("Command ID to abort.")),
+	), func(_ context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+		var args struct {
+			CommandID string `json:"command_id"`
+		}
+		if err := bind(req, &args); err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
+		_, _, cmds, _, _ := deps.loadDeps()
+		result, err := cmds.Abort(args.CommandID)
+		if err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
+		return structured(result)
+	})
+
 	srv.AddTool(basemcp.NewTool("command_list",
 		basemcp.WithDescription("List recent command history entries, optionally filtered by status and repo."),
 		basemcp.WithString("repo_path", basemcp.Description("Optional repo_path filter.")),
