@@ -476,6 +476,222 @@ func Hash(data []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// --- CreateIfAbsent ---
+
+// CreateIfAbsentRequest describes a file creation that only happens if the file doesn't exist.
+type CreateIfAbsentRequest struct {
+	Path       string `json:"path"`
+	RepoPath   string `json:"repo_path,omitempty"`
+	Content    string `json:"content,omitempty"`
+	ContentB64 string `json:"content_b64,omitempty"`
+	Mode       int    `json:"mode,omitempty"`
+}
+
+// CreateIfAbsent creates a file with the given content only if it doesn't already exist.
+// Returns already_present if the file exists, ok if created.
+func CreateIfAbsent(req CreateIfAbsentRequest) (ReplaceResult, error) {
+	if strings.TrimSpace(req.Path) == "" {
+		return ReplaceResult{}, errors.New("path is required")
+	}
+	var clean string
+	if strings.TrimSpace(req.RepoPath) != "" {
+		var err error
+		clean, _, err = repoRelativePath(req.RepoPath, req.Path)
+		if err != nil {
+			return ReplaceResult{}, err
+		}
+	} else {
+		var err error
+		clean, err = cleanPath(req.Path)
+		if err != nil {
+			return ReplaceResult{}, err
+		}
+	}
+	content, err := resolveContent(req.Content, req.ContentB64)
+	if err != nil {
+		return ReplaceResult{}, err
+	}
+	if content == "" {
+		return ReplaceResult{}, errors.New("content is required (set content or content_b64)")
+	}
+	// #nosec G304 -- clean is resolved from a validated local path or repo-relative path.
+	if _, statErr := os.Stat(clean); statErr == nil {
+		return ReplaceResult{Status: "already_present", Path: clean, Changed: false, Reason: "file already exists"}, nil
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return ReplaceResult{}, statErr
+	}
+	mode := os.FileMode(0o644)
+	if req.Mode != 0 {
+		mode = os.FileMode(req.Mode)
+	}
+	if err := os.WriteFile(clean, []byte(content), mode); err != nil {
+		return ReplaceResult{}, err
+	}
+	newHash := Hash([]byte(content))
+	return ReplaceResult{Status: "ok", Path: clean, Changed: true, NewHash: newHash}, nil
+}
+
+// --- AppendUnique ---
+
+// AppendUniqueRequest describes an append that only happens if the content is not already present.
+type AppendUniqueRequest struct {
+	Path         string `json:"path"`
+	RepoPath     string `json:"repo_path,omitempty"`
+	ExpectedHash string `json:"expected_hash"`
+	Content      string `json:"content,omitempty"`
+	ContentB64   string `json:"content_b64,omitempty"`
+	Separator    string `json:"separator,omitempty"`
+}
+
+// AppendUnique appends content to the end of a file only if the exact content
+// is not already present anywhere in the file. Hash-guarded.
+func AppendUnique(req AppendUniqueRequest) (ReplaceResult, error) {
+	if strings.TrimSpace(req.Path) == "" {
+		return ReplaceResult{}, errors.New("path is required")
+	}
+	if req.ExpectedHash == "" {
+		return ReplaceResult{}, errors.New("expected_hash is required")
+	}
+	var clean string
+	if strings.TrimSpace(req.RepoPath) != "" {
+		var err error
+		clean, _, err = repoRelativePath(req.RepoPath, req.Path)
+		if err != nil {
+			return ReplaceResult{}, err
+		}
+	} else {
+		var err error
+		clean, err = cleanPath(req.Path)
+		if err != nil {
+			return ReplaceResult{}, err
+		}
+	}
+	content, err := resolveContent(req.Content, req.ContentB64)
+	if err != nil {
+		return ReplaceResult{}, err
+	}
+	if content == "" {
+		return ReplaceResult{}, errors.New("content is required (set content or content_b64)")
+	}
+	// #nosec G304 -- clean is resolved from a validated local path or repo-relative path.
+	data, readErr := os.ReadFile(clean)
+	if readErr != nil {
+		if errors.Is(readErr, os.ErrNotExist) {
+			return ReplaceResult{Status: "conflict", Path: clean, Reason: "file does not exist"}, nil
+		}
+		return ReplaceResult{}, readErr
+	}
+	oldHash := Hash(data)
+	if oldHash != req.ExpectedHash {
+		return ReplaceResult{Status: "conflict", Path: clean, OldHash: oldHash, Reason: "file hash changed after snapshot"}, nil
+	}
+	text := string(data)
+	if strings.Contains(text, content) {
+		return ReplaceResult{Status: "ok", Path: clean, Changed: false, OldHash: oldHash, NewHash: oldHash, Reason: "content already present"}, nil
+	}
+	separator := req.Separator
+	if separator == "" {
+		separator = "\n"
+	}
+	var next string
+	if len(data) == 0 {
+		next = content
+	} else if strings.HasSuffix(text, separator) {
+		next = text + content
+	} else {
+		next = text + separator + content
+	}
+	newHash := Hash([]byte(next))
+	if err := os.WriteFile(clean, []byte(next), 0o600); err != nil {
+		return ReplaceResult{}, err
+	}
+	return ReplaceResult{Status: "ok", Path: clean, Changed: true, OldHash: oldHash, NewHash: newHash}, nil
+}
+
+// --- DeleteExactBlock ---
+
+// DeleteExactBlockRequest describes deletion of an exact multi-line block.
+type DeleteExactBlockRequest struct {
+	Path         string `json:"path"`
+	RepoPath     string `json:"repo_path,omitempty"`
+	ExpectedHash string `json:"expected_hash"`
+	Block        string `json:"block,omitempty"`
+	BlockB64     string `json:"block_b64,omitempty"`
+}
+
+// DeleteExactBlock removes an exact multi-line block from a file.
+// If the block is not found, returns ok with changed=false (idempotent).
+// If the block appears more than once, returns conflict.
+func DeleteExactBlock(req DeleteExactBlockRequest) (ReplaceResult, error) {
+	if strings.TrimSpace(req.Path) == "" {
+		return ReplaceResult{}, errors.New("path is required")
+	}
+	if req.ExpectedHash == "" {
+		return ReplaceResult{}, errors.New("expected_hash is required")
+	}
+	var clean string
+	if strings.TrimSpace(req.RepoPath) != "" {
+		var err error
+		clean, _, err = repoRelativePath(req.RepoPath, req.Path)
+		if err != nil {
+			return ReplaceResult{}, err
+		}
+	} else {
+		var err error
+		clean, err = cleanPath(req.Path)
+		if err != nil {
+			return ReplaceResult{}, err
+		}
+	}
+	block, err := resolveContent(req.Block, req.BlockB64)
+	if err != nil {
+		return ReplaceResult{}, err
+	}
+	if block == "" {
+		return ReplaceResult{}, errors.New("block is required (set block or block_b64)")
+	}
+	// #nosec G304 -- clean is resolved from a validated local path or repo-relative path.
+	data, readErr := os.ReadFile(clean)
+	if readErr != nil {
+		if errors.Is(readErr, os.ErrNotExist) {
+			return ReplaceResult{Status: "conflict", Path: clean, Reason: "file does not exist"}, nil
+		}
+		return ReplaceResult{}, readErr
+	}
+	oldHash := Hash(data)
+	if oldHash != req.ExpectedHash {
+		return ReplaceResult{Status: "conflict", Path: clean, OldHash: oldHash, Reason: "file hash changed after snapshot"}, nil
+	}
+	text := string(data)
+	count := strings.Count(text, block)
+	if count == 0 {
+		return ReplaceResult{Status: "ok", Path: clean, Changed: false, OldHash: oldHash, NewHash: oldHash, Reason: "block not found (already absent)"}, nil
+	}
+	if count > 1 {
+		return ReplaceResult{Status: "conflict", Path: clean, OldHash: oldHash, Reason: "block is not unique"}, nil
+	}
+	next := strings.Replace(text, block, "", 1)
+	// Collapse triple blank lines that may result from deletion.
+	next = strings.ReplaceAll(next, "\n\n\n", "\n\n")
+	newHash := Hash([]byte(next))
+	if err := os.WriteFile(clean, []byte(next), 0o600); err != nil {
+		return ReplaceResult{}, err
+	}
+	return ReplaceResult{Status: "ok", Path: clean, Changed: true, OldHash: oldHash, NewHash: newHash}, nil
+}
+
+// resolveContent returns the content from plain text or base64-encoded text.
+func resolveContent(plain string, b64 string) (string, error) {
+	if b64 != "" {
+		decoded, err := base64.StdEncoding.DecodeString(b64)
+		if err != nil {
+			return "", fmt.Errorf("content_b64: invalid base64: %w", err)
+		}
+		return string(decoded), nil
+	}
+	return plain, nil
+}
+
 const protectedLeanGenericToolMessage = "policy_denied: generic file access to protected task registry source is disabled for this path only; continue with task_current/task_get/task_graph/task_context or use a focused search that skips protected registry files"
 
 func rejectProtectedLeanPath(path string) error {

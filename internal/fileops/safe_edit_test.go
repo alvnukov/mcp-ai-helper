@@ -422,3 +422,337 @@ func TestReadFileContentInRepoRejectsSymlinkEscape(t *testing.T) {
 		t.Fatal("expected error for symlink escape")
 	}
 }
+
+// --- CreateIfAbsent tests ---
+
+func TestCreateIfAbsentCreatesNewFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "new.txt")
+	result, err := CreateIfAbsent(CreateIfAbsentRequest{Path: path, Content: "hello\n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "ok" || !result.Changed {
+		t.Fatalf("result = %+v, want ok changed", result)
+	}
+	data, _ := os.ReadFile(path)
+	if string(data) != "hello\n" {
+		t.Fatalf("content = %q", string(data))
+	}
+}
+
+func TestCreateIfAbsentSkipsExistingFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "existing.txt")
+	if err := os.WriteFile(path, []byte("original\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := CreateIfAbsent(CreateIfAbsentRequest{Path: path, Content: "new\n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "already_present" || result.Changed {
+		t.Fatalf("result = %+v, want already_present unchanged", result)
+	}
+	data, _ := os.ReadFile(path)
+	if string(data) != "original\n" {
+		t.Fatalf("content should be unchanged: %q", string(data))
+	}
+}
+
+func TestCreateIfAbsentRequiresPath(t *testing.T) {
+	_, err := CreateIfAbsent(CreateIfAbsentRequest{Content: "x"})
+	if err == nil {
+		t.Fatal("expected error for empty path")
+	}
+}
+
+func TestCreateIfAbsentRequiresContent(t *testing.T) {
+	dir := t.TempDir()
+	_, err := CreateIfAbsent(CreateIfAbsentRequest{Path: filepath.Join(dir, "x.txt")})
+	if err == nil {
+		t.Fatal("expected error for empty content")
+	}
+}
+
+// --- AppendUnique tests ---
+
+func TestAppendUniqueAppendsNewContent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.txt")
+	if err := os.WriteFile(path, []byte("line1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, _ := ReadSnapshot(path)
+	result, err := AppendUnique(AppendUniqueRequest{
+		Path:         path,
+		ExpectedHash: snapshot.Hash,
+		Content:      "line2\n",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "ok" || !result.Changed {
+		t.Fatalf("result = %+v, want ok changed", result)
+	}
+	data, _ := os.ReadFile(path)
+	if string(data) != "line1\nline2\n" {
+		t.Fatalf("content = %q", string(data))
+	}
+}
+
+func TestAppendUniqueSkipsExistingContent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.txt")
+	if err := os.WriteFile(path, []byte("line1\nline2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, _ := ReadSnapshot(path)
+	result, err := AppendUnique(AppendUniqueRequest{
+		Path:         path,
+		ExpectedHash: snapshot.Hash,
+		Content:      "line2\n",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "ok" || result.Changed {
+		t.Fatalf("result = %+v, want ok unchanged", result)
+	}
+}
+
+func TestAppendUniqueDetectsHashMismatch(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.txt")
+	if err := os.WriteFile(path, []byte("original\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := AppendUnique(AppendUniqueRequest{
+		Path:         path,
+		ExpectedHash: "deadbeef",
+		Content:      "new\n",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "conflict" {
+		t.Fatalf("status = %q, want conflict", result.Status)
+	}
+	data, _ := os.ReadFile(path)
+	if string(data) != "original\n" {
+		t.Fatalf("file should be unchanged: %q", string(data))
+	}
+}
+
+func TestAppendUniqueRequiresPath(t *testing.T) {
+	_, err := AppendUnique(AppendUniqueRequest{ExpectedHash: "x", Content: "y"})
+	if err == nil {
+		t.Fatal("expected error for empty path")
+	}
+}
+
+func TestAppendUniqueRequiresExpectedHash(t *testing.T) {
+	dir := t.TempDir()
+	_, err := AppendUnique(AppendUniqueRequest{Path: filepath.Join(dir, "f.txt"), Content: "y"})
+	if err == nil {
+		t.Fatal("expected error for empty expected_hash")
+	}
+}
+
+func TestAppendUniqueRequiresContent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.txt")
+	if err := os.WriteFile(path, []byte("x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, _ := ReadSnapshot(path)
+	_, err := AppendUnique(AppendUniqueRequest{Path: path, ExpectedHash: snapshot.Hash})
+	if err == nil {
+		t.Fatal("expected error for empty content")
+	}
+}
+
+func TestAppendUniqueWithBase64(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.txt")
+	if err := os.WriteFile(path, []byte("line1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, _ := ReadSnapshot(path)
+	result, err := AppendUnique(AppendUniqueRequest{
+		Path:         path,
+		ExpectedHash: snapshot.Hash,
+		ContentB64:   base64.StdEncoding.EncodeToString([]byte("line2\n")),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "ok" || !result.Changed {
+		t.Fatalf("result = %+v, want ok changed", result)
+	}
+	data, _ := os.ReadFile(path)
+	if string(data) != "line1\nline2\n" {
+		t.Fatalf("content = %q", string(data))
+	}
+}
+
+func TestAppendUniqueHandlesEmptyFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.txt")
+	if err := os.WriteFile(path, []byte(""), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, _ := ReadSnapshot(path)
+	result, err := AppendUnique(AppendUniqueRequest{
+		Path:         path,
+		ExpectedHash: snapshot.Hash,
+		Content:      "first\n",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "ok" || !result.Changed {
+		t.Fatalf("result = %+v, want ok changed", result)
+	}
+	data, _ := os.ReadFile(path)
+	if string(data) != "first\n" {
+		t.Fatalf("content = %q (no separator for empty file)", string(data))
+	}
+}
+
+// --- DeleteExactBlock tests ---
+
+func TestDeleteExactBlockRemovesBlock(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.txt")
+	if err := os.WriteFile(path, []byte("before\nblock start\nblock end\nafter\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, _ := ReadSnapshot(path)
+	result, err := DeleteExactBlock(DeleteExactBlockRequest{
+		Path:         path,
+		ExpectedHash: snapshot.Hash,
+		Block:        "block start\nblock end\n",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "ok" || !result.Changed {
+		t.Fatalf("result = %+v, want ok changed", result)
+	}
+	data, _ := os.ReadFile(path)
+	if string(data) != "before\nafter\n" {
+		t.Fatalf("content = %q", string(data))
+	}
+}
+
+func TestDeleteExactBlockIdempotentWhenAbsent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.txt")
+	if err := os.WriteFile(path, []byte("before\nafter\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, _ := ReadSnapshot(path)
+	result, err := DeleteExactBlock(DeleteExactBlockRequest{
+		Path:         path,
+		ExpectedHash: snapshot.Hash,
+		Block:        "nonexistent\n",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "ok" || result.Changed {
+		t.Fatalf("result = %+v, want ok unchanged (idempotent)", result)
+	}
+}
+
+func TestDeleteExactBlockDetectsHashMismatch(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.txt")
+	if err := os.WriteFile(path, []byte("content\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := DeleteExactBlock(DeleteExactBlockRequest{
+		Path:         path,
+		ExpectedHash: "deadbeef",
+		Block:        "content\n",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "conflict" {
+		t.Fatalf("status = %q, want conflict", result.Status)
+	}
+}
+
+func TestDeleteExactBlockRejectsNonUniqueBlock(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.txt")
+	if err := os.WriteFile(path, []byte("a\nblock\nb\nblock\nc\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, _ := ReadSnapshot(path)
+	result, err := DeleteExactBlock(DeleteExactBlockRequest{
+		Path:         path,
+		ExpectedHash: snapshot.Hash,
+		Block:        "block\n",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "conflict" {
+		t.Fatalf("status = %q, want conflict (non-unique)", result.Status)
+	}
+}
+
+func TestDeleteExactBlockRequiresPath(t *testing.T) {
+	_, err := DeleteExactBlock(DeleteExactBlockRequest{ExpectedHash: "x", Block: "y"})
+	if err == nil {
+		t.Fatal("expected error for empty path")
+	}
+}
+
+func TestDeleteExactBlockRequiresExpectedHash(t *testing.T) {
+	dir := t.TempDir()
+	_, err := DeleteExactBlock(DeleteExactBlockRequest{Path: filepath.Join(dir, "f.txt"), Block: "y"})
+	if err == nil {
+		t.Fatal("expected error for empty expected_hash")
+	}
+}
+
+func TestDeleteExactBlockRequiresBlock(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.txt")
+	if err := os.WriteFile(path, []byte("x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, _ := ReadSnapshot(path)
+	_, err := DeleteExactBlock(DeleteExactBlockRequest{Path: path, ExpectedHash: snapshot.Hash})
+	if err == nil {
+		t.Fatal("expected error for empty block")
+	}
+}
+
+func TestDeleteExactBlockWithBase64(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f.txt")
+	if err := os.WriteFile(path, []byte("before\nremove me\nafter\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, _ := ReadSnapshot(path)
+	result, err := DeleteExactBlock(DeleteExactBlockRequest{
+		Path:         path,
+		ExpectedHash: snapshot.Hash,
+		BlockB64:     base64.StdEncoding.EncodeToString([]byte("remove me\n")),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "ok" || !result.Changed {
+		t.Fatalf("result = %+v, want ok changed", result)
+	}
+	data, _ := os.ReadFile(path)
+	if string(data) != "before\nafter\n" {
+		t.Fatalf("content = %q", string(data))
+	}
+}
