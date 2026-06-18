@@ -133,6 +133,24 @@ func registerFileTools(srv *server.MCPServer) {
 		}
 		return structured(result)
 	})
+	srv.AddTool(basemcp.NewTool("list_dir",
+		basemcp.WithDescription("Structured directory listing with name, path, type, size, modified_at."),
+		basemcp.WithString("repo_path", basemcp.Required()),
+		basemcp.WithString("path", basemcp.Description("Repo-relative directory path. Defaults to repo root.")),
+	), func(_ context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+		var args struct {
+			RepoPath string `json:"repo_path"`
+			Path     string `json:"path"`
+		}
+		if err := bind(req, &args); err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
+		result, err := fileops.ListDir(fileops.ListDirRequest{RepoPath: args.RepoPath, Path: args.Path})
+		if err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
+		return structured(result)
+	})
 	srv.AddTool(basemcp.NewTool("write_file",
 		basemcp.WithDescription("Write content to a file. Creates parent dirs if needed. Use content_b64 for text with backslashes or non-UTF8. Set expected_hash to guard overwrite of existing files."),
 		basemcp.WithString("repo_path", basemcp.Required()),

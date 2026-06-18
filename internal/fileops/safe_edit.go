@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // Snapshot records file identity before a guarded edit.
@@ -767,6 +768,82 @@ func WriteFile(req WriteFileRequest) (ReplaceResult, error) {
 	}
 	newHash := Hash([]byte(content))
 	return ReplaceResult{Status: "ok", Path: clean, Changed: true, NewHash: newHash}, nil
+}
+
+// --- ListDir ---
+
+// ListDirRequest describes a directory listing query.
+type ListDirRequest struct {
+	RepoPath string `json:"repo_path"`
+	Path     string `json:"path,omitempty"` // repo-relative, defaults to "."
+}
+
+// DirEntry is one item in a directory listing.
+type DirEntry struct {
+	Name         string    `json:"name"`
+	Path         string    `json:"path"`
+	IsDir        bool      `json:"is_dir"`
+	Size         int64     `json:"size,omitempty"`
+	ModifiedAt   string    `json:"modified_at,omitempty"`
+	IsSymlink    bool      `json:"is_symlink,omitempty"`
+}
+
+// ListDirResult holds structured directory listing.
+type ListDirResult struct {
+	Path    string     `json:"path"`
+	Entries []DirEntry `json:"entries"`
+	Total   int        `json:"total"`
+}
+
+// ListDir returns a structured directory listing.
+func ListDir(req ListDirRequest) (ListDirResult, error) {
+	var dir string
+	if strings.TrimSpace(req.RepoPath) != "" {
+		resolved, _, err := repoRelativePath(req.RepoPath, req.Path)
+		if err != nil {
+			return ListDirResult{}, err
+		}
+		dir = resolved
+	} else {
+		if req.Path == "" {
+			dir = "."
+		} else {
+			var err error
+			dir, err = cleanPath(req.Path)
+			if err != nil {
+				return ListDirResult{}, err
+			}
+		}
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ListDirResult{}, err
+	}
+
+	result := ListDirResult{
+		Path:    dir,
+		Entries: make([]DirEntry, 0, len(entries)),
+	}
+
+	for _, e := range entries {
+		entry := DirEntry{
+			Name:  e.Name(),
+			Path:  filepath.ToSlash(filepath.Join(dir, e.Name())),
+			IsDir: e.IsDir(),
+		}
+		if e.Type()&os.ModeSymlink != 0 {
+			entry.IsSymlink = true
+		}
+		info, err := e.Info()
+		if err == nil {
+			entry.Size = info.Size()
+			entry.ModifiedAt = info.ModTime().UTC().Format(time.RFC3339)
+		}
+		result.Entries = append(result.Entries, entry)
+	}
+	result.Total = len(result.Entries)
+	return result, nil
 }
 
 const protectedLeanGenericToolMessage = "policy_denied: generic file access to protected task registry source is disabled for this path only; continue with task_current/task_get/task_graph/task_context or use a focused search that skips protected registry files"
