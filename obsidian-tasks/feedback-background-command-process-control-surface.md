@@ -1,7 +1,7 @@
 ---
 id: feedback-background-command-process-control-surface
 title: 'Feedback: добавить MCP surface для списка и управления фоновыми command/process jobs'
-status: todo
+status: done
 priority: high
 model_level: medium
 tags:
@@ -12,7 +12,7 @@ tags:
     - observability
     - control
 created_at: "2026-06-17T09:31:46.429713Z"
-updated_at: "2026-06-17T09:31:46.429713Z"
+updated_at: "2026-06-18T11:26:58.956059Z"
 ---
 
 ## Body
