@@ -301,7 +301,577 @@ func splitLines(text string) []string {
 	return out
 }
 
-// --- git status ---
+// --- git log ---
+
+// LogRequest describes a git log query.
+type LogRequest struct {
+	RepoPath string `json:"repo_path"`
+	Limit    int    `json:"limit,omitempty"`
+	Path     string `json:"path,omitempty"`
+	Author   string `json:"author,omitempty"`
+	Since    string `json:"since,omitempty"`
+	Until    string `json:"until,omitempty"`
+	Grep     string `json:"grep,omitempty"`
+}
+
+// LogCommit describes one commit in the log.
+type LogCommit struct {
+	Hash      string   `json:"hash"`
+	ShortHash string   `json:"short_hash"`
+	Author    string   `json:"author"`
+	Date      string   `json:"date"`
+	Message   string   `json:"message"`
+	Files     []string `json:"files,omitempty"`
+}
+
+// LogResult holds structured git log output.
+type LogResult struct {
+	Commits []LogCommit `json:"commits"`
+	Total   int         `json:"total"`
+}
+
+// Log returns structured git log for a repository.
+func Log(ctx context.Context, req LogRequest) (LogResult, error) {
+	if strings.TrimSpace(req.RepoPath) == "" {
+		return LogResult{}, errors.New("repo_path is required")
+	}
+	repo, err := filepath.Abs(req.RepoPath)
+	if err != nil {
+		return LogResult{}, err
+	}
+	if _, err := runGit(ctx, repo, "rev-parse", "--show-toplevel"); err != nil {
+		return LogResult{}, err
+	}
+
+	args := []string{"log", "--format=%H|%h|%an|%ai|%s", "--no-color"}
+	if req.Limit > 0 {
+		args = append(args, fmt.Sprintf("-%d", req.Limit))
+	} else {
+		args = append(args, "-20")
+	}
+	if req.Author != "" {
+		args = append(args, "--author="+req.Author)
+	}
+	if req.Since != "" {
+		args = append(args, "--since="+req.Since)
+	}
+	if req.Until != "" {
+		args = append(args, "--until="+req.Until)
+	}
+	if req.Grep != "" {
+		args = append(args, "--grep="+req.Grep)
+	}
+	if req.Path != "" {
+		args = append(args, "--", req.Path)
+	}
+
+	raw, err := runGit(ctx, repo, args...)
+	if err != nil {
+		return LogResult{}, err
+	}
+
+	result := LogResult{}
+	for _, line := range splitLines(raw) {
+		parts := strings.SplitN(line, "|", 5)
+		if len(parts) < 5 {
+			continue
+		}
+		commit := LogCommit{
+			Hash:      parts[0],
+			ShortHash: parts[1],
+			Author:    parts[2],
+			Date:      parts[3],
+			Message:   parts[4],
+		}
+		result.Commits = append(result.Commits, commit)
+	}
+	result.Total = len(result.Commits)
+	return result, nil
+}
+
+// LogDiffRequest describes a git show query for a single commit.
+type LogDiffRequest struct {
+	RepoPath string `json:"repo_path"`
+	Hash     string `json:"hash"`
+}
+
+// LogDiffResult holds structured git show output for a commit.
+type LogDiffResult struct {
+	Hash      string     `json:"hash"`
+	ShortHash string     `json:"short_hash"`
+	Author    string     `json:"author"`
+	Date      string     `json:"date"`
+	Message   string     `json:"message"`
+	Files     []DiffFile `json:"files"`
+	Stats     []FileStat `json:"stats"`
+}
+
+// FileStat describes file change statistics.
+type FileStat struct {
+	Path     string `json:"path"`
+	Additions int    `json:"additions"`
+	Deletions int    `json:"deletions"`
+}
+
+// LogDiff returns structured git show output for a single commit.
+func LogDiff(ctx context.Context, req LogDiffRequest) (LogDiffResult, error) {
+	if strings.TrimSpace(req.RepoPath) == "" {
+		return LogDiffResult{}, errors.New("repo_path is required")
+	}
+	if strings.TrimSpace(req.Hash) == "" {
+		return LogDiffResult{}, errors.New("hash is required")
+	}
+	repo, err := filepath.Abs(req.RepoPath)
+	if err != nil {
+		return LogDiffResult{}, err
+	}
+	if _, err := runGit(ctx, repo, "rev-parse", "--show-toplevel"); err != nil {
+		return LogDiffResult{}, err
+	}
+
+	raw, err := runGit(ctx, repo, "show", "--format=%H|%h|%an|%ai|%s", "--no-color", "-U3", req.Hash)
+	if err != nil {
+		return LogDiffResult{}, err
+	}
+
+	result := LogDiffResult{}
+	lines := strings.Split(raw, "\n")
+	if len(lines) > 0 {
+		header := lines[0]
+		parts := strings.SplitN(header, "|", 5)
+		if len(parts) >= 5 {
+			result.Hash = parts[0]
+			result.ShortHash = parts[1]
+			result.Author = parts[2]
+			result.Date = parts[3]
+			result.Message = parts[4]
+		}
+	}
+
+	var currentFile *DiffFile
+	var currentHunk *DiffHunk
+
+	for _, line := range lines[1:] {
+		switch {
+		case strings.HasPrefix(line, "diff --git"):
+			if currentFile != nil {
+				if currentHunk != nil {
+					currentFile.Hunks = append(currentFile.Hunks, *currentHunk)
+				}
+				result.Files = append(result.Files, *currentFile)
+			}
+			currentFile = &DiffFile{Status: "modified"}
+			currentHunk = nil
+		case strings.HasPrefix(line, "rename from"):
+			if currentFile != nil {
+				currentFile.OldPath = strings.TrimPrefix(line, "rename from ")
+				currentFile.Status = "renamed"
+			}
+		case strings.HasPrefix(line, "rename to"):
+			if currentFile != nil {
+				currentFile.Path = strings.TrimPrefix(line, "rename to ")
+			}
+		case strings.HasPrefix(line, "new file"):
+			if currentFile != nil {
+				currentFile.Status = "added"
+			}
+		case strings.HasPrefix(line, "deleted file"):
+			if currentFile != nil {
+				currentFile.Status = "deleted"
+			}
+		case strings.HasPrefix(line, "Binary files"):
+			if currentFile != nil {
+				currentFile.IsBinary = true
+			}
+		case strings.HasPrefix(line, "--- a/"):
+			if currentFile != nil && currentFile.Path == "" {
+				currentFile.Path = strings.TrimPrefix(line, "--- a/")
+			}
+		case strings.HasPrefix(line, "+++ b/"):
+			if currentFile != nil {
+				currentFile.Path = strings.TrimPrefix(line, "+++ b/")
+			}
+		case strings.HasPrefix(line, "@@"):
+			if currentFile != nil {
+				if currentHunk != nil {
+					currentFile.Hunks = append(currentFile.Hunks, *currentHunk)
+				}
+				currentHunk = &DiffHunk{Header: line}
+			}
+		default:
+			if currentHunk != nil {
+				currentHunk.Lines = append(currentHunk.Lines, line)
+			}
+		}
+	}
+	if currentFile != nil {
+		if currentHunk != nil {
+			currentFile.Hunks = append(currentFile.Hunks, *currentHunk)
+		}
+		result.Files = append(result.Files, *currentFile)
+	}
+
+	statRaw, err := runGit(ctx, repo, "show", "--stat", "--format=", "--no-color", req.Hash)
+	if err == nil {
+		for _, line := range splitLines(statRaw) {
+			if strings.Contains(line, "|") {
+				parts := strings.SplitN(line, "|", 2)
+				if len(parts) == 2 {
+					path := strings.TrimSpace(parts[0])
+					changeStr := strings.TrimSpace(parts[1])
+					additions := strings.Count(changeStr, "+")
+					deletions := strings.Count(changeStr, "-")
+					result.Stats = append(result.Stats, FileStat{Path: path, Additions: additions, Deletions: deletions})
+				}
+			}
+		}
+	}
+
+	return result, nil
+}
+
+// --- git stash ---
+
+// StashRequest describes a git stash list query.
+type StashRequest struct {
+	RepoPath string `json:"repo_path"`
+}
+
+// StashEntry describes one stash entry.
+type StashEntry struct {
+	Index   int    `json:"index"`
+	Hash    string `json:"hash"`
+	Message string `json:"message"`
+}
+
+// StashResult holds structured git stash list output.
+type StashResult struct {
+	Entries []StashEntry `json:"entries"`
+	Total   int          `json:"total"`
+}
+
+// StashList returns structured git stash list for a repository.
+func StashList(ctx context.Context, req StashRequest) (StashResult, error) {
+	if strings.TrimSpace(req.RepoPath) == "" {
+		return StashResult{}, errors.New("repo_path is required")
+	}
+	repo, err := filepath.Abs(req.RepoPath)
+	if err != nil {
+		return StashResult{}, err
+	}
+	if _, err := runGit(ctx, repo, "rev-parse", "--show-toplevel"); err != nil {
+		return StashResult{}, err
+	}
+
+	raw, err := runGit(ctx, repo, "stash", "list", "--format=%H|%gd|%s")
+	if err != nil {
+		return StashResult{}, err
+	}
+
+	result := StashResult{}
+	for _, line := range splitLines(raw) {
+		parts := strings.SplitN(line, "|", 3)
+		if len(parts) < 3 {
+			continue
+		}
+		entry := StashEntry{
+			Hash:    parts[0],
+			Message: parts[2],
+		}
+		fmt.Sscanf(parts[1], "stash@{%d}", &entry.Index)
+		result.Entries = append(result.Entries, entry)
+	}
+	result.Total = len(result.Entries)
+	return result, nil
+}
+
+// --- git branch ---
+
+// BranchRequest describes a git branch query.
+type BranchRequest struct {
+	RepoPath string `json:"repo_path"`
+	All      bool   `json:"all,omitempty"`
+}
+
+// Branch describes one branch.
+type Branch struct {
+	Name      string `json:"name"`
+	IsCurrent bool   `json:"is_current"`
+	IsRemote  bool   `json:"is_remote,omitempty"`
+	Hash      string `json:"hash"`
+}
+
+// BranchResult holds structured git branch output.
+type BranchResult struct {
+	Branches []Branch `json:"branches"`
+	Current  string   `json:"current"`
+}
+
+// BranchList returns structured git branch list for a repository.
+func BranchList(ctx context.Context, req BranchRequest) (BranchResult, error) {
+	if strings.TrimSpace(req.RepoPath) == "" {
+		return BranchResult{}, errors.New("repo_path is required")
+	}
+	repo, err := filepath.Abs(req.RepoPath)
+	if err != nil {
+		return BranchResult{}, err
+	}
+	if _, err := runGit(ctx, repo, "rev-parse", "--show-toplevel"); err != nil {
+		return BranchResult{}, err
+	}
+
+	args := []string{"branch", "--format=%(refname:short)|%(objectname:short)|%(HEAD)"}
+	if req.All {
+		args = append(args, "-a")
+	}
+
+	raw, err := runGit(ctx, repo, args...)
+	if err != nil {
+		return BranchResult{}, err
+	}
+
+	result := BranchResult{}
+	for _, line := range splitLines(raw) {
+		parts := strings.SplitN(line, "|", 3)
+		if len(parts) < 3 {
+			continue
+		}
+		branch := Branch{
+			Name:      parts[0],
+			Hash:      parts[1],
+			IsCurrent: parts[2] == "*",
+			IsRemote:  strings.Contains(parts[0], "/"),
+		}
+		if branch.IsCurrent {
+			result.Current = branch.Name
+		}
+		result.Branches = append(result.Branches, branch)
+	}
+	return result, nil
+}
+
+// --- git remote ---
+
+// RemoteRequest describes a git remote query.
+type RemoteRequest struct {
+	RepoPath string `json:"repo_path"`
+}
+
+// Remote describes one remote.
+type Remote struct {
+	Name string `json:"name"`
+	URL  string `json:"url"`
+	Fetch string `json:"fetch,omitempty"`
+}
+
+// RemoteResult holds structured git remote output.
+type RemoteResult struct {
+	Remotes []Remote `json:"remotes"`
+}
+
+// RemoteList returns structured git remote list for a repository.
+func RemoteList(ctx context.Context, req RemoteRequest) (RemoteResult, error) {
+	if strings.TrimSpace(req.RepoPath) == "" {
+		return RemoteResult{}, errors.New("repo_path is required")
+	}
+	repo, err := filepath.Abs(req.RepoPath)
+	if err != nil {
+		return RemoteResult{}, err
+	}
+	if _, err := runGit(ctx, repo, "rev-parse", "--show-toplevel"); err != nil {
+		return RemoteResult{}, err
+	}
+
+	raw, err := runGit(ctx, repo, "remote", "-v")
+	if err != nil {
+		return RemoteResult{}, err
+	}
+
+	remotes := map[string]*Remote{}
+	for _, line := range splitLines(raw) {
+		parts := strings.Fields(line)
+		if len(parts) < 3 {
+			continue
+		}
+		name := parts[0]
+		url := parts[1]
+		direction := parts[2]
+		if _, ok := remotes[name]; !ok {
+			remotes[name] = &Remote{Name: name}
+		}
+		if direction == "(fetch)" {
+			remotes[name].URL = url
+			remotes[name].Fetch = url
+		} else if direction == "(push)" {
+			remotes[name].URL = url
+		}
+	}
+
+	result := RemoteResult{}
+	for _, r := range remotes {
+		result.Remotes = append(result.Remotes, *r)
+	}
+	return result, nil
+}
+
+// --- git tag ---
+
+// TagRequest describes a git tag query.
+type TagRequest struct {
+	RepoPath string `json:"repo_path"`
+	Pattern  string `json:"pattern,omitempty"`
+}
+
+// Tag describes one tag.
+type Tag struct {
+	Name   string `json:"name"`
+	Hash   string `json:"hash"`
+	IsAnnotated bool   `json:"is_annotated,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+// TagResult holds structured git tag output.
+type TagResult struct {
+	Tags  []Tag `json:"tags"`
+	Total int   `json:"total"`
+}
+
+// TagList returns structured git tag list for a repository.
+func TagList(ctx context.Context, req TagRequest) (TagResult, error) {
+	if strings.TrimSpace(req.RepoPath) == "" {
+		return TagResult{}, errors.New("repo_path is required")
+	}
+	repo, err := filepath.Abs(req.RepoPath)
+	if err != nil {
+		return TagResult{}, err
+	}
+	if _, err := runGit(ctx, repo, "rev-parse", "--show-toplevel"); err != nil {
+		return TagResult{}, err
+	}
+
+	args := []string{"tag", "--format=%(refname:short)|%(objectname:short)|%(objecttype)|%(contents)"}
+	if req.Pattern != "" {
+		args = append(args, "-l", req.Pattern)
+	}
+
+	raw, err := runGit(ctx, repo, args...)
+	if err != nil {
+		return TagResult{}, err
+	}
+
+	result := TagResult{}
+	for _, line := range splitLines(raw) {
+		parts := strings.SplitN(line, "|", 4)
+		if len(parts) < 3 {
+			continue
+		}
+		tag := Tag{
+			Name: parts[0],
+			Hash: parts[1],
+		}
+		if parts[2] == "tag" {
+			tag.IsAnnotated = true
+		}
+		if len(parts) > 3 {
+			tag.Message = parts[3]
+		}
+		result.Tags = append(result.Tags, tag)
+	}
+	result.Total = len(result.Tags)
+	return result, nil
+}
+
+// --- git blame ---
+
+// BlameRequest describes a git blame query.
+type BlameRequest struct {
+	RepoPath string `json:"repo_path"`
+	File     string `json:"file"`
+}
+
+// BlameLine describes one line's blame info.
+type BlameLine struct {
+	Hash      string `json:"hash"`
+	Author    string `json:"author"`
+	Date      string `json:"date"`
+	Line      int    `json:"line"`
+	Content   string `json:"content"`
+}
+
+// BlameResult holds structured git blame output.
+type BlameResult struct {
+	Lines []BlameLine `json:"lines"`
+	Total int         `json:"total"`
+}
+
+// Blame returns structured git blame for a file.
+func Blame(ctx context.Context, req BlameRequest) (BlameResult, error) {
+	if strings.TrimSpace(req.RepoPath) == "" {
+		return BlameResult{}, errors.New("repo_path is required")
+	}
+	if strings.TrimSpace(req.File) == "" {
+		return BlameResult{}, errors.New("file is required")
+	}
+	repo, err := filepath.Abs(req.RepoPath)
+	if err != nil {
+		return BlameResult{}, err
+	}
+	if _, err := runGit(ctx, repo, "rev-parse", "--show-toplevel"); err != nil {
+		return BlameResult{}, err
+	}
+
+	raw, err := runGit(ctx, repo, "blame", "--porcelain", "--", req.File)
+	if err != nil {
+		return BlameResult{}, err
+	}
+
+	result := BlameResult{}
+	lines := strings.Split(raw, "\n")
+	var current *BlameLine
+
+	for _, line := range lines {
+		if strings.HasPrefix(line, "\t") {
+			if current != nil {
+				current.Content = strings.TrimPrefix(line, "\t")
+				result.Lines = append(result.Lines, *current)
+			}
+			current = nil
+			continue
+		}
+		parts := strings.SplitN(line, " ", 2)
+		if len(parts) < 2 {
+			continue
+		}
+		key := parts[0]
+		value := parts[1]
+		switch key {
+		case "author":
+			if current == nil {
+				current = &BlameLine{}
+			}
+			current.Author = value
+		case "author-time":
+			if current == nil {
+				current = &BlameLine{}
+			}
+			current.Date = value
+		case "summary":
+			// skip
+		default:
+			if len(key) == 40 {
+				if current == nil {
+					current = &BlameLine{}
+				}
+				current.Hash = key[:8]
+				if n, err := strconv.Atoi(value); err == nil {
+					current.Line = n
+				}
+			}
+		}
+	}
+	result.Total = len(result.Lines)
+	return result, nil
+}
 
 // StatusRequest describes a git status query.
 type StatusRequest struct {

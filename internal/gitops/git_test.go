@@ -1,6 +1,7 @@
 package gitops
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -458,6 +459,251 @@ func TestNormalizeOwnedFilesRejectsDuplicates(t *testing.T) {
 	}
 	if len(out) != 2 {
 		t.Fatalf("expected 2 unique files, got %d: %v", len(out), out)
+	}
+}
+
+func TestLogReturnsCommits(t *testing.T) {
+	repo := initRepo(t)
+	writeFile(t, filepath.Join(repo, "a.txt"), "a\n")
+	run(t, repo, "add", "a.txt")
+	run(t, repo, "commit", "-m", "first commit")
+	writeFile(t, filepath.Join(repo, "b.txt"), "b\n")
+	run(t, repo, "add", "b.txt")
+	run(t, repo, "commit", "-m", "second commit")
+
+	result, err := Log(t.Context(), LogRequest{RepoPath: repo, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Total != 2 {
+		t.Fatalf("expected 2 commits, got %d", result.Total)
+	}
+	if result.Commits[0].Message != "second commit" {
+		t.Fatalf("first commit message = %q, want 'second commit'", result.Commits[0].Message)
+	}
+	if result.Commits[1].Message != "first commit" {
+		t.Fatalf("second commit message = %q, want 'first commit'", result.Commits[1].Message)
+	}
+}
+
+func TestLogRespectsLimit(t *testing.T) {
+	repo := initRepo(t)
+	for i := 0; i < 5; i++ {
+		writeFile(t, filepath.Join(repo, "a.txt"), fmt.Sprintf("v%d\n", i))
+		run(t, repo, "add", "a.txt")
+		run(t, repo, "commit", "-m", fmt.Sprintf("commit %d", i))
+	}
+
+	result, err := Log(t.Context(), LogRequest{RepoPath: repo, Limit: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Total != 3 {
+		t.Fatalf("expected 3 commits, got %d", result.Total)
+	}
+}
+
+func TestLogFiltersByPath(t *testing.T) {
+	repo := initRepo(t)
+	writeFile(t, filepath.Join(repo, "a.txt"), "a\n")
+	run(t, repo, "add", "a.txt")
+	run(t, repo, "commit", "-m", "add a")
+	writeFile(t, filepath.Join(repo, "b.txt"), "b\n")
+	run(t, repo, "add", "b.txt")
+	run(t, repo, "commit", "-m", "add b")
+
+	result, err := Log(t.Context(), LogRequest{RepoPath: repo, Path: "a.txt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Total != 1 {
+		t.Fatalf("expected 1 commit for a.txt, got %d", result.Total)
+	}
+	if result.Commits[0].Message != "add a" {
+		t.Fatalf("commit message = %q, want 'add a'", result.Commits[0].Message)
+	}
+}
+
+func TestLogDiffReturnsCommitDetails(t *testing.T) {
+	repo := initRepo(t)
+	writeFile(t, filepath.Join(repo, "a.txt"), "hello\n")
+	run(t, repo, "add", "a.txt")
+	run(t, repo, "commit", "-m", "add a")
+
+	hash := strings.TrimSpace(run(t, repo, "rev-parse", "HEAD"))
+
+	result, err := LogDiff(t.Context(), LogDiffRequest{RepoPath: repo, Hash: hash})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Message != "add a" {
+		t.Fatalf("message = %q, want 'add a'", result.Message)
+	}
+	if len(result.Files) == 0 {
+		t.Fatal("expected files in diff")
+	}
+}
+
+func TestStashListEmpty(t *testing.T) {
+	repo := initRepo(t)
+	writeFile(t, filepath.Join(repo, "a.txt"), "a\n")
+	run(t, repo, "add", "a.txt")
+	run(t, repo, "commit", "-m", "init")
+
+	result, err := StashList(t.Context(), StashRequest{RepoPath: repo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Total != 0 {
+		t.Fatalf("expected 0 stashes, got %d", result.Total)
+	}
+}
+
+func TestStashListReturnsEntries(t *testing.T) {
+	repo := initRepo(t)
+	writeFile(t, filepath.Join(repo, "a.txt"), "a\n")
+	run(t, repo, "add", "a.txt")
+	run(t, repo, "commit", "-m", "init")
+	writeFile(t, filepath.Join(repo, "a.txt"), "modified\n")
+	run(t, repo, "stash", "push", "-m", "my stash")
+
+	result, err := StashList(t.Context(), StashRequest{RepoPath: repo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Total != 1 {
+		t.Fatalf("expected 1 stash, got %d", result.Total)
+	}
+	if !strings.Contains(result.Entries[0].Message, "my stash") {
+		t.Fatalf("stash message = %q, want to contain 'my stash'", result.Entries[0].Message)
+	}
+}
+
+func TestBranchListReturnsCurrent(t *testing.T) {
+	repo := initRepo(t)
+	writeFile(t, filepath.Join(repo, "a.txt"), "a\n")
+	run(t, repo, "add", "a.txt")
+	run(t, repo, "commit", "-m", "init")
+
+	result, err := BranchList(t.Context(), BranchRequest{RepoPath: repo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Current == "" {
+		t.Fatal("expected current branch to be set")
+	}
+	found := false
+	for _, b := range result.Branches {
+		if b.IsCurrent {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("expected to find current branch in list")
+	}
+}
+
+func TestRemoteListEmpty(t *testing.T) {
+	repo := initRepo(t)
+	writeFile(t, filepath.Join(repo, "a.txt"), "a\n")
+	run(t, repo, "add", "a.txt")
+	run(t, repo, "commit", "-m", "init")
+
+	result, err := RemoteList(t.Context(), RemoteRequest{RepoPath: repo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Remotes) != 0 {
+		t.Fatalf("expected 0 remotes, got %d", len(result.Remotes))
+	}
+}
+
+func TestTagListEmpty(t *testing.T) {
+	repo := initRepo(t)
+	writeFile(t, filepath.Join(repo, "a.txt"), "a\n")
+	run(t, repo, "add", "a.txt")
+	run(t, repo, "commit", "-m", "init")
+
+	result, err := TagList(t.Context(), TagRequest{RepoPath: repo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Total != 0 {
+		t.Fatalf("expected 0 tags, got %d", result.Total)
+	}
+}
+
+func TestTagListReturnsTags(t *testing.T) {
+	repo := initRepo(t)
+	writeFile(t, filepath.Join(repo, "a.txt"), "a\n")
+	run(t, repo, "add", "a.txt")
+	run(t, repo, "commit", "-m", "init")
+	run(t, repo, "tag", "-a", "v1.0", "-m", "release 1.0")
+
+	result, err := TagList(t.Context(), TagRequest{RepoPath: repo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Total != 1 {
+		t.Fatalf("expected 1 tag, got %d", result.Total)
+	}
+	if result.Tags[0].Name != "v1.0" {
+		t.Fatalf("tag name = %q, want 'v1.0'", result.Tags[0].Name)
+	}
+	if !result.Tags[0].IsAnnotated {
+		t.Fatal("expected annotated tag")
+	}
+}
+
+func TestBlameReturnsLines(t *testing.T) {
+	repo := initRepo(t)
+	writeFile(t, filepath.Join(repo, "a.txt"), "line1\nline2\n")
+	run(t, repo, "add", "a.txt")
+	run(t, repo, "commit", "-m", "init")
+
+	result, err := Blame(t.Context(), BlameRequest{RepoPath: repo, File: "a.txt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Total != 2 {
+		t.Fatalf("expected 2 lines, got %d", result.Total)
+	}
+	if result.Lines[0].Content != "line1" {
+		t.Fatalf("line 1 content = %q, want 'line1'", result.Lines[0].Content)
+	}
+}
+
+func TestStatusReturnsBranch(t *testing.T) {
+	repo := initRepo(t)
+	writeFile(t, filepath.Join(repo, "a.txt"), "a\n")
+	run(t, repo, "add", "a.txt")
+	run(t, repo, "commit", "-m", "init")
+
+	result, err := Status(t.Context(), StatusRequest{RepoPath: repo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Branch == "" {
+		t.Fatal("expected branch to be set")
+	}
+	if !result.IsClean {
+		t.Fatal("expected clean worktree")
+	}
+}
+
+func TestDiffReturnsEmpty(t *testing.T) {
+	repo := initRepo(t)
+	writeFile(t, filepath.Join(repo, "a.txt"), "a\n")
+	run(t, repo, "add", "a.txt")
+	run(t, repo, "commit", "-m", "init")
+
+	result, err := Diff(t.Context(), DiffRequest{RepoPath: repo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Empty {
+		t.Fatal("expected empty diff")
 	}
 }
 
