@@ -28,10 +28,11 @@ type taskMutationResult struct {
 }
 
 type taskBatchMutationResult struct {
-	Upserted   []tasks.Task `json:"upserted"`
-	Closed     []tasks.Task `json:"closed"`
-	Source     string       `json:"source"`
-	Validation string       `json:"validation"`
+	Upserted     []tasks.Task `json:"upserted"`
+	Closed       []tasks.Task `json:"closed"`
+	Source       string       `json:"source"`
+	Validation   string       `json:"validation"`
+	ChangedFiles []string     `json:"changed_files,omitempty"`
 }
 
 type leanRegistryDiagnostic struct {
@@ -445,7 +446,7 @@ func batchUpsertTasks(ctx context.Context, req tasks.BatchUpsertRequest, command
 	if err != nil {
 		return taskBatchMutationResult{}, err
 	}
-	return taskBatchMutationResult{Upserted: upserted, Closed: closed, Source: "lean_registry", Validation: envelope.Validation.Summary + " + lake build"}, nil
+	return taskBatchMutationResult{Upserted: upserted, Closed: closed, Source: "lean_registry", Validation: envelope.Validation.Summary + " + lake build", ChangedFiles: envelope.ChangedFiles}, nil
 }
 
 func deleteTask(ctx context.Context, req tasks.DeleteRequest, commands *command.Runner, _ *tasks.Store) (taskMutationResult, error) {

@@ -955,7 +955,7 @@ func (c *Config) Validate() error {
 		info, err := os.Stat(checkPath)
 		if err != nil {
 			if os.IsNotExist(err) {
-				return fmt.Errorf("task_registry.obsidian.path is not initialized: %s does not exist; create the directory configured by task_registry.obsidian.path, update .mcp-ai-helper.yaml, or set task_registry.backend: lean; next_call: server_setup_guidance", checkPath)
+				return nil
 			}
 			return fmt.Errorf("task_registry.obsidian.path not readable: %w; next_call: server_setup_guidance", err)
 		}

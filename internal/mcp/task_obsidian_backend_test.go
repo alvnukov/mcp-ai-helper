@@ -319,7 +319,26 @@ func TestObsidianWriterQuotesColonScalars(t *testing.T) {
 	}
 }
 
-func TestObsidianListAllFailsClosedOnInvalidNote(t *testing.T) {
+func TestObsidianListAllAutoInitializesMissingRegistryDir(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "missing-registry")
+	backend := newObsidianTaskBackend(dir)
+	all, _, err := backend.ListAll(nil, "")
+	if err != nil {
+		t.Fatalf("ListAll should auto-initialize missing registry dir: %v", err)
+	}
+	if len(all) != 0 {
+		t.Fatalf("expected 0 tasks, got %d", len(all))
+	}
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		t.Fatalf("registry dir was not created: info=%v err=%v", info, err)
+	}
+	meta := backend.(*obsidianTaskBackend).ListMetadata()
+	if !strings.Contains(meta.Validation, "0 task") {
+		t.Fatalf("validation = %q", meta.Validation)
+	}
+}
+
+func TestObsidianListAllDegradesOnInvalidNote(t *testing.T) {
 	dir := t.TempDir()
 	backend := newObsidianTaskBackend(dir)
 	_, err := backend.Upsert(nil, tasks.AddRequest{ID: "valid", Status: "todo", Title: "Valid"})
@@ -330,10 +349,98 @@ func TestObsidianListAllFailsClosedOnInvalidNote(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "invalid.md"), bad, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = backend.ListAll(nil, "")
-	if err == nil || !strings.Contains(err.Error(), "read obsidian task note invalid") {
-		t.Fatalf("expected invalid note error, got: %v", err)
+	all, _, err := backend.ListAll(nil, "")
+	if err != nil {
+		t.Fatalf("ListAll should degrade instead of failing: %v", err)
 	}
+	if len(all) != 1 || all[0].ID != "valid" {
+		t.Fatalf("ListAll tasks = %#v, want only valid task", all)
+	}
+	meta := backend.(*obsidianTaskBackend).ListMetadata()
+	if len(meta.Diagnostics) != 1 || meta.Diagnostics[0].Code != "invalid_projection" {
+		t.Fatalf("diagnostics = %#v", meta.Diagnostics)
+	}
+	if !strings.Contains(meta.Validation, "1 diagnostic") {
+		t.Fatalf("validation = %q", meta.Validation)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "invalid.md")); err != nil {
+		t.Fatalf("invalid note must be preserved: %v", err)
+	}
+}
+
+func TestObsidianListAllAutoHealsFilenameIDMismatch(t *testing.T) {
+	dir := t.TempDir()
+	backend := newObsidianTaskBackend(dir)
+	mismatched := []byte("---\nid: canonical-task\ntitle: Canonical Task\nstatus: todo\n---\n\n## Body\n\nOriginal body.\n")
+	if err := os.WriteFile(filepath.Join(dir, "wrong-name.md"), mismatched, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	all, _, err := backend.ListAll(nil, "")
+	if err != nil {
+		t.Fatalf("ListAll: %v", err)
+	}
+	if len(all) != 1 || all[0].ID != "canonical-task" || all[0].Body != "Original body." {
+		t.Fatalf("tasks = %#v", all)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "wrong-name.md")); !os.IsNotExist(err) {
+		t.Fatalf("wrong-name.md should be renamed, got err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "canonical-task.md")); err != nil {
+		t.Fatalf("canonical-task.md missing after auto-heal: %v", err)
+	}
+	meta := backend.(*obsidianTaskBackend).ListMetadata()
+	if len(meta.Diagnostics) != 1 || meta.Diagnostics[0].Code != "projection_id_auto_healed" {
+		t.Fatalf("diagnostics = %#v", meta.Diagnostics)
+	}
+	if !stringSliceContains(meta.ChangedFiles, "wrong-name.md") || !stringSliceContains(meta.ChangedFiles, "canonical-task.md") {
+		t.Fatalf("changed files = %#v", meta.ChangedFiles)
+	}
+	got, _, err := backend.Get(nil, "", "canonical-task")
+	if err != nil {
+		t.Fatalf("Get canonical-task after auto-heal: %v", err)
+	}
+	if got.Title != "Canonical Task" {
+		t.Fatalf("title = %q", got.Title)
+	}
+}
+
+func TestObsidianListAllDoesNotOverwriteConflictingMismatch(t *testing.T) {
+	dir := t.TempDir()
+	backend := newObsidianTaskBackend(dir)
+	_, err := backend.Upsert(nil, tasks.AddRequest{ID: "canonical-task", Status: "todo", Title: "Existing Canonical"})
+	if err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	mismatched := []byte("---\nid: canonical-task\ntitle: Conflicting Task\nstatus: todo\n---\n")
+	if err := os.WriteFile(filepath.Join(dir, "wrong-name.md"), mismatched, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	all, _, err := backend.ListAll(nil, "")
+	if err != nil {
+		t.Fatalf("ListAll: %v", err)
+	}
+	if len(all) != 1 || all[0].Title != "Existing Canonical" {
+		t.Fatalf("tasks = %#v", all)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "wrong-name.md")); err != nil {
+		t.Fatalf("conflicting note must be preserved: %v", err)
+	}
+	meta := backend.(*obsidianTaskBackend).ListMetadata()
+	if len(meta.Diagnostics) != 1 || meta.Diagnostics[0].Code != "projection_id_conflict" {
+		t.Fatalf("diagnostics = %#v", meta.Diagnostics)
+	}
+	if len(meta.ChangedFiles) != 0 {
+		t.Fatalf("conflict must not report changed files: %#v", meta.ChangedFiles)
+	}
+}
+
+func stringSliceContains(items []string, want string) bool {
+	for _, item := range items {
+		if item == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestObsidianDelete(t *testing.T) {
@@ -379,7 +486,7 @@ func TestObsidianSetStatus(t *testing.T) {
 func TestObsidianBatchUpsert(t *testing.T) {
 	dir := t.TempDir()
 	backend := newObsidianTaskBackend(dir)
-	_, err := backend.BatchUpsert(nil, tasks.BatchUpsertRequest{
+	result, err := backend.BatchUpsert(nil, tasks.BatchUpsertRequest{
 		Tasks: []tasks.AddRequest{
 			{ID: "batch-1", Status: "todo", Title: "Batch 1"},
 			{ID: "batch-2", Status: "todo", Title: "Batch 2"},
@@ -394,6 +501,9 @@ func TestObsidianBatchUpsert(t *testing.T) {
 	}
 	if len(all) != 2 {
 		t.Fatalf("expected 2 tasks, got %d", len(all))
+	}
+	if !stringSliceContains(result.ChangedFiles, "batch-1.md") || !stringSliceContains(result.ChangedFiles, "batch-2.md") {
+		t.Fatalf("changed files = %#v", result.ChangedFiles)
 	}
 }
 
@@ -515,5 +625,42 @@ func TestObsidianLeanSpecificFieldsNotDropped(t *testing.T) {
 	}
 	if len(got.VerificationPlan) == 0 {
 		t.Error("Lean field 'verification_plan' was silently dropped")
+	}
+}
+
+func TestTaskListResponseIncludesCountsAndRegistryMetadata(t *testing.T) {
+	backend := &obsidianTaskBackend{}
+	backend.setListMetadata(taskListMetadata{
+		Validation: "obsidian registry validated: 2 task(s), 1 diagnostic(s), 1 changed file(s)",
+		Diagnostics: []taskRegistryDiagnostic{{
+			Code:     "invalid_projection",
+			File:     "bad.md",
+			Message:  "skipped invalid Obsidian task note",
+			Severity: "warning",
+		}},
+		ChangedFiles: []string{"repaired.md"},
+	})
+	all := []tasks.Task{
+		{ID: "todo-task", Status: "todo", Title: "Todo"},
+		{ID: "done-task", Status: "done", Title: "Done"},
+	}
+
+	response := taskListResponse(backend, all[:1], all, "obsidian_registry")
+
+	counts, ok := response["counts_by_status"].(map[string]int)
+	if !ok {
+		t.Fatalf("counts_by_status type = %T", response["counts_by_status"])
+	}
+	if counts["todo"] != 1 || counts["done"] != 1 {
+		t.Fatalf("counts_by_status = %#v", counts)
+	}
+	if response["validation"] == "" {
+		t.Fatalf("validation missing from response: %#v", response)
+	}
+	if diagnostics, ok := response["diagnostics"].([]taskRegistryDiagnostic); !ok || len(diagnostics) != 1 {
+		t.Fatalf("diagnostics = %#v", response["diagnostics"])
+	}
+	if changedFiles, ok := response["changed_files"].([]string); !ok || !stringSliceContains(changedFiles, "repaired.md") {
+		t.Fatalf("changed_files = %#v", response["changed_files"])
 	}
 }

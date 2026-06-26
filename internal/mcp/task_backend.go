@@ -20,6 +20,23 @@ type taskBackend interface {
 	Delete(ctx context.Context, req tasks.DeleteRequest) (taskMutationResult, error)
 }
 
+type taskRegistryDiagnostic struct {
+	Code     string `json:"code"`
+	File     string `json:"file,omitempty"`
+	Message  string `json:"message"`
+	Severity string `json:"severity"`
+}
+
+type taskListMetadata struct {
+	Validation   string                   `json:"validation,omitempty"`
+	Diagnostics  []taskRegistryDiagnostic `json:"diagnostics,omitempty"`
+	ChangedFiles []string                 `json:"changed_files,omitempty"`
+}
+
+type taskListMetadataProvider interface {
+	ListMetadata() taskListMetadata
+}
+
 type lakeTaskBackend struct {
 	commands *command.Runner
 	store    *tasks.Store
@@ -78,5 +95,5 @@ func (b workflowTaskBackend) SetStatus(ctx context.Context, req tasks.StatusRequ
 
 func (b workflowTaskBackend) BatchUpsert(ctx context.Context, req tasks.BatchUpsertRequest) (tasks.BatchUpsertResult, error) {
 	result, err := b.backend.BatchUpsert(ctx, req)
-	return tasks.BatchUpsertResult{Upserted: result.Upserted, Closed: result.Closed, Source: result.Source, Validation: result.Validation}, err
+	return tasks.BatchUpsertResult{Upserted: result.Upserted, Closed: result.Closed, Source: result.Source, Validation: result.Validation, ChangedFiles: result.ChangedFiles}, err
 }

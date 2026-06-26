@@ -29,7 +29,7 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 		if err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
-		return structured(map[string]any{"tasks": filterTasks(list, args), "source": source})
+		return structured(taskListResponse(backend, filterTasks(list, args), list, source))
 	})
 	srv.AddTool(basemcp.NewTool("task_search",
 		basemcp.WithDescription("Search per-repository tasks by id, status, title, body, priority, or tag."),
@@ -49,7 +49,7 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 		if err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
-		return structured(map[string]any{"tasks": filterTasks(list, args), "source": source})
+		return structured(taskListResponse(backend, filterTasks(list, args), list, source))
 	})
 	srv.AddTool(basemcp.NewTool("task_set_status",
 		basemcp.WithDescription("Set one per-repository task status."),
@@ -138,7 +138,7 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 		if err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
-		return structured(map[string]any{"tasks": list, "source": source})
+		return structured(taskListResponse(backend, list, list, source))
 	})
 	srv.AddTool(basemcp.NewTool("task_get",
 		basemcp.WithDescription("Read one per-repository task by id."),
@@ -320,6 +320,35 @@ func mergeTaskUpdate(existing tasks.Task, update tasks.UpdateRequest) tasks.AddR
 		merged.VerificationPlan = update.VerificationPlan
 	}
 	return merged
+}
+
+func taskListResponse(backend taskBackend, visible []tasks.Task, counted []tasks.Task, source string) map[string]any {
+	out := map[string]any{
+		"tasks":            visible,
+		"source":           source,
+		"counts_by_status": countTasksByStatus(counted),
+	}
+	if provider, ok := backend.(taskListMetadataProvider); ok {
+		meta := provider.ListMetadata()
+		if meta.Validation != "" {
+			out["validation"] = meta.Validation
+		}
+		if len(meta.Diagnostics) > 0 {
+			out["diagnostics"] = meta.Diagnostics
+		}
+		if len(meta.ChangedFiles) > 0 {
+			out["changed_files"] = meta.ChangedFiles
+		}
+	}
+	return out
+}
+
+func countTasksByStatus(list []tasks.Task) map[string]int {
+	counts := make(map[string]int)
+	for _, task := range list {
+		counts[task.Status]++
+	}
+	return counts
 }
 
 func filterTasks(list []tasks.Task, req tasks.ListRequest) []tasks.Task {

@@ -72,7 +72,7 @@ func TestTaskRegistryBackendRejectsInvalidValue(t *testing.T) {
 	}
 }
 
-func TestTaskRegistryBackendRequiresReadableObsidianPath(t *testing.T) {
+func TestTaskRegistryBackendRequiresObsidianPathButAllowsMissingDirectory(t *testing.T) {
 	cfg := &Config{TaskRegistry: TaskRegistryConfig{Backend: "obsidian"}}
 	applyDefaults(cfg)
 	err := cfg.Validate()
@@ -84,14 +84,18 @@ func TestTaskRegistryBackendRequiresReadableObsidianPath(t *testing.T) {
 	}
 
 	cfg.TaskRegistry.Obsidian.Path = filepath.Join(t.TempDir(), "missing")
-	err = cfg.Validate()
-	if err == nil || !strings.Contains(err.Error(), "task_registry.obsidian.path is not initialized") {
-		t.Fatalf("expected uninitialized path error, got: %v", err)
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("missing obsidian directory should be auto-initialized by backend, got: %v", err)
 	}
-	for _, want := range []string{"create the directory", "task_registry.backend: lean", "next_call: server_setup_guidance"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("uninitialized path error missing %q: %v", want, err)
-		}
+
+	filePath := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(filePath, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg.TaskRegistry.Obsidian.Path = filePath
+	err = cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "task_registry.obsidian.path is not a directory") {
+		t.Fatalf("expected non-directory error, got: %v", err)
 	}
 }
 

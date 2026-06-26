@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -18,7 +19,14 @@ import (
 )
 
 type obsidianTaskBackend struct {
-	dir string
+	dir      string
+	mu       sync.Mutex
+	lastScan taskListMetadata
+}
+
+type obsidianTaskScan struct {
+	Tasks    []tasks.Task
+	Metadata taskListMetadata
 }
 
 func newObsidianTaskBackend(dir string) taskBackend {
@@ -98,6 +106,23 @@ func (b *obsidianTaskBackend) notePath(id string) string {
 	return filepath.Join(b.dir, id+".md")
 }
 
+func (b *obsidianTaskBackend) ensureDir() error {
+	if strings.TrimSpace(b.dir) == "" {
+		return errors.New("obsidian task registry path is required")
+	}
+	if err := os.MkdirAll(b.dir, 0o700); err != nil {
+		return fmt.Errorf("initialize obsidian task registry dir: %w", err)
+	}
+	info, err := os.Stat(b.dir)
+	if err != nil {
+		return fmt.Errorf("stat obsidian task registry dir: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("obsidian task registry path is not a directory: %s", b.dir)
+	}
+	return nil
+}
+
 func (b *obsidianTaskBackend) ListCurrent(ctx context.Context, repoPath string) ([]tasks.Task, string, error) {
 	all, _, err := b.ListAll(ctx, repoPath)
 	if err != nil {
@@ -130,12 +155,18 @@ func (b *obsidianTaskBackend) Get(_ context.Context, repoPath string, id string)
 }
 
 func (b *obsidianTaskBackend) Upsert(_ context.Context, req tasks.AddRequest) (taskMutationResult, error) {
+	if err := b.ensureDir(); err != nil {
+		return taskMutationResult{}, err
+	}
 	if strings.TrimSpace(req.Title) == "" {
 		return taskMutationResult{}, errors.New("title is required")
 	}
 	id := req.ID
 	if id == "" {
 		id = tasks.WorktreePathForID(req.Title)
+	}
+	if !safeObsidianTaskID(id) {
+		return taskMutationResult{}, fmt.Errorf("task id %q is not safe for an Obsidian task filename", id)
 	}
 	now := time.Now().UTC()
 	existing, exists := b.tryRead(id)
@@ -174,6 +205,9 @@ func (b *obsidianTaskBackend) Upsert(_ context.Context, req tasks.AddRequest) (t
 }
 
 func (b *obsidianTaskBackend) SetStatus(_ context.Context, req tasks.StatusRequest) (taskMutationResult, error) {
+	if err := b.ensureDir(); err != nil {
+		return taskMutationResult{}, err
+	}
 	if strings.TrimSpace(req.Status) == "" {
 		return taskMutationResult{}, errors.New("status is required")
 	}
@@ -191,7 +225,11 @@ func (b *obsidianTaskBackend) SetStatus(_ context.Context, req tasks.StatusReque
 }
 
 func (b *obsidianTaskBackend) BatchUpsert(_ context.Context, req tasks.BatchUpsertRequest) (taskBatchMutationResult, error) {
+	if err := b.ensureDir(); err != nil {
+		return taskBatchMutationResult{}, err
+	}
 	upserted := make([]tasks.Task, 0, len(req.Tasks))
+	changedFiles := make([]string, 0, len(req.Tasks))
 	for _, item := range req.Tasks {
 		if item.RepoPath == "" {
 			item.RepoPath = req.RepoPath
@@ -201,6 +239,9 @@ func (b *obsidianTaskBackend) BatchUpsert(_ context.Context, req tasks.BatchUpse
 			return taskBatchMutationResult{}, fmt.Errorf("batch upsert %s: %w", item.ID, err)
 		}
 		upserted = append(upserted, result.Task)
+		for _, file := range result.ChangedFiles {
+			changedFiles = appendChangedFile(changedFiles, file)
+		}
 	}
 	closed := make([]tasks.Task, 0)
 	if req.CloseMissing {
@@ -235,13 +276,21 @@ func (b *obsidianTaskBackend) BatchUpsert(_ context.Context, req tasks.BatchUpse
 					if err := b.writeNote(note); err != nil {
 						continue
 					}
+					changedFiles = appendChangedFile(changedFiles, note.ID+".md")
 					closed = append(closed, tasks.WithWorktreeContext(req.RepoPath, noteToTask(note)))
 					break
 				}
 			}
 		}
 	}
-	return taskBatchMutationResult{Upserted: upserted, Closed: closed, Source: "obsidian_registry", Validation: "batch upsert complete"}, nil
+	if _, err := b.readAll(); err != nil {
+		return taskBatchMutationResult{}, err
+	}
+	meta := b.ListMetadata()
+	for _, file := range meta.ChangedFiles {
+		changedFiles = appendChangedFile(changedFiles, file)
+	}
+	return taskBatchMutationResult{Upserted: upserted, Closed: closed, Source: "obsidian_registry", Validation: "batch upsert complete; " + meta.Validation, ChangedFiles: changedFiles}, nil
 }
 
 func (b *obsidianTaskBackend) Delete(_ context.Context, req tasks.DeleteRequest) (taskMutationResult, error) {
@@ -260,6 +309,26 @@ func (b *obsidianTaskBackend) Delete(_ context.Context, req tasks.DeleteRequest)
 	return taskMutationResult{Task: task, Source: "obsidian_registry", Validation: "file deleted", ChangedFiles: []string{req.ID + ".md"}}, nil
 }
 
+func (b *obsidianTaskBackend) ListMetadata() taskListMetadata {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return taskListMetadata{
+		Validation:   b.lastScan.Validation,
+		Diagnostics:  append([]taskRegistryDiagnostic(nil), b.lastScan.Diagnostics...),
+		ChangedFiles: append([]string(nil), b.lastScan.ChangedFiles...),
+	}
+}
+
+func (b *obsidianTaskBackend) setListMetadata(meta taskListMetadata) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.lastScan = taskListMetadata{
+		Validation:   meta.Validation,
+		Diagnostics:  append([]taskRegistryDiagnostic(nil), meta.Diagnostics...),
+		ChangedFiles: append([]string(nil), meta.ChangedFiles...),
+	}
+}
+
 func withObsidianWorktreeContext(repoPath string, items []tasks.Task) []tasks.Task {
 	out := make([]tasks.Task, 0, len(items))
 	for _, item := range items {
@@ -269,27 +338,99 @@ func withObsidianWorktreeContext(repoPath string, items []tasks.Task) []tasks.Ta
 }
 
 func (b *obsidianTaskBackend) readAll() ([]tasks.Task, error) {
+	scan, err := b.scanNotes(true)
+	if err != nil {
+		b.setListMetadata(taskListMetadata{})
+		return nil, err
+	}
+	b.setListMetadata(scan.Metadata)
+	return scan.Tasks, nil
+}
+
+func (b *obsidianTaskBackend) scanNotes(autoHeal bool) (obsidianTaskScan, error) {
+	if err := b.ensureDir(); err != nil {
+		return obsidianTaskScan{}, err
+	}
 	entries, err := os.ReadDir(b.dir)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("obsidian task registry is not initialized: %s does not exist; create the directory configured by task_registry.obsidian.path, update .mcp-ai-helper.yaml, or set task_registry.backend: lean; next_call: server_setup_guidance", b.dir)
-		}
-		return nil, fmt.Errorf("read obsidian task dir: %w", err)
+		return obsidianTaskScan{}, fmt.Errorf("read obsidian task dir: %w", err)
 	}
-	out := make([]tasks.Task, 0, len(entries))
+	scan := obsidianTaskScan{Tasks: make([]tasks.Task, 0, len(entries))}
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
 			continue
 		}
-		id := strings.TrimSuffix(entry.Name(), ".md")
-		note, err := b.readNote(id)
+		filenameID := strings.TrimSuffix(entry.Name(), ".md")
+		note, err := b.readNoteForScan(filenameID)
 		if err != nil {
-			return nil, fmt.Errorf("read obsidian task note %s: %w", id, err)
+			scan.addDiagnostic("invalid_projection", entry.Name(), fmt.Sprintf("skipped invalid Obsidian task note: %v", err), "warning")
+			continue
 		}
-		out = append(out, noteToTask(note))
+		if note.ID != filenameID {
+			if !b.autoHealFilenameIDMismatch(&scan, filenameID, note, autoHeal) {
+				continue
+			}
+		}
+		scan.Tasks = append(scan.Tasks, noteToTask(note))
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out, nil
+	sort.Slice(scan.Tasks, func(i, j int) bool { return scan.Tasks[i].ID < scan.Tasks[j].ID })
+	scan.finishValidation()
+	return scan, nil
+}
+
+func (b *obsidianTaskBackend) autoHealFilenameIDMismatch(scan *obsidianTaskScan, filenameID string, note taskNote, autoHeal bool) bool {
+	oldName := filenameID + ".md"
+	newName := note.ID + ".md"
+	if !safeObsidianTaskID(note.ID) {
+		scan.addDiagnostic("projection_id_unsafe", oldName, fmt.Sprintf("frontmatter id %q cannot be used as a safe task filename", note.ID), "error")
+		return false
+	}
+	oldPath := b.notePath(filenameID)
+	newPath := b.notePath(note.ID)
+	if _, err := os.Stat(newPath); err == nil {
+		scan.addDiagnostic("projection_id_conflict", oldName, fmt.Sprintf("frontmatter id %q conflicts with existing %s; skipped without overwrite", note.ID, newName), "error")
+		return false
+	} else if !os.IsNotExist(err) {
+		scan.addDiagnostic("projection_id_conflict_check_failed", oldName, fmt.Sprintf("cannot check target %s: %v", newName, err), "error")
+		return false
+	}
+	if !autoHeal {
+		scan.addDiagnostic("projection_id_mismatch", oldName, fmt.Sprintf("frontmatter id %q differs from filename id %q", note.ID, filenameID), "warning")
+		return false
+	}
+	if err := os.Rename(oldPath, newPath); err != nil {
+		scan.addDiagnostic("projection_id_rename_failed", oldName, fmt.Sprintf("cannot rename to %s: %v", newName, err), "error")
+		return false
+	}
+	scan.Metadata.ChangedFiles = appendChangedFile(scan.Metadata.ChangedFiles, oldName)
+	scan.Metadata.ChangedFiles = appendChangedFile(scan.Metadata.ChangedFiles, newName)
+	scan.addDiagnostic("projection_id_auto_healed", oldName, fmt.Sprintf("renamed %s to %s to match frontmatter id", oldName, newName), "info")
+	return true
+}
+
+func safeObsidianTaskID(id string) bool {
+	id = strings.TrimSpace(id)
+	if id == "" || id == "." || id == ".." || strings.Contains(id, "..") || strings.ContainsAny(id, `/\`) {
+		return false
+	}
+	return filepath.Clean(id) == id
+}
+
+func (scan *obsidianTaskScan) addDiagnostic(code string, file string, message string, severity string) {
+	scan.Metadata.Diagnostics = append(scan.Metadata.Diagnostics, taskRegistryDiagnostic{Code: code, File: file, Message: message, Severity: severity})
+}
+
+func (scan *obsidianTaskScan) finishValidation() {
+	scan.Metadata.Validation = fmt.Sprintf("obsidian registry validated: %d task(s), %d diagnostic(s), %d changed file(s)", len(scan.Tasks), len(scan.Metadata.Diagnostics), len(scan.Metadata.ChangedFiles))
+}
+
+func appendChangedFile(files []string, file string) []string {
+	for _, existing := range files {
+		if existing == file {
+			return files
+		}
+	}
+	return append(files, file)
 }
 
 func (b *obsidianTaskBackend) readOne(id string) (tasks.Task, error) {
@@ -309,6 +450,9 @@ func (b *obsidianTaskBackend) tryRead(id string) (tasks.Task, bool) {
 }
 
 func (b *obsidianTaskBackend) readNote(id string) (taskNote, error) {
+	if !safeObsidianTaskID(id) {
+		return taskNote{}, fmt.Errorf("task id %q is not safe for an Obsidian task filename", id)
+	}
 	path := b.notePath(id)
 	// #nosec G304,G703 -- path from notePath, scoped under obsidian tasks directory
 	data, err := os.ReadFile(path)
@@ -321,7 +465,28 @@ func (b *obsidianTaskBackend) readNote(id string) (taskNote, error) {
 	return parseNote(data, id)
 }
 
+func (b *obsidianTaskBackend) readNoteForScan(id string) (taskNote, error) {
+	if !safeObsidianTaskID(id) {
+		return taskNote{}, fmt.Errorf("task id %q is not safe for an Obsidian task filename", id)
+	}
+	path := b.notePath(id)
+	// #nosec G304,G703 -- path from notePath, scoped under obsidian tasks directory
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return taskNote{}, fmt.Errorf("read task %s: %w", id, err)
+	}
+	return parseNoteForScan(data, id)
+}
+
 func parseNote(data []byte, expectedID string) (taskNote, error) {
+	return parseNoteWithFilenamePolicy(data, expectedID, true)
+}
+
+func parseNoteForScan(data []byte, expectedID string) (taskNote, error) {
+	return parseNoteWithFilenamePolicy(data, expectedID, false)
+}
+
+func parseNoteWithFilenamePolicy(data []byte, expectedID string, requireFilenameID bool) (taskNote, error) {
 	text := string(data)
 	fm, body, err := splitFrontmatter(text, expectedID)
 	if err != nil {
@@ -337,7 +502,7 @@ func parseNote(data []byte, expectedID string) (taskNote, error) {
 			return taskNote{}, fmt.Errorf("frontmatter parse failed in %s.md: %w", expectedID, err)
 		}
 	}
-	if err := normalizeParsedNote(&note, expectedID); err != nil {
+	if err := normalizeParsedNote(&note, expectedID, requireFilenameID); err != nil {
 		return taskNote{}, err
 	}
 	note.Body, note.AccCriteriaSection, note.VerPlanSection = splitBody(body)
@@ -366,7 +531,7 @@ func splitFrontmatter(text string, expectedID string) (string, string, error) {
 	return "", "", fmt.Errorf("%w: missing closing --- in %s", errInvalidFrontmatter, expectedID)
 }
 
-func normalizeParsedNote(note *taskNote, expectedID string) error {
+func normalizeParsedNote(note *taskNote, expectedID string, requireFilenameID bool) error {
 	note.ID = strings.TrimSpace(note.ID)
 	note.Title = strings.TrimSpace(note.Title)
 	if note.ID == "" {
@@ -375,7 +540,7 @@ func normalizeParsedNote(note *taskNote, expectedID string) error {
 	if note.Title == "" {
 		return fmt.Errorf("%w: 'title' is required in %s.md", errMissingRequired, expectedID)
 	}
-	if note.ID != expectedID {
+	if requireFilenameID && note.ID != expectedID {
 		return fmt.Errorf("id mismatch in %s: frontmatter id=%s, filename id=%s", expectedID, note.ID, expectedID)
 	}
 	note.Status = normalizeFrontmatterEnum(note.Status)
@@ -565,6 +730,12 @@ func parseBulletList(text string) []string {
 }
 
 func (b *obsidianTaskBackend) writeNote(note taskNote) error {
+	if err := b.ensureDir(); err != nil {
+		return err
+	}
+	if !safeObsidianTaskID(note.ID) {
+		return fmt.Errorf("task id %q is not safe for an Obsidian task filename", note.ID)
+	}
 	var buf bytes.Buffer
 	buf.WriteString("---\n")
 	if err := b.encodeYAML(&buf, note); err != nil {

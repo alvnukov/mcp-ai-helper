@@ -108,10 +108,11 @@ type BatchUpsertRequest struct {
 }
 
 type BatchUpsertResult struct {
-	Upserted   []Task `json:"upserted"`
-	Closed     []Task `json:"closed"`
-	Source     string `json:"source,omitempty"`
-	Validation string `json:"validation,omitempty"`
+	Upserted     []Task   `json:"upserted"`
+	Closed       []Task   `json:"closed"`
+	Source       string   `json:"source,omitempty"`
+	Validation   string   `json:"validation,omitempty"`
+	ChangedFiles []string `json:"changed_files,omitempty"`
 }
 
 func NewStore(_ any) *Store { return &Store{} }
