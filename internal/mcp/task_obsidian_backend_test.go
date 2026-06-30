@@ -641,7 +641,14 @@ func TestTaskListResponseIncludesCountsAndRegistryMetadata(t *testing.T) {
 		ChangedFiles: []string{"repaired.md"},
 	})
 	all := []tasks.Task{
-		{ID: "todo-task", Status: "todo", Title: "Todo"},
+		{
+			ID:                 "todo-task",
+			Status:             "todo",
+			Title:              "Todo",
+			Body:               strings.Repeat("large body ", 100),
+			AcceptanceCriteria: []string{"criterion"},
+			VerificationPlan:   []string{"go test ./internal/mcp"},
+		},
 		{ID: "done-task", Status: "done", Title: "Done"},
 	}
 
@@ -653,6 +660,22 @@ func TestTaskListResponseIncludesCountsAndRegistryMetadata(t *testing.T) {
 	}
 	if counts["todo"] != 1 || counts["done"] != 1 {
 		t.Fatalf("counts_by_status = %#v", counts)
+	}
+	items, ok := response["tasks"].([]taskListItem)
+	if !ok || len(items) != 1 {
+		t.Fatalf("tasks should be compact task list items, got %#v", response["tasks"])
+	}
+	if items[0].ID != "todo-task" || items[0].Title != "Todo" {
+		t.Fatalf("compact task lost identity fields: %#v", items[0])
+	}
+	if items[0].AcceptanceCriteriaCount != 1 || items[0].VerificationPlanCount != 1 {
+		t.Fatalf("compact task should preserve detail counts: %#v", items[0])
+	}
+	if response["tasks_returned"] != 1 || response["tasks_total"] != 2 {
+		t.Fatalf("task counts missing from response: %#v", response)
+	}
+	if response["next_call"] == "" || len(response["details_omitted"].([]string)) == 0 {
+		t.Fatalf("response should explain how to fetch omitted details: %#v", response)
 	}
 	if response["validation"] == "" {
 		t.Fatalf("validation missing from response: %#v", response)

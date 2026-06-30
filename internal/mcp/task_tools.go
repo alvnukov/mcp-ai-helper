@@ -322,11 +322,32 @@ func mergeTaskUpdate(existing tasks.Task, update tasks.UpdateRequest) tasks.AddR
 	return merged
 }
 
+type taskListItem struct {
+	ID                      string   `json:"id"`
+	TaskType                string   `json:"task_type,omitempty"`
+	Branch                  string   `json:"branch,omitempty"`
+	WorktreePath            string   `json:"worktree_path,omitempty"`
+	CodePath                string   `json:"code_path,omitempty"`
+	ParentID                string   `json:"parent_id,omitempty"`
+	Status                  string   `json:"status"`
+	Title                   string   `json:"title"`
+	Priority                string   `json:"priority,omitempty"`
+	ModelLevel              string   `json:"model_level"`
+	Tags                    []string `json:"tags,omitempty"`
+	AcceptanceCriteriaCount int      `json:"acceptance_criteria_count,omitempty"`
+	VerificationPlanCount   int      `json:"verification_plan_count,omitempty"`
+	ProjectionSource        string   `json:"projection_source,omitempty"`
+}
+
 func taskListResponse(backend taskBackend, visible []tasks.Task, counted []tasks.Task, source string) map[string]any {
 	out := map[string]any{
-		"tasks":            visible,
+		"tasks":            summarizeTaskList(visible),
 		"source":           source,
 		"counts_by_status": countTasksByStatus(counted),
+		"tasks_returned":   len(visible),
+		"tasks_total":      len(counted),
+		"details_omitted":  []string{"body", "acceptance_criteria", "verification_plan", "created_at", "updated_at"},
+		"next_call":        "Use task_get for one full task or task_context for execution context after choosing an id.",
 	}
 	if provider, ok := backend.(taskListMetadataProvider); ok {
 		meta := provider.ListMetadata()
@@ -339,6 +360,32 @@ func taskListResponse(backend taskBackend, visible []tasks.Task, counted []tasks
 		if len(meta.ChangedFiles) > 0 {
 			out["changed_files"] = meta.ChangedFiles
 		}
+	}
+	return out
+}
+
+func summarizeTaskList(list []tasks.Task) []taskListItem {
+	out := make([]taskListItem, 0, len(list))
+	for _, task := range list {
+		item := taskListItem{
+			ID:                      task.ID,
+			TaskType:                task.TaskType,
+			Branch:                  task.Branch,
+			WorktreePath:            task.WorktreePath,
+			CodePath:                task.CodePath,
+			ParentID:                task.ParentID,
+			Status:                  task.Status,
+			Title:                   task.Title,
+			Priority:                task.Priority,
+			ModelLevel:              task.ModelLevel,
+			AcceptanceCriteriaCount: len(task.AcceptanceCriteria),
+			VerificationPlanCount:   len(task.VerificationPlan),
+			ProjectionSource:        task.ProjectionSource,
+		}
+		if len(task.Tags) > 0 {
+			item.Tags = append([]string(nil), task.Tags...)
+		}
+		out = append(out, item)
 	}
 	return out
 }
