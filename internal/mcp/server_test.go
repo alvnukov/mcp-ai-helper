@@ -73,7 +73,7 @@ func TestNewExposesAssistantGuidance(t *testing.T) {
 	if !strings.Contains(cfg.AssistantGuidance, "no such unified commit means the task is not done") {
 		t.Fatal("guidance text does not describe commit closeout policy")
 	}
-	for _, want := range []string{"tool_manifest", "command_get", "filter_command_history", "issue_add", "issue_list", "issue_accept"} {
+	for _, want := range []string{"tool_manifest", "command action=get", "command action=filter", "issue_add", "issue_list", "issue_accept"} {
 		if !strings.Contains(currentGuidance(cfg), want) {
 			t.Fatalf("guidance text does not describe tool discovery for %q", want)
 		}
@@ -132,7 +132,7 @@ func TestNewHidesDisabledLayers(t *testing.T) {
 	cfg.Layers.Workflows.Enabled = &disabled
 	srv := New(cfg)
 	tools := srv.ListTools()
-	for _, name := range []string{"assistant_guidance", "list_models", "collect_command_output", "command_get", "run_workflow", "task", "web_fetch"} {
+	for _, name := range []string{"assistant_guidance", "list_models", "command", "run_workflow", "task", "web_fetch"} {
 		if _, ok := tools[name]; ok {
 			t.Fatalf("tool %s should be hidden", name)
 		}
@@ -196,42 +196,40 @@ func TestToolManifestListsFeedbackAndCommandTools(t *testing.T) {
 		t.Fatalf("tool_manifest tools field = %#v", manifest["tools"])
 	}
 	joined := " " + strings.Join(tools, " ") + " "
-	for _, want := range []string{"command_get", "filter_command_history", "issue_add", "issue_list", "issue_accept"} {
+	for _, want := range []string{"command", "issue_add", "issue_list", "issue_accept"} {
 		if !strings.Contains(joined, " "+want+" ") {
 			t.Fatalf("tool_manifest missing %q: %#v", want, tools)
 		}
 	}
 }
 
-func TestCommandGetToolIsRegistered(t *testing.T) {
+func TestCommandToolIsRegistered(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{AssistantGuidance: config.DefaultAssistantGuidance()}
 	srv := New(cfg)
-	if _, ok := srv.ListTools()["command_get"]; !ok {
-		t.Fatal("command_get tool is not registered")
+	if _, ok := srv.ListTools()["command"]; !ok {
+		t.Fatal("command tool is not registered")
 	}
 }
 
-func TestCommandHistoryToolsAdvertiseFilterFields(t *testing.T) {
+func TestCommandToolAdvertisesFilterFields(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{AssistantGuidance: config.DefaultAssistantGuidance()}
 	srv := New(cfg)
-	for _, toolName := range []string{"command_get", "filter_command_history"} {
-		tool, ok := srv.ListTools()[toolName]
-		if !ok {
-			t.Fatalf("%s tool is not registered", toolName)
-		}
-		schemaBytes, err := json.Marshal(tool.Tool.InputSchema)
-		if err != nil {
-			t.Fatalf("marshal schema: %v", err)
-		}
-		schema := string(schemaBytes)
-		for _, field := range []string{"include", "exclude", "preset", "max_lines", "context_before", "context_after"} {
-			if !strings.Contains(schema, field) {
-				t.Fatalf("%s schema does not contain %q: %s", toolName, field, schema)
-			}
+	tool, ok := srv.ListTools()["command"]
+	if !ok {
+		t.Fatal("command tool is not registered")
+	}
+	schemaBytes, err := json.Marshal(tool.Tool.InputSchema)
+	if err != nil {
+		t.Fatalf("marshal schema: %v", err)
+	}
+	schema := string(schemaBytes)
+	for _, field := range []string{"include", "exclude", "preset", "max_lines", "context_before", "context_after"} {
+		if !strings.Contains(schema, field) {
+			t.Fatalf("command schema does not contain %q: %s", field, schema)
 		}
 	}
 }
@@ -658,7 +656,7 @@ func TestLanguageToolsRegistered(t *testing.T) {
 func TestCurrentGuidanceUsesUpdatedConfig(t *testing.T) {
 	t.Parallel()
 	cfg := &config.Config{AssistantGuidance: "first guidance"}
-	if got := currentGuidance(cfg); !strings.Contains(got, "first guidance") || !strings.Contains(got, "command_get") {
+	if got := currentGuidance(cfg); !strings.Contains(got, "first guidance") || !strings.Contains(got, "command action=get") {
 		t.Fatalf("guidance = %q", got)
 	}
 	cfg.AssistantGuidance = "second guidance"

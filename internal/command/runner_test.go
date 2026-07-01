@@ -204,7 +204,7 @@ func TestRunnerReturnsRunningAndPersistsResultAfterWaitBudget(t *testing.T) {
 	if result.Status != "running" {
 		t.Fatalf("status = %q, want running", result.Status)
 	}
-	if result.CommandID == "" || result.NextCall == nil || result.NextCall.Tool != "command_get" {
+	if result.CommandID == "" || result.NextCall == nil || result.NextCall.Tool != "command" || result.NextCall.Action != "get" {
 		t.Fatalf("missing durable lookup metadata: %#v", result)
 	}
 
@@ -226,6 +226,66 @@ func TestRunnerReturnsRunningAndPersistsResultAfterWaitBudget(t *testing.T) {
 	if len(completed.FilteredLines) != 1 || completed.FilteredLines[0] != "done" {
 		t.Fatalf("filtered lines = %#v", completed.FilteredLines)
 	}
+}
+
+func TestRunnerFiltersFullRetainedOutputBeyondMaxLines(t *testing.T) {
+	dir := t.TempDir()
+	runner := NewRunner(config.CommandPolicy{AllowedCWDs: []string{dir}, DefaultTimeoutSeconds: 1, MaxOutputBytes: 4000, MaxLines: 5})
+	var cmd strings.Builder
+	cmd.WriteString("printf 'target\\n")
+	for i := 0; i < 30; i++ {
+		cmd.WriteString("noise\\n")
+	}
+	cmd.WriteString("'")
+
+	result, err := runner.RunFiltered(t.Context(), cmd.String(), dir, 1, Filter{Include: "target"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.FilteredLines) != 1 || result.FilteredLines[0] != "target" {
+		t.Fatalf("filtered lines = %#v, want target from full retained output", result.FilteredLines)
+	}
+}
+
+func TestRunnerUpdatesRunningHistoryTailAndFilter(t *testing.T) {
+	repoPath := t.TempDir()
+	logRoot := t.TempDir()
+	runner := NewRunner(config.CommandPolicy{AllowedCWDs: []string{repoPath}, DefaultTimeoutSeconds: 6, MaxOutputBytes: 1000, MaxLines: 20, LogDir: logRoot})
+
+	result, err := runner.RunFilteredInRepoWithWait(t.Context(), "printf 'ready\\n'; sleep 3; printf 'done\\n'", repoPath, "", 6, 1, Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "running" {
+		t.Fatalf("status = %q, want running", result.Status)
+	}
+
+	deadline := time.Now().Add(1 * time.Second)
+	for time.Now().Before(deadline) {
+		live, err := runner.FilterHistory(result.CommandID, Filter{Include: "ready"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if live.Status == "running" && len(live.FilteredLines) == 1 && live.FilteredLines[0] == "ready" && strings.Join(live.StdoutTail, "\n") == "ready" {
+			goto waitForCompletion
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("running command history did not expose current output tail/filter")
+
+waitForCompletion:
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		completed, err := runner.FilterHistory(result.CommandID, Filter{Include: "done"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if completed.Status == "ok" && len(completed.FilteredLines) == 1 && completed.FilteredLines[0] == "done" {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("running command did not complete with final output")
 }
 
 func TestApplyFilterPresetProfiles(t *testing.T) {

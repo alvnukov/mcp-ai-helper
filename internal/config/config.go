@@ -33,7 +33,7 @@ const defaultAssistantGuidance = `mcp-ai-helper operating guidance:
 
 1. Discover: call task action=current first. Pick one executable task whose model_level fits the current model; do not execute blocked parent/epic tasks.
 2. Focus: call task_context for the chosen task when available. Use task_graph only for dependency/parent context. If unavailable, say surface_mismatch/blocker or proceed only with confirmed task action=current facts.
-3. Inspect: use file action=read/snapshot for exact files/ranges. Use collect_command_output or run_workflow command steps only for narrow commands with filters.
+3. Inspect: use file action=read/snapshot for exact files/ranges. Use command action=run or run_workflow command steps only for narrow commands with filters.
 4. Decide before editing: state selected task, exact owned_files, forbidden files, acceptance criteria, minimal gate, and finalization path.
 5. Execute: prefer one self-contained run_workflow: minimal edits -> formatting -> focused checks -> task status transition -> git_commit_owned. Never split code commit and task status into a post-hoc status commit.
 6. Close only when acceptance criteria, relevant gate, task transition, and owned-files commit all succeeded. If there is no such unified commit means the task is not done.
@@ -41,7 +41,7 @@ const defaultAssistantGuidance = `mcp-ai-helper operating guidance:
 
 ## Tool Discovery Hints
 
-1. Retained command output: use command_get(command_id, mode=status|result|tail|evidence) or filter_command_history(command_id) instead of rerunning commands or reading raw log files.
+1. Retained command output: use command action=get(command_id, mode=status|result|tail|evidence) or command action=filter(command_id) instead of rerunning commands or reading raw log files.
 2. Feedback intake: use issue_add to record cross-repository feedback, issue_list to inspect open feedback issues, and issue_accept to move one issue into in_progress when taking ownership.
 3. If these tool names are not visible after assistant_guidance, request MCP client rediscovery/restart; do not replace them with shell/file/git fallbacks.
 

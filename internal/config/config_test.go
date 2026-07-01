@@ -177,7 +177,7 @@ func TestLoadCreatesDefaultConfigInHomeDir(t *testing.T) {
 	if !strings.Contains(cfg.AssistantGuidance, "Search -> Fetch -> Find -> Read") || !strings.Contains(cfg.AssistantGuidance, "web_search for compact hits") || !strings.Contains(cfg.AssistantGuidance, "A search hit is not evidence") || !strings.Contains(cfg.AssistantGuidance, "fetched_doc_find") || !strings.Contains(cfg.AssistantGuidance, "fetched_doc_read") {
 		t.Fatal("loaded config guidance is missing bounded web workflow")
 	}
-	if !strings.Contains(cfg.AssistantGuidance, "command_get") || !strings.Contains(cfg.AssistantGuidance, "filter_command_history") || !strings.Contains(cfg.AssistantGuidance, "issue_add") {
+	if !strings.Contains(cfg.AssistantGuidance, "command action=get") || !strings.Contains(cfg.AssistantGuidance, "command action=filter") || !strings.Contains(cfg.AssistantGuidance, "issue_add") {
 		t.Fatal("loaded config guidance is missing tool discovery hints")
 	}
 }
@@ -274,7 +274,7 @@ func TestLoadRepoConfigAndMergePolicy(t *testing.T) {
 	repo := t.TempDir()
 	if err := os.WriteFile(filepath.Join(repo, repoConfigFile), []byte(`permissions:
   tools:
-    deny: [collect_command_output]
+    deny: [command]
 command_policy:
   allowed_cwds: [safe]
 `), 0o600); err != nil {
@@ -287,7 +287,7 @@ command_policy:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if repoCfg == nil || !repoCfg.ToolDenied("collect_command_output") {
+	if repoCfg == nil || !repoCfg.ToolDenied("command") {
 		t.Fatalf("repo permissions were not loaded: %#v", repoCfg)
 	}
 	base := &Config{CommandPolicy: CommandPolicy{AllowedCWDs: []string{"."}, DefaultTimeoutSeconds: 20}}

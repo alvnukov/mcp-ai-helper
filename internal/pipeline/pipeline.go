@@ -1161,7 +1161,7 @@ func (r *Runner) Run(ctx context.Context, req Request) (result Result, err error
 	}
 	compact := req.CompactOutput == nil || *req.CompactOutput
 	if cmdResult.Status == "running" {
-		return Result{Status: "running", Compact: compact, Command: cmdResult, Summary: evidence.Summary{Truncated: cmdResult.Truncated}, Analysis: "command still running; use command_get with command_id", Validation: evidence.Validation{Valid: false, Status: "running"}, Handoff: runningHandoff(cmdResult)}, nil
+		return Result{Status: "running", Compact: compact, Command: cmdResult, Summary: evidence.Summary{Truncated: cmdResult.Truncated}, Analysis: "command still running; use command action=get with command_id", Validation: evidence.Validation{Valid: false, Status: "running"}, Handoff: runningHandoff(cmdResult)}, nil
 	}
 	summary := evidence.Summary{EvidenceLines: cmdResult.EvidenceLines, Truncated: cmdResult.Truncated}
 	analysis := deterministicAnalysis(req.Task, cmdResult)
@@ -1233,7 +1233,7 @@ func runningHandoff(result command.Result) string {
 	b.WriteString("status: running")
 	fmt.Fprintf(&b, "\ncommand_id: %s", result.CommandID)
 	fmt.Fprintf(&b, "\nelapsed_ms: %d", result.DurationMS)
-	b.WriteString("\nnext_call: command_get")
+	b.WriteString("\nnext_call: command action=get")
 	return b.String()
 }
 
@@ -1255,7 +1255,7 @@ func compactHandoff(status string, result command.Result) string {
 		}
 	}
 	if len(result.StdoutTail) > 0 || len(result.StderrTail) > 0 {
-		b.WriteString("output: collapsed; use filter_command_history with command_id for details")
+		b.WriteString("output: collapsed; use command action=filter with command_id for details")
 	}
 	return b.String()
 }

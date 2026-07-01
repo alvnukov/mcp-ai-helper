@@ -77,6 +77,7 @@ type Result struct {
 // NextCall tells the caller how to inspect a still-running durable command.
 type NextCall struct {
 	Tool      string `json:"tool"`
+	Action    string `json:"action,omitempty"`
 	CommandID string `json:"command_id"`
 	Mode      string `json:"mode,omitempty"`
 }
@@ -124,7 +125,7 @@ func (r *Runner) RunFiltered(ctx context.Context, cmd string, cwd string, timeou
 
 // RunFilteredWithWait runs a command with a separate MCP wait budget.
 // If mcpWaitSeconds is exceeded, the process keeps running under its execution timeout
-// and the caller receives a durable command_id for command_get/filter_command_history.
+// and the caller receives a durable command_id for command action=get/filter.
 func (r *Runner) RunFilteredWithWait(ctx context.Context, cmd string, cwd string, timeoutSeconds int, mcpWaitSeconds int, filter Filter) (Result, error) {
 	return r.runFilteredWithWait(ctx, cmd, cwd, timeoutSeconds, mcpWaitSeconds, filter, "")
 }
@@ -214,18 +215,35 @@ func (r *Runner) executePrepared(ctx context.Context, commandID string, cmd stri
 	runCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
 	defer cancel()
 
-	stdout := newLimitBuffer(r.policy.MaxOutputBytes)
-	stderr := newLimitBuffer(r.policy.MaxOutputBytes)
+	envs, cmdMask := secretsFromContext(ctx)
+	redactOutput := func(text string) string {
+		out := redact(text)
+		if r.baseMask != nil {
+			out = r.baseMask.Apply(out)
+		}
+		if cmdMask != nil {
+			out = cmdMask.Apply(out)
+		}
+		return out
+	}
+	updateRunningOutput := func(stdoutText string, stderrText string, outputTruncated bool) {
+		stdoutLines := normalizeLines(redactOutput(stdoutText))
+		stderrLines := normalizeLines(redactOutput(stderrText))
+		combined := append([]string{}, stdoutLines...)
+		combined = append(combined, stderrLines...)
+		sum := sha256.Sum256([]byte(strings.Join(stdoutLines, "\n") + "\n" + strings.Join(stderrLines, "\n")))
+		_ = r.history.UpdateRunningOutput(commandID, stdoutLines, stderrLines, combined, outputTruncated, hex.EncodeToString(sum[:]))
+	}
+	output := newLiveOutput(r.policy.MaxOutputBytes, updateRunningOutput)
 	// #nosec G204 -- command execution is this package's explicit MCP capability and is constrained by cwd, timeout, and output policy.
 	command := exec.CommandContext(runCtx, shellBin(), shellArgs(cmd)...)
 	command.Dir = runCWD
 	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	envs, cmdMask := secretsFromContext(ctx)
 	if len(envs) > 0 {
 		command.Env = append(os.Environ(), envs...)
 	}
-	command.Stdout = stdout
-	command.Stderr = stderr
+	command.Stdout = output.stdoutWriter()
+	command.Stderr = output.stderrWriter()
 
 	err := command.Run()
 	// Kill the entire process group after the command finishes,
@@ -255,24 +273,18 @@ func (r *Runner) executePrepared(ctx context.Context, commandID string, cmd stri
 		status = "failed"
 	}
 
-	stdoutText := redact(stdout.String())
-	stderrText := redact(stderr.String())
-	if r.baseMask != nil {
-		stdoutText = r.baseMask.Apply(stdoutText)
-		stderrText = r.baseMask.Apply(stderrText)
-	}
-	if cmdMask != nil {
-		stdoutText = cmdMask.Apply(stdoutText)
-		stderrText = cmdMask.Apply(stderrText)
-	}
+	stdoutText, stderrText, outputTruncated := output.snapshot()
+	stdoutText = redactOutput(stdoutText)
+	stderrText = redactOutput(stderrText)
 	stdoutLines := normalizeLines(stdoutText)
 	stderrLines := normalizeLines(stderrText)
 	combined := append([]string{}, stdoutLines...)
 	combined = append(combined, stderrLines...)
+	evidenceLines := combined
 	truncatedLines := false
-	if len(combined) > r.policy.MaxLines {
+	if len(evidenceLines) > r.policy.MaxLines {
 		truncatedLines = true
-		combined = combined[len(combined)-r.policy.MaxLines:]
+		evidenceLines = tailN(evidenceLines, r.policy.MaxLines)
 	}
 	sum := sha256.Sum256([]byte(stdoutText + "\n" + stderrText))
 	filteredLines, filterTruncated, err := applyFilter(combined, filter)
@@ -281,7 +293,7 @@ func (r *Runner) executePrepared(ctx context.Context, commandID string, cmd stri
 	}
 	outputHash := hex.EncodeToString(sum[:])
 	commandStr := r.maskText(ctx, cmd)
-	truncated := stdout.Truncated() || stderr.Truncated() || truncatedLines
+	truncated := outputTruncated || truncatedLines
 	if err := r.history.Put(Record{
 		CommandID:   commandID,
 		Status:      status,
@@ -311,7 +323,7 @@ func (r *Runner) executePrepared(ctx context.Context, commandID string, cmd stri
 		StdoutTail:    tail80(stdoutLines),
 		StderrTail:    tail80(stderrLines),
 		FilteredLines: filteredLines,
-		EvidenceLines: evidence.Select(combined, 30),
+		EvidenceLines: evidence.Select(evidenceLines, 30),
 		OutputHash:    outputHash,
 	}, nil
 }
@@ -341,7 +353,7 @@ func nextCallForStatus(status string, commandID string) *NextCall {
 	if status != "running" || commandID == "" {
 		return nil
 	}
-	return &NextCall{Tool: "command_get", CommandID: commandID, Mode: "status"}
+	return &NextCall{Tool: "command", Action: "get", CommandID: commandID, Mode: "status"}
 }
 
 // RunInRepo executes cmd in repoPath or a repo-relative cwd without allowing path escape.
@@ -409,9 +421,9 @@ func (r *Runner) ListCommands(req ListRequest) (ListResult, error) {
 
 // AbortResult reports the outcome of an abort attempt.
 type AbortResult struct {
-	Status  string `json:"status"`
+	Status    string `json:"status"`
 	CommandID string `json:"command_id"`
-	Reason  string `json:"reason,omitempty"`
+	Reason    string `json:"reason,omitempty"`
 }
 
 // Abort kills a running command by its commandID.
@@ -549,6 +561,56 @@ func insideDir(root string, child string) bool {
 		return false
 	}
 	return childAbs == rootAbs || strings.HasPrefix(childAbs, rootAbs+string(os.PathSeparator))
+}
+
+type liveOutput struct {
+	mu     sync.Mutex
+	stdout *limitBuffer
+	stderr *limitBuffer
+	update func(stdoutText string, stderrText string, truncated bool)
+}
+
+type liveOutputWriter struct {
+	output *liveOutput
+	stream string
+}
+
+func newLiveOutput(maxBytes int, update func(stdoutText string, stderrText string, truncated bool)) *liveOutput {
+	return &liveOutput{stdout: newLimitBuffer(maxBytes), stderr: newLimitBuffer(maxBytes), update: update}
+}
+
+func (o *liveOutput) stdoutWriter() *liveOutputWriter {
+	return &liveOutputWriter{output: o, stream: "stdout"}
+}
+
+func (o *liveOutput) stderrWriter() *liveOutputWriter {
+	return &liveOutputWriter{output: o, stream: "stderr"}
+}
+
+func (w *liveOutputWriter) Write(p []byte) (int, error) {
+	return w.output.write(w.stream, p)
+}
+
+func (o *liveOutput) write(stream string, p []byte) (int, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	var n int
+	var err error
+	if stream == "stderr" {
+		n, err = o.stderr.Write(p)
+	} else {
+		n, err = o.stdout.Write(p)
+	}
+	if o.update != nil {
+		o.update(o.stdout.String(), o.stderr.String(), o.stdout.Truncated() || o.stderr.Truncated())
+	}
+	return n, err
+}
+
+func (o *liveOutput) snapshot() (string, string, bool) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.stdout.String(), o.stderr.String(), o.stdout.Truncated() || o.stderr.Truncated()
 }
 
 type limitBuffer struct {
@@ -828,8 +890,11 @@ func normalizeLines(text string) []string {
 }
 
 func tail80(values []string) []string {
-	const limit = 80
-	if len(values) <= limit {
+	return tailN(values, 80)
+}
+
+func tailN(values []string, limit int) []string {
+	if limit <= 0 || len(values) <= limit {
 		return values
 	}
 	return values[len(values)-limit:]
