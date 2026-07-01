@@ -438,7 +438,7 @@ func planTaskExecution(list []tasks.Task, req planTaskExecutionRequest) planTask
 	result := planTaskExecutionResult{
 		Mode:              "blocked",
 		Action:            "blocked",
-		RequiredPipeline:  []string{"task_current"},
+		RequiredPipeline:  []string{"task action=current"},
 		Goal:              goal,
 		CurrentTask:       current,
 		ReadyTasks:        ready,
@@ -447,7 +447,7 @@ func planTaskExecution(list []tasks.Task, req planTaskExecutionRequest) planTask
 		PlanningOnly:      true,
 	}
 	if current == nil {
-		result.MinimalNextDataCollection = []string{"task_current", "task_tree"}
+		result.MinimalNextDataCollection = []string{"task action=current", "task_tree"}
 		return result
 	}
 
@@ -498,12 +498,12 @@ func readinessForAction(action string) string {
 }
 
 func minimalContextForTask(task tasks.Task) []string {
-	context := []string{"task_current", "task_get " + task.ID}
+	context := []string{"task action=current", "task action=get " + task.ID}
 	for _, file := range ownedFilesForTask(task) {
 		if file == "MCPAIHelperProject/ActiveTasks.lean" {
 			continue
 		}
-		context = append(context, "read_file "+file, "snapshot_file "+file)
+		context = append(context, "file action=read "+file, "file action=snapshot "+file)
 	}
 	return uniqueStrings(context)
 }
@@ -645,15 +645,15 @@ func normalizeRequestedModelLevel(value string) string {
 }
 
 func pipelineForTask(task *taskPlanSummary) []string {
-	pipeline := []string{"task_current"}
+	pipeline := []string{"task action=current"}
 	if strings.Contains(task.TaskType, "implementation") || strings.Contains(task.TaskType, "test") {
-		pipeline = append(pipeline, "read_file", "snapshot_file", "run_workflow")
+		pipeline = append(pipeline, "file action=read", "file action=snapshot", "run_workflow")
 	}
 	if strings.Contains(task.TaskType, "docs") {
-		pipeline = append(pipeline, "read_file", "snapshot_file", "run_workflow")
+		pipeline = append(pipeline, "file action=read", "file action=snapshot", "run_workflow")
 	}
 	if len(pipeline) == 1 {
-		pipeline = append(pipeline, "read_file")
+		pipeline = append(pipeline, "file action=read")
 	}
 	return pipeline
 }

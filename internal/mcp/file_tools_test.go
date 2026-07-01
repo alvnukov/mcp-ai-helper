@@ -20,11 +20,11 @@ func newTestSrv(t *testing.T) *server.MCPServer {
 	return New(cfg)
 }
 
-func readFilesToolHandler(t *testing.T, srv *server.MCPServer) func(context.Context, basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+func fileToolHandler(t *testing.T, srv *server.MCPServer) func(context.Context, basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
 	t.Helper()
-	st, ok := srv.ListTools()["read_files"]
+	st, ok := srv.ListTools()["file"]
 	if !ok {
-		t.Fatal("read_files tool not registered")
+		t.Fatal("file tool not registered")
 	}
 	return st.Handler
 }
@@ -53,14 +53,14 @@ func resultMap(t *testing.T, r *basemcp.CallToolResult) map[string]any {
 	return m
 }
 
-func TestReadFilesRegistered(t *testing.T) {
+func TestFileToolRegistered(t *testing.T) {
 	t.Parallel()
 	srv := newTestSrv(t)
-	st, ok := srv.ListTools()["read_files"]
+	st, ok := srv.ListTools()["file"]
 	if !ok {
-		t.Fatal("read_files tool not registered")
+		t.Fatal("file tool not registered")
 	}
-	if !strings.Contains(st.Tool.Description, "multiple") {
+	if !strings.Contains(st.Tool.Description, "read_many") {
 		t.Fatalf("description = %q", st.Tool.Description)
 	}
 	schemaBytes, err := json.Marshal(st.Tool.InputSchema)
@@ -68,10 +68,18 @@ func TestReadFilesRegistered(t *testing.T) {
 		t.Fatal(err)
 	}
 	schema := string(schemaBytes)
-	for _, field := range []string{"repo_path", "paths"} {
+	for _, field := range []string{"repo_path", "paths", "action"} {
 		if !strings.Contains(schema, field) {
 			t.Fatalf("schema missing %q: %s", field, schema)
 		}
+	}
+}
+
+func TestEditToolRegistered(t *testing.T) {
+	t.Parallel()
+	srv := newTestSrv(t)
+	if _, ok := srv.ListTools()["edit"]; !ok {
+		t.Fatal("edit tool not registered")
 	}
 }
 
@@ -81,11 +89,12 @@ func TestReadFilesTwoValid(t *testing.T) {
 	writeTestFile(t, dir, "b.txt", "foo\nbar\nbaz\n")
 
 	srv := newTestSrv(t)
-	handler := readFilesToolHandler(t, srv)
+	handler := fileToolHandler(t, srv)
 
 	req := basemcp.CallToolRequest{}
 	req.Params.Arguments = map[string]any{
 		"repo_path": dir,
+		"action":   "read_many",
 		"paths":     []any{"a.txt", "b.txt"},
 	}
 	r, err := handler(context.Background(), req)
@@ -124,11 +133,12 @@ func TestReadFilesOneMissing(t *testing.T) {
 	writeTestFile(t, dir, "present.txt", "data\n")
 
 	srv := newTestSrv(t)
-	handler := readFilesToolHandler(t, srv)
+	handler := fileToolHandler(t, srv)
 
 	req := basemcp.CallToolRequest{}
 	req.Params.Arguments = map[string]any{
 		"repo_path": dir,
+		"action":   "read_many",
 		"paths":     []any{"present.txt", "missing.txt"},
 	}
 	r, err := handler(context.Background(), req)
@@ -163,11 +173,12 @@ func TestReadFilesOneMissing(t *testing.T) {
 func TestReadFilesEmptyPaths(t *testing.T) {
 	dir := t.TempDir()
 	srv := newTestSrv(t)
-	handler := readFilesToolHandler(t, srv)
+	handler := fileToolHandler(t, srv)
 
 	req := basemcp.CallToolRequest{}
 	req.Params.Arguments = map[string]any{
 		"repo_path": dir,
+		"action":   "read_many",
 		"paths":     []any{},
 	}
 	r, err := handler(context.Background(), req)
@@ -182,7 +193,7 @@ func TestReadFilesEmptyPaths(t *testing.T) {
 func TestReadFilesTooManyPaths(t *testing.T) {
 	dir := t.TempDir()
 	srv := newTestSrv(t)
-	handler := readFilesToolHandler(t, srv)
+	handler := fileToolHandler(t, srv)
 
 	paths := make([]any, 9)
 	for i := range 9 {
@@ -191,6 +202,7 @@ func TestReadFilesTooManyPaths(t *testing.T) {
 	req := basemcp.CallToolRequest{}
 	req.Params.Arguments = map[string]any{
 		"repo_path": dir,
+		"action":   "read_many",
 		"paths":     paths,
 	}
 	r, err := handler(context.Background(), req)
@@ -209,11 +221,12 @@ func TestReadFilesPerFileByteLimit(t *testing.T) {
 	writeTestFile(t, dir, "small.txt", "tiny\n")
 
 	srv := newTestSrv(t)
-	handler := readFilesToolHandler(t, srv)
+	handler := fileToolHandler(t, srv)
 
 	req := basemcp.CallToolRequest{}
 	req.Params.Arguments = map[string]any{
 		"repo_path": dir,
+		"action":   "read_many",
 		"paths":     []any{"big.txt", "small.txt"},
 	}
 	r, err := handler(context.Background(), req)
@@ -247,11 +260,12 @@ func TestReadFilesTotalByteLimit(t *testing.T) {
 	writeTestFile(t, dir, "f3.txt", content)
 
 	srv := newTestSrv(t)
-	handler := readFilesToolHandler(t, srv)
+	handler := fileToolHandler(t, srv)
 
 	req := basemcp.CallToolRequest{}
 	req.Params.Arguments = map[string]any{
 		"repo_path": dir,
+		"action":   "read_many",
 		"paths":     []any{"f1.txt", "f2.txt", "f3.txt"},
 	}
 	r, err := handler(context.Background(), req)
@@ -272,10 +286,10 @@ func TestReadFilesTotalByteLimit(t *testing.T) {
 	}
 }
 
-func TestReadFileStillRegistered(t *testing.T) {
+func TestFileReadActionStillRegistered(t *testing.T) {
 	t.Parallel()
 	srv := newTestSrv(t)
-	if _, ok := srv.ListTools()["read_file"]; !ok {
-		t.Fatal("read_file tool no longer registered")
+	if _, ok := srv.ListTools()["file"]; !ok {
+		t.Fatal("file tool no longer registered")
 	}
 }

@@ -451,14 +451,14 @@ func TestGuidanceDocumentsStrictRepoTaskWorkflow(t *testing.T) {
 	guidance := DefaultAssistantGuidance()
 	for _, want := range []string{
 		"MCP-ONLY",
-		"task_current first",
+		"task action=current first",
 		"task_graph",
 		"task_context",
 		"one self-contained run_workflow",
 		"Never set a task to done",
 		"post-hoc status commit",
 		"Never edit task registry/source/projection files directly",
-		"use task_upsert, task_batch_upsert, task_set_status, task_delete",
+		"use task action=upsert, task action=batch_upsert, task action=set_status, task action=delete",
 		"surface_mismatch/blocker",
 		"configurable in the server config through assistant_guidance",
 	} {
@@ -467,7 +467,7 @@ func TestGuidanceDocumentsStrictRepoTaskWorkflow(t *testing.T) {
 		}
 	}
 	setup := SetupGuidance("")
-	for _, want := range []string{"task_current first", "task_graph", "task_context", "task_batch_upsert/task_set_status", "complete authoritative set", "owned-files commit in one run_workflow", "Lean/Lake task state is canonical"} {
+	for _, want := range []string{"task action=current first", "task_graph", "task_context", "task action=batch_upsert/task action=set_status", "complete authoritative set", "owned-files commit in one run_workflow", "Lean/Lake task state is canonical"} {
 		if !strings.Contains(setup["tasks"], want) {
 			t.Fatalf("setup guidance missing %q in %#v", want, setup)
 		}

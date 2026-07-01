@@ -35,10 +35,10 @@ func registerPipelineTools(srv *server.MCPServer, deps *Server) {
 				},
 				{
 					"type":        "guarded_replace",
-					"description": "Replace one unique text span only if the file hash still matches. Use read_file first, then snapshot_file, then this.",
+					"description": "Replace one unique text span only if the file hash still matches. Use file action=read first, then file action=snapshot, then this.",
 					"fields": map[string]string{
 						"path":          "Repo-relative file path (string, required).",
-						"expected_hash": "SHA-256 hash from snapshot_file before edit (string, required).",
+						"expected_hash": "SHA-256 hash from file action=snapshot before edit (string, required).",
 						"old":           "Text to replace. Use old_b64 for strings with backslashes (string, either old or old_b64 required).",
 						"old_b64":       "Base64-encoded old text. Safer for strings with backslashes (string).",
 						"new":           "Replacement text. Use new_b64 for strings with backslashes (string).",

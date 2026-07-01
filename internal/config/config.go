@@ -31,9 +31,9 @@ const defaultAssistantGuidance = `mcp-ai-helper operating guidance:
 
 ## Repo Task Protocol
 
-1. Discover: call task_current first. Pick one executable task whose model_level fits the current model; do not execute blocked parent/epic tasks.
-2. Focus: call task_context for the chosen task when available. Use task_graph only for dependency/parent context. If unavailable, say surface_mismatch/blocker or proceed only with confirmed task_current facts.
-3. Inspect: use read_file/snapshot_file for exact files/ranges. Use collect_command_output or run_workflow command steps only for narrow commands with filters.
+1. Discover: call task action=current first. Pick one executable task whose model_level fits the current model; do not execute blocked parent/epic tasks.
+2. Focus: call task_context for the chosen task when available. Use task_graph only for dependency/parent context. If unavailable, say surface_mismatch/blocker or proceed only with confirmed task action=current facts.
+3. Inspect: use file action=read/snapshot for exact files/ranges. Use collect_command_output or run_workflow command steps only for narrow commands with filters.
 4. Decide before editing: state selected task, exact owned_files, forbidden files, acceptance criteria, minimal gate, and finalization path.
 5. Execute: prefer one self-contained run_workflow: minimal edits -> formatting -> focused checks -> task status transition -> git_commit_owned. Never split code commit and task status into a post-hoc status commit.
 6. Close only when acceptance criteria, relevant gate, task transition, and owned-files commit all succeeded. If there is no such unified commit means the task is not done.
@@ -58,8 +58,8 @@ const defaultAssistantGuidance = `mcp-ai-helper operating guidance:
 
 1. Never use broad staging or destructive git operations. Commit only explicit owned files after relevant checks pass.
 2. Never set a task to done until acceptance criteria, focused gate, task status transition, and owned-files commit have all succeeded in the same workflow/closeout.
-3. Never edit task registry/source/projection files directly. Do not change MCPAIHelperProject/ActiveTasks.lean, tasks/*.lean, task JSON comments, or legacy task files to update task title/body/status/priority/tags/criteria/verification; use task_upsert, task_batch_upsert, task_set_status, task_delete, or another explicit task-facing helper tool only.
-4. For migrated Lean/Lake repos, task_current, task_list, task_get, and task mutations require the configured registry/exporter; legacy tasks/*.lean JSON-comment files are not fallback storage.
+3. Never edit task registry/source/projection files directly. Do not change MCPAIHelperProject/ActiveTasks.lean, tasks/*.lean, task JSON comments, or legacy task files to update task title/body/status/priority/tags/criteria/verification; use task action=upsert, task action=batch_upsert, task action=set_status, task action=delete, or another explicit task-facing helper tool only.
+4. For migrated Lean/Lake repos, task action=current, task action=list, task action=get, and task mutations require the configured registry/exporter; legacy tasks/*.lean JSON-comment files are not fallback storage.
 5. If task tools cannot express the needed mutation, stop with a surface mismatch/blocker; do not work around with file edits, scripts, guarded_replace, shell, or direct git operations.
 
 This guidance is configurable in the server config through assistant_guidance; generated default config and configs/config.example.yaml show the same field.`
@@ -652,8 +652,8 @@ func SetupGuidance(configPath string) map[string]string {
 		"layers":                    "Use layers.<name>.enabled to toggle logs, tasks, guidance, models, commands, and workflows without editing code.",
 		"models":                    "Add providers/models only when remote model calls are needed; local pipelines and tasks work without provider credentials.",
 		"workflows":                 "Prefer one long run_workflow or run_pipeline call when intermediate results are not needed by the calling model. Include deterministic conditions, guarded edits, relevant checks, task status transitions, and owned-files commits in that workflow when they do not require caller-side decisions.",
-		"tasks":                     "Read task_current first. Use task_graph for relationships and task_context for selected-task execution. Mutate tasks with task_batch_upsert/task_set_status; close_missing only with a complete authoritative set. Done requires acceptance criteria, focused gate, task transition, and owned-files commit in one run_workflow. Lean/Lake task state is canonical; never parse or regex-mutate registry source as fallback.",
-		"lean_task_registry_repair": "If task_current reports repair_required/action=repair_lean_task_registry_exporter, the repo has MCPAIHelperProject/ActiveTasks.lean but lacks the exporter surface. Repair by adding MCPAIHelperProject/TaskRegistryExport.lean from the mcp-ai-helper canonical exporter module, declaring a task_registry_export executable in lakefile.lean or lakefile.toml with root MCPAIHelperProject.TaskRegistryExport, then verifying with lake build, lake exe task_registry_export --list-active, and task_current. Do not fall back to legacy tasks/*.lean files.",
+		"tasks":                     "Read task action=current first. Use task_graph for relationships and task_context for selected-task execution. Mutate tasks with task action=batch_upsert/task action=set_status; close_missing only with a complete authoritative set. Done requires acceptance criteria, focused gate, task transition, and owned-files commit in one run_workflow. Lean/Lake task state is canonical; never parse or regex-mutate registry source as fallback.",
+		"lean_task_registry_repair": "If task action=current reports repair_required/action=repair_lean_task_registry_exporter, the repo has MCPAIHelperProject/ActiveTasks.lean but lacks the exporter surface. Repair by adding MCPAIHelperProject/TaskRegistryExport.lean from the mcp-ai-helper canonical exporter module, declaring a task_registry_export executable in lakefile.lean or lakefile.toml with root MCPAIHelperProject.TaskRegistryExport, then verifying with lake build, lake exe task_registry_export --list-active, and task action=current. Do not fall back to legacy tasks/*.lean files.",
 	}
 }
 
@@ -667,7 +667,7 @@ func SetupGuidanceForConfig(cfg *Config) map[string]string {
 	if cfg == nil || !strings.EqualFold(strings.TrimSpace(cfg.TaskRegistry.Backend), "obsidian") {
 		return setup
 	}
-	setup["tasks"] = "Read task_current first. Use task_graph for relationships and task_context for selected-task execution. Mutate tasks with task_batch_upsert/task_set_status; close_missing only with a complete authoritative set. Done requires acceptance criteria, focused gate, task transition, and owned-files commit in one run_workflow. The configured Obsidian task registry is canonical; do not read or edit registry files through generic file/search/command tools."
+	setup["tasks"] = "Read task action=current first. Use task_graph for relationships and task_context for selected-task execution. Mutate tasks with task action=batch_upsert/task action=set_status; close_missing only with a complete authoritative set. Done requires acceptance criteria, focused gate, task transition, and owned-files commit in one run_workflow. The configured Obsidian task registry is canonical; do not read or edit registry files through generic file/search/command tools."
 	for key, value := range setup {
 		if leanGuidancePattern.MatchString(key) || leanGuidancePattern.MatchString(value) {
 			delete(setup, key)
