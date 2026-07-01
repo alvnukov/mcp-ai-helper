@@ -67,7 +67,7 @@ func TestNewExposesAssistantGuidance(t *testing.T) {
 	if !strings.Contains(prompt.Prompt.Description, "calling LLM") {
 		t.Fatalf("guidance prompt description = %q", prompt.Prompt.Description)
 	}
-	if !strings.Contains(cfg.AssistantGuidance, "one self-contained run_workflow") {
+	if !strings.Contains(cfg.AssistantGuidance, "one self-contained run action=workflow") {
 		t.Fatal("guidance text does not describe workflow-first policy")
 	}
 	if !strings.Contains(cfg.AssistantGuidance, "no such unified commit means the task is not done") {
@@ -115,7 +115,7 @@ func TestStartupSurfaceBudgetStaysCompact(t *testing.T) {
 	if len(data) > 48000 {
 		t.Fatalf("startup surface too large: %d bytes", len(data))
 	}
-	for _, name := range []string{"fetch_url", "task_add", "task_update", "task_tree", "reasoning_patterns", "task_packet", "plan_task_execution", "git_status", "git_diff", "git_commit_owned", "git_log", "git_log_diff", "git_stash_list", "git_branch_list", "git_remote_list", "git_tag_list", "git_blame", "git_prepare_task_worktree", "collect_command_output", "command_get", "command_abort", "command_list", "filter_command_history", "cleanup_command_history", "project_health", "read_file", "read_files", "search_files", "snapshot_file", "list_dir", "write_file", "apply_guarded_replace", "task_current", "task_get", "task_list", "task_search", "task_set_status", "task_batch_upsert", "task_upsert", "task_delete"} {
+	for _, name := range []string{"fetch_url", "task_add", "task_update", "task_tree", "reasoning_patterns", "task_packet", "plan_task_execution", "git_status", "git_diff", "git_commit_owned", "git_log", "git_log_diff", "git_stash_list", "git_branch_list", "git_remote_list", "git_tag_list", "git_blame", "git_prepare_task_worktree", "collect_command_output", "command_get", "command_abort", "command_list", "filter_command_history", "cleanup_command_history", "project_health", "read_file", "read_files", "search_files", "snapshot_file", "list_dir", "write_file", "apply_guarded_replace", "task_current", "task_get", "task_list", "task_search", "task_set_status", "task_batch_upsert", "task_upsert", "task_delete", "run_pipeline", "run_workflow", "workflow_schema"} {
 		if _, ok := srv.ListTools()[name]; ok {
 			t.Fatalf("duplicate/legacy tool %s should not be registered", name)
 		}
@@ -132,7 +132,7 @@ func TestNewHidesDisabledLayers(t *testing.T) {
 	cfg.Layers.Workflows.Enabled = &disabled
 	srv := New(cfg)
 	tools := srv.ListTools()
-	for _, name := range []string{"assistant_guidance", "list_models", "command", "run_workflow", "task", "web_fetch"} {
+	for _, name := range []string{"assistant_guidance", "list_models", "command", "run", "task", "web_fetch"} {
 		if _, ok := tools[name]; ok {
 			t.Fatalf("tool %s should be hidden", name)
 		}
@@ -142,15 +142,15 @@ func TestNewHidesDisabledLayers(t *testing.T) {
 	}
 }
 
-func TestRunWorkflowSchemaIncludesWorkflowFields(t *testing.T) {
+func TestRunSchemaIncludesWorkflowFields(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{AssistantGuidance: config.DefaultAssistantGuidance()}
 	srv := New(cfg)
 	tools := srv.ListTools()
-	tool, ok := tools["run_workflow"]
+	tool, ok := tools["run"]
 	if !ok {
-		t.Fatal("run_workflow tool is not registered")
+		t.Fatal("run tool is not registered")
 	}
 
 	schemaBytes, err := json.Marshal(tool.Tool.InputSchema)
@@ -160,7 +160,7 @@ func TestRunWorkflowSchemaIncludesWorkflowFields(t *testing.T) {
 	schema := string(schemaBytes)
 	for _, field := range []string{"steps", "owned_files", "commit_message", "current_task_id", "task_on_start", "task_on_success", "task_on_failure", "secret_handles"} {
 		if !strings.Contains(schema, field) {
-			t.Fatalf("run_workflow schema does not contain %q: %s", field, schema)
+			t.Fatalf("run schema does not contain %q: %s", field, schema)
 		}
 	}
 
@@ -170,18 +170,18 @@ func TestRunWorkflowSchemaIncludesWorkflowFields(t *testing.T) {
 	}
 	properties, ok := inputSchema["properties"].(map[string]any)
 	if !ok {
-		t.Fatalf("run_workflow schema properties missing: %s", schema)
+		t.Fatalf("run schema properties missing: %s", schema)
 	}
 	steps, ok := properties["steps"].(map[string]any)
 	if !ok {
-		t.Fatalf("run_workflow steps schema missing: %s", schema)
+		t.Fatalf("run steps schema missing: %s", schema)
 	}
 	items, ok := steps["items"].(map[string]any)
 	if !ok {
-		t.Fatalf("run_workflow steps item schema missing: %s", schema)
+		t.Fatalf("run steps item schema missing: %s", schema)
 	}
 	if got := items["type"]; got != "object" {
-		t.Fatalf("run_workflow steps must advertise object items, got %v: %s", got, schema)
+		t.Fatalf("run steps must advertise object items, got %v: %s", got, schema)
 	}
 }
 
@@ -234,15 +234,15 @@ func TestCommandToolAdvertisesFilterFields(t *testing.T) {
 	}
 }
 
-func TestRunPipelineSchemaIncludesTaskStatusFields(t *testing.T) {
+func TestRunSchemaIncludesTaskStatusFields(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{AssistantGuidance: config.DefaultAssistantGuidance()}
 	srv := New(cfg)
 	tools := srv.ListTools()
-	tool, ok := tools["run_pipeline"]
+	tool, ok := tools["run"]
 	if !ok {
-		t.Fatal("run_pipeline tool is not registered")
+		t.Fatal("run tool is not registered")
 	}
 
 	schemaBytes, err := json.Marshal(tool.Tool.InputSchema)
@@ -252,7 +252,7 @@ func TestRunPipelineSchemaIncludesTaskStatusFields(t *testing.T) {
 	schema := string(schemaBytes)
 	for _, field := range []string{"timeout_seconds", "mcp_wait_seconds", "current_task_id", "task_on_start", "task_on_success", "task_on_failure"} {
 		if !strings.Contains(schema, field) {
-			t.Fatalf("run_pipeline schema does not contain %q: %s", field, schema)
+			t.Fatalf("run schema does not contain %q: %s", field, schema)
 		}
 	}
 }

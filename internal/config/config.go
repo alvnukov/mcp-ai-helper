@@ -33,9 +33,9 @@ const defaultAssistantGuidance = `mcp-ai-helper operating guidance:
 
 1. Discover: call task action=current first. Pick one executable task whose model_level fits the current model; do not execute blocked parent/epic tasks.
 2. Focus: call task_context for the chosen task when available. Use task_graph only for dependency/parent context. If unavailable, say surface_mismatch/blocker or proceed only with confirmed task action=current facts.
-3. Inspect: use file action=read/snapshot for exact files/ranges. Use command action=run or run_workflow command steps only for narrow commands with filters.
+3. Inspect: use file action=read/snapshot for exact files/ranges. Use command action=run or run action=workflow command steps only for narrow commands with filters.
 4. Decide before editing: state selected task, exact owned_files, forbidden files, acceptance criteria, minimal gate, and finalization path.
-5. Execute: prefer one self-contained run_workflow: minimal edits -> formatting -> focused checks -> task status transition -> git action=commit. Never split code commit and task status into a post-hoc status commit.
+5. Execute: prefer one self-contained run action=workflow: minimal edits -> formatting -> focused checks -> task status transition -> git action=commit. Never split code commit and task status into a post-hoc status commit.
 6. Close only when acceptance criteria, relevant gate, task transition, and owned-files commit all succeeded. If there is no such unified commit means the task is not done.
 7. On failure: inspect actual state once, form a new hypothesis, and run the next minimal check. Do not repeat the same failed command without new information.
 
@@ -651,8 +651,8 @@ func SetupGuidance(configPath string) map[string]string {
 		"first_run":                 "When the config file is missing, mcp-ai-helper creates ~/.mcp-ai-helper/config.yaml with safe local-command defaults.",
 		"layers":                    "Use layers.<name>.enabled to toggle logs, tasks, guidance, models, commands, and workflows without editing code.",
 		"models":                    "Add providers/models only when remote model calls are needed; local pipelines and tasks work without provider credentials.",
-		"workflows":                 "Prefer one long run_workflow or run_pipeline call when intermediate results are not needed by the calling model. Include deterministic conditions, guarded edits, relevant checks, task status transitions, and owned-files commits in that workflow when they do not require caller-side decisions.",
-		"tasks":                     "Read task action=current first. Use task_graph for relationships and task_context for selected-task execution. Mutate tasks with task action=batch_upsert/task action=set_status; close_missing only with a complete authoritative set. Done requires acceptance criteria, focused gate, task transition, and owned-files commit in one run_workflow. Lean/Lake task state is canonical; never parse or regex-mutate registry source as fallback.",
+		"workflows":                 "Prefer one long run action=workflow or run action=pipeline call when intermediate results are not needed by the calling model. Include deterministic conditions, guarded edits, relevant checks, task status transitions, and owned-files commits in that workflow when they do not require caller-side decisions.",
+		"tasks":                     "Read task action=current first. Use task_graph for relationships and task_context for selected-task execution. Mutate tasks with task action=batch_upsert/task action=set_status; close_missing only with a complete authoritative set. Done requires acceptance criteria, focused gate, task transition, and owned-files commit in one run action=workflow. Lean/Lake task state is canonical; never parse or regex-mutate registry source as fallback.",
 		"lean_task_registry_repair": "If task action=current reports repair_required/action=repair_lean_task_registry_exporter, the repo has MCPAIHelperProject/ActiveTasks.lean but lacks the exporter surface. Repair by adding MCPAIHelperProject/TaskRegistryExport.lean from the mcp-ai-helper canonical exporter module, declaring a task_registry_export executable in lakefile.lean or lakefile.toml with root MCPAIHelperProject.TaskRegistryExport, then verifying with lake build, lake exe task_registry_export --list-active, and task action=current. Do not fall back to legacy tasks/*.lean files.",
 	}
 }
@@ -667,7 +667,7 @@ func SetupGuidanceForConfig(cfg *Config) map[string]string {
 	if cfg == nil || !strings.EqualFold(strings.TrimSpace(cfg.TaskRegistry.Backend), "obsidian") {
 		return setup
 	}
-	setup["tasks"] = "Read task action=current first. Use task_graph for relationships and task_context for selected-task execution. Mutate tasks with task action=batch_upsert/task action=set_status; close_missing only with a complete authoritative set. Done requires acceptance criteria, focused gate, task transition, and owned-files commit in one run_workflow. The configured Obsidian task registry is canonical; do not read or edit registry files through generic file/search/command tools."
+	setup["tasks"] = "Read task action=current first. Use task_graph for relationships and task_context for selected-task execution. Mutate tasks with task action=batch_upsert/task action=set_status; close_missing only with a complete authoritative set. Done requires acceptance criteria, focused gate, task transition, and owned-files commit in one run action=workflow. The configured Obsidian task registry is canonical; do not read or edit registry files through generic file/search/command tools."
 	for key, value := range setup {
 		if leanGuidancePattern.MatchString(key) || leanGuidancePattern.MatchString(value) {
 			delete(setup, key)

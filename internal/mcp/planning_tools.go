@@ -647,10 +647,10 @@ func normalizeRequestedModelLevel(value string) string {
 func pipelineForTask(task *taskPlanSummary) []string {
 	pipeline := []string{"task action=current"}
 	if strings.Contains(task.TaskType, "implementation") || strings.Contains(task.TaskType, "test") {
-		pipeline = append(pipeline, "file action=read", "file action=snapshot", "run_workflow")
+		pipeline = append(pipeline, "file action=read", "file action=snapshot", "run action=workflow")
 	}
 	if strings.Contains(task.TaskType, "docs") {
-		pipeline = append(pipeline, "file action=read", "file action=snapshot", "run_workflow")
+		pipeline = append(pipeline, "file action=read", "file action=snapshot", "run action=workflow")
 	}
 	if len(pipeline) == 1 {
 		pipeline = append(pipeline, "file action=read")

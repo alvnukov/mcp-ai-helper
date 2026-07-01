@@ -19,7 +19,7 @@ func TestLoadExampleConfig(t *testing.T) {
 	if _, ok := cfg.Models["routine_summary"]; !ok {
 		t.Fatal("routine_summary model is missing")
 	}
-	if !strings.Contains(cfg.AssistantGuidance, "run_workflow") {
+	if !strings.Contains(cfg.AssistantGuidance, "run action=workflow") {
 		t.Fatal("assistant guidance is missing")
 	}
 }
@@ -162,7 +162,7 @@ func TestLoadCreatesDefaultConfigInHomeDir(t *testing.T) {
 	if cfg.WebPolicy.TimeoutSeconds != 600 {
 		t.Fatalf("default web timeout = %d, want 600", cfg.WebPolicy.TimeoutSeconds)
 	}
-	if !strings.Contains(cfg.AssistantGuidance, "Repo Task Protocol") || !strings.Contains(cfg.AssistantGuidance, "one self-contained run_workflow") {
+	if !strings.Contains(cfg.AssistantGuidance, "Repo Task Protocol") || !strings.Contains(cfg.AssistantGuidance, "one self-contained run action=workflow") {
 		t.Fatal("loaded config guidance is missing workflow policy")
 	}
 	if !strings.Contains(cfg.AssistantGuidance, "Never set a task to done") {
@@ -454,7 +454,7 @@ func TestGuidanceDocumentsStrictRepoTaskWorkflow(t *testing.T) {
 		"task action=current first",
 		"task_graph",
 		"task_context",
-		"one self-contained run_workflow",
+		"one self-contained run action=workflow",
 		"Never set a task to done",
 		"post-hoc status commit",
 		"Never edit task registry/source/projection files directly",
@@ -467,7 +467,7 @@ func TestGuidanceDocumentsStrictRepoTaskWorkflow(t *testing.T) {
 		}
 	}
 	setup := SetupGuidance("")
-	for _, want := range []string{"task action=current first", "task_graph", "task_context", "task action=batch_upsert/task action=set_status", "complete authoritative set", "owned-files commit in one run_workflow", "Lean/Lake task state is canonical"} {
+	for _, want := range []string{"task action=current first", "task_graph", "task_context", "task action=batch_upsert/task action=set_status", "complete authoritative set", "owned-files commit in one run action=workflow", "Lean/Lake task state is canonical"} {
 		if !strings.Contains(setup["tasks"], want) {
 			t.Fatalf("setup guidance missing %q in %#v", want, setup)
 		}

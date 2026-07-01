@@ -10,116 +10,20 @@ import (
 )
 
 func registerPipelineTools(srv *server.MCPServer, deps *Server) {
-	// Workflow step schema for discoverability.
-	srv.AddTool(basemcp.NewTool("workflow_schema",
-		basemcp.WithDescription("Return valid step types and their parameters for run_workflow steps."),
-	), func(_ context.Context, _ basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
-		return structured(map[string]any{
-			"common_step_fields": map[string]string{
-				"depends_on": "Optional array of step IDs this step depends on. Engine auto-detects same-file dependencies; use this for cross-file or cross-tool ordering.",
-				"if":         "Condition: 'always' (default), &&, ||, !, changed_files_count comparisons, changed_files contains path, steps.<id>.status/exit_code/validation comparisons, steps.<id>.output_contains text, file_exists/file_missing path, or tasks.<id>.status comparisons.",
-				"on_failure": "Optional: 'stop' (default) or 'continue'.",
-			},
-			"step_types": []map[string]any{
-				{
-					"type":        "command",
-					"description": "Run a shell command. Workflow stops on non-zero exit unless on_failure is 'continue'.",
-					"fields": map[string]string{
-						"command":          "Shell command to run (string, required).",
-						"cwd":              "Optional repo-relative working directory (string).",
-						"web_doc_id":       "Optional fetched document id. When set, command receives HELPER_WEB_DOC_PATH pointing to the selected helper-managed artifact.",
-						"web_doc_source":   "Optional artifact source for web_doc_id: normalized (default) or raw.",
-						"mcp_wait_seconds": "Optional MCP wait budget before returning running + command_id.",
-						"on_failure":       "Optional: 'stop' (default) or 'continue'.",
-					},
-				},
-				{
-					"type":        "guarded_replace",
-					"description": "Replace one unique text span only if the file hash still matches. Use file action=read first, then file action=snapshot, then this.",
-					"fields": map[string]string{
-						"path":          "Repo-relative file path (string, required).",
-						"expected_hash": "SHA-256 hash from file action=snapshot before edit (string, required).",
-						"old":           "Text to replace. Use old_b64 for strings with backslashes (string, either old or old_b64 required).",
-						"old_b64":       "Base64-encoded old text. Safer for strings with backslashes (string).",
-						"new":           "Replacement text. Use new_b64 for strings with backslashes (string).",
-						"new_b64":       "Base64-encoded new text (string).",
-					},
-				},
-				{
-					"type":        "task_batch_upsert",
-					"description": "Synchronize per-repository task state.",
-					"fields": map[string]string{
-						"tasks":         "Array of task objects with id, title, status, priority, model_level, tags, body (required).",
-						"close_missing": "Close active tasks not in this batch (boolean).",
-					},
-				},
-				{
-					"type":        "task_transition",
-					"description": "Guardedly transition task statuses inside a workflow.",
-					"fields": map[string]string{
-						"task_ids": "Task IDs to transition (array of strings, required).",
-						"from":     "Optional required current status for every task.",
-						"to":       "Target status (string, required).",
-					},
-				},
-				{
-					"type":        "git_commit_owned",
-					"description": "Commit only explicit owned files. Never stages all files.",
-					"fields": map[string]string{
-						"files":   "Repo-relative files to commit (array of strings, required).",
-						"message": "Commit message (string, required).",
-					},
-				},
-				{
-					"type":        "git_prepare_task_worktree",
-					"description": "Create or reuse .worktrees/<task_id> on branch <task_type>/<task_id>.",
-					"fields": map[string]string{
-						"task_id":   "Task id, e.g. task-057 (string, required).",
-						"task_type": "Branch type, e.g. feature, bug, hotfix, chore, docs, refactor, test, ci (string, required).",
-					},
-				},
-			},
-		})
-	})
-
-	srv.AddTool(basemcp.NewTool("run_pipeline",
-		basemcp.WithDescription("Run command -> evidence extraction -> optional model analysis -> evidence validation."),
-		basemcp.WithString("command", basemcp.Required()),
+	srv.AddTool(basemcp.NewTool("run",
+		basemcp.WithDescription("Run pipelines and workflows. Required: action, repo_path (except schema). Actions: pipeline (command, repo_path, cwd?, timeout_seconds?, mcp_wait_seconds?, current_task_id?, task_on_start?, task_on_success?, task_on_failure?, compact_output?, secret_handles?) — run command with evidence extraction; workflow (repo_path, steps[], owned_files?, commit_message?, current_task_id?, task_on_start?, task_on_success?, task_on_failure?, secret_handles?, preview?) — run guarded edits, checks, and optional commit; schema () — return valid workflow step types and parameters."),
+		basemcp.WithString("action", basemcp.Required(), basemcp.Enum("pipeline", "workflow", "schema")),
 		basemcp.WithString("repo_path", basemcp.Required()),
+		basemcp.WithString("command", basemcp.Description("Shell command (pipeline action).")),
 		basemcp.WithString("cwd", basemcp.Description("Optional repo-relative working directory.")),
-		basemcp.WithNumber("timeout_seconds", basemcp.Description("Optional command timeout in seconds.")),
+		basemcp.WithNumber("timeout_seconds", basemcp.Description("Optional command timeout in seconds (pipeline action).")),
 		basemcp.WithNumber("mcp_wait_seconds", basemcp.Description("Optional MCP wait budget before returning running + command_id.")),
-		basemcp.WithString("current_task_id", basemcp.Description("Optional task id to update during pipeline execution.")),
-		basemcp.WithString("task_on_start", basemcp.Description("Optional status for current_task_id before executing command; defaults to in_progress.")),
-		basemcp.WithString("task_on_success", basemcp.Description("Optional status for current_task_id after command exit 0 and valid evidence; defaults to done.")),
-		basemcp.WithString("task_on_failure", basemcp.Description("Optional status for current_task_id after command failure, invalid evidence, or pipeline error; defaults to blocked.")),
-		basemcp.WithString("task"),
-		basemcp.WithBoolean("compact_output", basemcp.Description("Collapse successful command output. Defaults to true.")),
-		basemcp.WithArray("secret_handles", basemcp.Description("Optional server-config secret handles to inject into the command environment as HELPER_SECRET_<HANDLE>. Values are redacted from model-facing output."), basemcp.WithStringItems()),
-	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
-		var args pipeline.Request
-		if err := bind(req, &args); err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
-		}
-		pipes, err := deps.pipelineRunnerForRepo(args.RepoPath, "run_pipeline")
-		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
-		}
-		result, err := pipes.Run(ctx, args)
-		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
-		}
-		return structured(result)
-	})
-
-	srv.AddTool(basemcp.NewTool("run_workflow",
-		basemcp.WithDescription("Run one repo workflow: guarded edits, checks, and optional owned-files commit. Set preview=true for dry-run."),
-		basemcp.WithString("repo_path", basemcp.Required()),
-		basemcp.WithString("current_task_id", basemcp.Description("Optional task id to update during workflow execution.")),
-		basemcp.WithString("task_on_start", basemcp.Description("Optional status for current_task_id before executing steps; defaults to in_progress.")),
-		basemcp.WithString("task_on_success", basemcp.Description("Optional status for current_task_id after successful workflow; defaults to done.")),
-		basemcp.WithString("task_on_failure", basemcp.Description("Optional status for current_task_id after failed workflow; defaults to blocked.")),
-		basemcp.WithArray("secret_handles", basemcp.Description("Optional server-config secret handles to inject into command steps as HELPER_SECRET_<HANDLE>. Values are redacted from model-facing output."), basemcp.WithStringItems()),
+		basemcp.WithString("current_task_id", basemcp.Description("Optional task id to update during execution.")),
+		basemcp.WithString("task_on_start", basemcp.Description("Optional status for current_task_id before executing; defaults to in_progress.")),
+		basemcp.WithString("task_on_success", basemcp.Description("Optional status for current_task_id after success; defaults to done.")),
+		basemcp.WithString("task_on_failure", basemcp.Description("Optional status for current_task_id after failure; defaults to blocked.")),
+		basemcp.WithBoolean("compact_output", basemcp.Description("Collapse successful command output (pipeline action). Defaults to true.")),
+		basemcp.WithArray("secret_handles", basemcp.Description("Optional server-config secret handles to inject as HELPER_SECRET_<HANDLE>."), basemcp.WithStringItems()),
 		basemcp.WithArray("steps",
 			basemcp.Description("Workflow steps: command, guarded_replace, task_batch_upsert, task_transition, git_commit_owned, git_prepare_task_worktree."),
 			basemcp.Items(map[string]any{
@@ -139,63 +43,166 @@ func registerPipelineTools(srv *server.MCPServer, deps *Server) {
 		basemcp.WithString("commit_message", basemcp.Description("Optional commit message used by git workflow steps.")),
 		basemcp.WithBoolean("preview", basemcp.Description("Set to true for dry-run: returns steps that would execute without running them.")),
 	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
-		var args struct {
-			pipeline.WorkflowRequest
-			OwnedFiles    []string `json:"owned_files"`
-			CommitMessage string   `json:"commit_message"`
-			Preview       bool     `json:"preview"`
+		argsMap, _ := req.Params.Arguments.(map[string]any)
+		action, _ := argsMap["action"].(string)
+		switch action {
+		case "pipeline":
+			return runActionPipeline(ctx, req, deps)
+		case "workflow":
+			return runActionWorkflow(ctx, req, deps)
+		case "schema":
+			return runActionSchema()
+		default:
+			return basemcp.NewToolResultError("run: unknown action: " + action), nil
 		}
-		if err := bind(req, &args); err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
-		}
-		if len(args.OwnedFiles) > 0 && len(args.WorkflowRequest.Commit.Files) == 0 {
-			args.WorkflowRequest.Commit.Files = args.OwnedFiles
-			args.WorkflowRequest.Commit.Enabled = true
-		}
-		if args.CommitMessage != "" && args.WorkflowRequest.Commit.Message == "" {
-			args.WorkflowRequest.Commit.Message = args.CommitMessage
-			args.WorkflowRequest.Commit.Enabled = true
-		}
-		if args.Preview {
-			preview := map[string]any{"preview": true, "repo_path": args.RepoPath}
-			if len(args.Steps) > 0 {
-				stepsPreview := make([]map[string]any, 0, len(args.Steps))
-				for _, s := range args.Steps {
-					stepsPreview = append(stepsPreview, map[string]any{
-						"id":   s.ID,
-						"tool": s.Tool,
-						"args": s.Args,
-					})
-				}
-				preview["steps"] = stepsPreview
+	})
+}
+
+func runActionPipeline(ctx context.Context, req basemcp.CallToolRequest, deps *Server) (*basemcp.CallToolResult, error) {
+	var args pipeline.Request
+	if err := bind(req, &args); err != nil {
+		return basemcp.NewToolResultError(err.Error()), nil
+	}
+	if args.Command == "" {
+		return basemcp.NewToolResultError("run action=pipeline requires command"), nil
+	}
+	pipes, err := deps.pipelineRunnerForRepo(args.RepoPath, "run action=pipeline")
+	if err != nil {
+		return basemcp.NewToolResultError(err.Error()), nil
+	}
+	result, err := pipes.Run(ctx, args)
+	if err != nil {
+		return basemcp.NewToolResultError(err.Error()), nil
+	}
+	return structured(result)
+}
+
+func runActionWorkflow(ctx context.Context, req basemcp.CallToolRequest, deps *Server) (*basemcp.CallToolResult, error) {
+	var args struct {
+		pipeline.WorkflowRequest
+		OwnedFiles    []string `json:"owned_files"`
+		CommitMessage string   `json:"commit_message"`
+		Preview       bool     `json:"preview"`
+	}
+	if err := bind(req, &args); err != nil {
+		return basemcp.NewToolResultError(err.Error()), nil
+	}
+	if len(args.OwnedFiles) > 0 && len(args.WorkflowRequest.Commit.Files) == 0 {
+		args.WorkflowRequest.Commit.Files = args.OwnedFiles
+		args.WorkflowRequest.Commit.Enabled = true
+	}
+	if args.CommitMessage != "" && args.WorkflowRequest.Commit.Message == "" {
+		args.WorkflowRequest.Commit.Message = args.CommitMessage
+		args.WorkflowRequest.Commit.Enabled = true
+	}
+	if args.Preview {
+		preview := map[string]any{"preview": true, "repo_path": args.RepoPath}
+		if len(args.Steps) > 0 {
+			stepsPreview := make([]map[string]any, 0, len(args.Steps))
+			for _, s := range args.Steps {
+				stepsPreview = append(stepsPreview, map[string]any{
+					"id":   s.ID,
+					"tool": s.Tool,
+					"args": s.Args,
+				})
 			}
-			if len(args.Edits) > 0 {
-				editsPreview := make([]map[string]any, 0, len(args.Edits))
-				for _, e := range args.Edits {
-					editsPreview = append(editsPreview, map[string]any{"path": e.Path})
-				}
-				preview["edits"] = editsPreview
-			}
-			if len(args.Checks) > 0 {
-				checksPreview := make([]map[string]any, 0, len(args.Checks))
-				for _, c := range args.Checks {
-					checksPreview = append(checksPreview, map[string]any{"command": c.Command})
-				}
-				preview["checks"] = checksPreview
-			}
-			if args.Commit.Enabled {
-				preview["commit"] = map[string]any{"files": args.Commit.Files, "message": args.Commit.Message}
-			}
-			return structured(preview)
+			preview["steps"] = stepsPreview
 		}
-		pipes, err := deps.pipelineRunnerForRepo(args.RepoPath, "run_workflow")
-		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
+		if len(args.Edits) > 0 {
+			editsPreview := make([]map[string]any, 0, len(args.Edits))
+			for _, e := range args.Edits {
+				editsPreview = append(editsPreview, map[string]any{"path": e.Path})
+			}
+			preview["edits"] = editsPreview
 		}
-		result, err := pipes.RunWorkflow(ctx, args.WorkflowRequest)
-		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
+		if len(args.Checks) > 0 {
+			checksPreview := make([]map[string]any, 0, len(args.Checks))
+			for _, c := range args.Checks {
+				checksPreview = append(checksPreview, map[string]any{"command": c.Command})
+			}
+			preview["checks"] = checksPreview
 		}
-		return structured(result)
+		if args.Commit.Enabled {
+			preview["commit"] = map[string]any{"files": args.Commit.Files, "message": args.Commit.Message}
+		}
+		return structured(preview)
+	}
+	pipes, err := deps.pipelineRunnerForRepo(args.RepoPath, "run action=workflow")
+	if err != nil {
+		return basemcp.NewToolResultError(err.Error()), nil
+	}
+	result, err := pipes.RunWorkflow(ctx, args.WorkflowRequest)
+	if err != nil {
+		return basemcp.NewToolResultError(err.Error()), nil
+	}
+	return structured(result)
+}
+
+func runActionSchema() (*basemcp.CallToolResult, error) {
+	return structured(map[string]any{
+		"common_step_fields": map[string]string{
+			"depends_on": "Optional array of step IDs this step depends on. Engine auto-detects same-file dependencies; use this for cross-file or cross-tool ordering.",
+			"if":         "Condition: 'always' (default), &&, ||, !, changed_files_count comparisons, changed_files contains path, steps.<id>.status/exit_code/validation comparisons, steps.<id>.output_contains text, file_exists/file_missing path, or tasks.<id>.status comparisons.",
+			"on_failure": "Optional: 'stop' (default) or 'continue'.",
+		},
+		"step_types": []map[string]any{
+			{
+				"type":        "command",
+				"description": "Run a shell command. Workflow stops on non-zero exit unless on_failure is 'continue'.",
+				"fields": map[string]string{
+					"command":          "Shell command to run (string, required).",
+					"cwd":              "Optional repo-relative working directory (string).",
+					"web_doc_id":       "Optional fetched document id. When set, command receives HELPER_WEB_DOC_PATH pointing to the selected helper-managed artifact.",
+					"web_doc_source":   "Optional artifact source for web_doc_id: normalized (default) or raw.",
+					"mcp_wait_seconds": "Optional MCP wait budget before returning running + command_id.",
+					"on_failure":       "Optional: 'stop' (default) or 'continue'.",
+				},
+			},
+			{
+				"type":        "guarded_replace",
+				"description": "Replace one unique text span only if the file hash still matches. Use file action=read first, then file action=snapshot, then this.",
+				"fields": map[string]string{
+					"path":          "Repo-relative file path (string, required).",
+					"expected_hash": "SHA-256 hash from file action=snapshot before edit (string, required).",
+					"old":           "Text to replace. Use old_b64 for strings with backslashes (string, either old or old_b64 required).",
+					"old_b64":       "Base64-encoded old text. Safer for strings with backslashes (string).",
+					"new":           "Replacement text. Use new_b64 for strings with backslashes (string).",
+					"new_b64":       "Base64-encoded new text (string).",
+				},
+			},
+			{
+				"type":        "task_batch_upsert",
+				"description": "Synchronize per-repository task state.",
+				"fields": map[string]string{
+					"tasks":         "Array of task objects with id, title, status, priority, model_level, tags, body (required).",
+					"close_missing": "Close active tasks not in this batch (boolean).",
+				},
+			},
+			{
+				"type":        "task_transition",
+				"description": "Guardedly transition task statuses inside a workflow.",
+				"fields": map[string]string{
+					"task_ids": "Task IDs to transition (array of strings, required).",
+					"from":     "Optional required current status for every task.",
+					"to":       "Target status (string, required).",
+				},
+			},
+			{
+				"type":        "git_commit_owned",
+				"description": "Commit only explicit owned files. Never stages all files.",
+				"fields": map[string]string{
+					"files":   "Repo-relative files to commit (array of strings, required).",
+					"message": "Commit message (string, required).",
+				},
+			},
+			{
+				"type":        "git_prepare_task_worktree",
+				"description": "Create or reuse .worktrees/<task_id> on branch <task_type>/<task_id>.",
+				"fields": map[string]string{
+					"task_id":   "Task id, e.g. task-057 (string, required).",
+					"task_type": "Branch type, e.g. feature, bug, hotfix, chore, docs, refactor, test, ci (string, required).",
+				},
+			},
+		},
 	})
 }
