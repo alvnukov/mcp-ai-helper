@@ -215,6 +215,12 @@ type LayerPolicy struct {
 	Commands          LayerConfig `yaml:"commands" json:"commands"`
 	Workflows         LayerConfig `yaml:"workflows" json:"workflows"`
 	ReasoningPatterns LayerConfig `yaml:"reasoning_patterns" json:"reasoning_patterns"`
+	GitAdvanced       LayerConfig `yaml:"git_advanced" json:"git_advanced"`
+	Web               LayerConfig `yaml:"web" json:"web"`
+	TaskAdvanced      LayerConfig `yaml:"task_advanced" json:"task_advanced"`
+	TaskUI            LayerConfig `yaml:"task_ui" json:"task_ui"`
+	ConfigAdvanced    LayerConfig `yaml:"config_advanced" json:"config_advanced"`
+	Lake              LayerConfig `yaml:"lake" json:"lake"`
 }
 
 // LayerConfig controls one optional server layer.
@@ -695,6 +701,18 @@ layers:
     enabled: true
   reasoning_patterns:
     enabled: false
+  git_advanced:
+    enabled: false
+  web:
+    enabled: false
+  task_advanced:
+    enabled: false
+  task_ui:
+    enabled: false
+  config_advanced:
+    enabled: false
+  lake:
+    enabled: false
 
 providers:
   # example:
@@ -821,6 +839,18 @@ func (c *Config) LayerEnabled(name string) bool {
 		return layerEnabled(c.Layers.Workflows)
 	case "reasoning_patterns":
 		return layerEnabled(c.Layers.ReasoningPatterns)
+	case "git_advanced":
+		return layerOptIn(c.Layers.GitAdvanced)
+	case "web":
+		return layerOptIn(c.Layers.Web)
+	case "task_advanced":
+		return layerOptIn(c.Layers.TaskAdvanced)
+	case "task_ui":
+		return layerOptIn(c.Layers.TaskUI)
+	case "config_advanced":
+		return layerOptIn(c.Layers.ConfigAdvanced)
+	case "lake":
+		return layerOptIn(c.Layers.Lake)
 	case "jira":
 		return c.Integrations.Jira != nil && c.Integrations.Jira.IsEnabled()
 	default:
@@ -830,6 +860,10 @@ func (c *Config) LayerEnabled(name string) bool {
 
 func layerEnabled(layer LayerConfig) bool {
 	return layer.Enabled == nil || *layer.Enabled
+}
+
+func layerOptIn(layer LayerConfig) bool {
+	return layer.Enabled != nil && *layer.Enabled
 }
 
 func applyWebPolicyDefaults(policy *WebPolicy) {

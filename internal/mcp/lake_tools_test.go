@@ -13,6 +13,8 @@ import (
 func TestLakeSmokeToolRegistered(t *testing.T) {
 	t.Parallel()
 	cfg := &config.Config{AssistantGuidance: config.DefaultAssistantGuidance()}
+	enabled := true
+	cfg.Layers.Lake.Enabled = &enabled
 	srv := New(cfg)
 	if _, ok := srv.ListTools()["lake_smoke"]; !ok {
 		t.Fatal("lake_smoke tool is not registered")

@@ -178,6 +178,9 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 		}
 		return structured(result)
 	})
+}
+
+func registerTaskAdvancedTools(srv *server.MCPServer, deps *Server) {
 	srv.AddTool(basemcp.NewTool("task_graph",
 		basemcp.WithDescription("Bounded task graph after task_current. focus_task_id=task-123 centers one task. Edges: kind=parent_child, provenance=explicit. Reports truncated data; next_call: task_current or retry focused."),
 		basemcp.WithString("repo_path", basemcp.Required(), basemcp.Description("Repository root.")),

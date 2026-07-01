@@ -138,6 +138,18 @@ func TestLoadCreatesDefaultConfigInHomeDir(t *testing.T) {
 	if !strings.Contains(text, "reasoning_patterns:\n    enabled: false") {
 		t.Fatal("generated config should keep legacy reasoning_patterns out of the startup surface")
 	}
+	if !strings.Contains(text, "git_advanced:\n    enabled: false") {
+		t.Fatal("generated config should disable git_advanced layer by default")
+	}
+	if !strings.Contains(text, "web:\n    enabled: false") {
+		t.Fatal("generated config should disable web layer by default")
+	}
+	if !strings.Contains(text, "task_advanced:\n    enabled: false") {
+		t.Fatal("generated config should disable task_advanced layer by default")
+	}
+	if !strings.Contains(text, "lake:\n    enabled: false") {
+		t.Fatal("generated config should disable lake layer by default")
+	}
 	if !strings.Contains(text, "default_timeout_seconds: 300") {
 		t.Fatal("generated config should default command timeout to 300 seconds")
 	}
@@ -186,6 +198,16 @@ func TestLayerEnabledDefaultsAndOverrides(t *testing.T) {
 	cfg.Layers.ReasoningPatterns.Enabled = &disabled
 	if cfg.LayerEnabled("reasoning_patterns") {
 		t.Fatal("reasoning_patterns layer should be disabled")
+	}
+	for _, layer := range []string{"git_advanced", "web", "task_advanced", "task_ui", "config_advanced", "lake"} {
+		if cfg.LayerEnabled(layer) {
+			t.Fatalf("%s layer should default to disabled (opt-in)", layer)
+		}
+	}
+	enabled := true
+	cfg.Layers.GitAdvanced.Enabled = &enabled
+	if !cfg.LayerEnabled("git_advanced") {
+		t.Fatal("git_advanced layer should be enabled when explicitly set")
 	}
 }
 

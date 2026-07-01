@@ -9,6 +9,9 @@ import (
 	"github.com/zol/mcp-ai-helper/internal/gitops"
 )
 
+// registerGitTools registers the core git tools that are always available when
+// the server starts: status, diff, and owned-file commit. These are the only
+// git operations a model needs for the standard edit-check-commit workflow.
 func registerGitTools(srv *server.MCPServer) {
 	srv.AddTool(basemcp.NewTool("git_status",
 		basemcp.WithDescription("Structured git status: branch, staged, modified, untracked, ahead/behind."),
@@ -40,6 +43,28 @@ func registerGitTools(srv *server.MCPServer) {
 		}
 		return structured(result)
 	})
+	srv.AddTool(basemcp.NewTool("git_commit_owned",
+		basemcp.WithDescription("Commit only explicit owned files. Never stages all files."),
+		basemcp.WithString("repo_path", basemcp.Required()),
+		basemcp.WithArray("files", basemcp.Required()),
+		basemcp.WithString("message", basemcp.Required()),
+	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+		var args gitops.CommitRequest
+		if err := bind(req, &args); err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
+		result, err := gitops.CommitOwned(ctx, args)
+		if err != nil {
+			return basemcp.NewToolResultError(err.Error()), nil
+		}
+		return structured(result)
+	})
+}
+
+// registerGitAdvancedTools registers history/inspection git tools that are only
+// visible when the git_advanced layer is enabled. These are useful for
+// archaeology and review but not required for the standard workflow.
+func registerGitAdvancedTools(srv *server.MCPServer) {
 	srv.AddTool(basemcp.NewTool("git_log",
 		basemcp.WithDescription("Structured git log: hash, author, date, message per commit."),
 		basemcp.WithString("repo_path", basemcp.Required()),
@@ -143,22 +168,6 @@ func registerGitTools(srv *server.MCPServer) {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
 		result, err := gitops.Blame(ctx, args)
-		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
-		}
-		return structured(result)
-	})
-	srv.AddTool(basemcp.NewTool("git_commit_owned",
-		basemcp.WithDescription("Commit only explicit owned files. Never stages all files."),
-		basemcp.WithString("repo_path", basemcp.Required()),
-		basemcp.WithArray("files", basemcp.Required()),
-		basemcp.WithString("message", basemcp.Required()),
-	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
-		var args gitops.CommitRequest
-		if err := bind(req, &args); err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
-		}
-		result, err := gitops.CommitOwned(ctx, args)
 		if err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}

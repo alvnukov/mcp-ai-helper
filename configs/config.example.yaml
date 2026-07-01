@@ -56,6 +56,20 @@ layers:
     enabled: true
   workflows:
     enabled: true
+  reasoning_patterns:
+    enabled: false
+  git_advanced:
+    enabled: false
+  web:
+    enabled: false
+  task_advanced:
+    enabled: false
+  task_ui:
+    enabled: false
+  config_advanced:
+    enabled: false
+  lake:
+    enabled: false
 
 providers:
   example:

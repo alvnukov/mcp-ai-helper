@@ -44,6 +44,9 @@ func TestCurrentTasksReturnsOnlyActiveStatuses(t *testing.T) {
 
 func TestNewExposesAssistantGuidance(t *testing.T) {
 	cfg := &config.Config{AssistantGuidance: config.DefaultAssistantGuidance()}
+	enabled := true
+	cfg.Layers.TaskAdvanced.Enabled = &enabled
+	cfg.Layers.Web.Enabled = &enabled
 	srv := New(cfg)
 	for _, name := range []string{"assistant_guidance", "server_setup_guidance", "tool_manifest", "task_batch_upsert", "task_set_status", "task_graph", "task_context", "web_fetch"} {
 		if _, ok := srv.ListTools()[name]; !ok {
@@ -207,6 +210,29 @@ func TestCommandGetToolIsRegistered(t *testing.T) {
 	srv := New(cfg)
 	if _, ok := srv.ListTools()["command_get"]; !ok {
 		t.Fatal("command_get tool is not registered")
+	}
+}
+
+func TestCommandHistoryToolsAdvertiseFilterFields(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{AssistantGuidance: config.DefaultAssistantGuidance()}
+	srv := New(cfg)
+	for _, toolName := range []string{"command_get", "filter_command_history"} {
+		tool, ok := srv.ListTools()[toolName]
+		if !ok {
+			t.Fatalf("%s tool is not registered", toolName)
+		}
+		schemaBytes, err := json.Marshal(tool.Tool.InputSchema)
+		if err != nil {
+			t.Fatalf("marshal schema: %v", err)
+		}
+		schema := string(schemaBytes)
+		for _, field := range []string{"include", "exclude", "preset", "max_lines", "context_before", "context_after"} {
+			if !strings.Contains(schema, field) {
+				t.Fatalf("%s schema does not contain %q: %s", toolName, field, schema)
+			}
+		}
 	}
 }
 

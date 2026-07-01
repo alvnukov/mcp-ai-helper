@@ -194,6 +194,10 @@ func New(cfg *config.Config) *server.MCPServer {
 	registerFileTools(srv)
 	registerGitTools(srv)
 
+	if cfg.LayerEnabled("git_advanced") {
+		registerGitAdvancedTools(srv)
+	}
+
 	if cfg.LayerEnabled("models") {
 		registerGuidance(srv, deps)
 
@@ -222,18 +226,29 @@ func New(cfg *config.Config) *server.MCPServer {
 			return next, nil
 		}
 		registerConfigTools(srv, deps, reloadConfig)
-		registerFeatureTools(srv, deps)
+		if cfg.LayerEnabled("config_advanced") {
+			registerFeatureTools(srv, deps)
+		}
 		registerModelTools(srv, deps)
 		registerCommandTools(srv, deps)
-		registerLakeTools(srv, deps)
+		if cfg.LayerEnabled("lake") {
+			registerLakeTools(srv, deps)
+		}
 		registerPipelineTools(srv, deps)
-		registerWebTools(srv, deps)
+		if cfg.LayerEnabled("web") {
+			registerWebTools(srv, deps)
+		}
 
 		if cfg.LayerEnabled("issues") {
 			registerIssueTools(srv, deps)
 		}
 		registerTaskTools(srv, deps)
-		registerTaskUITools(srv, deps)
+		if cfg.LayerEnabled("task_advanced") {
+			registerTaskAdvancedTools(srv, deps)
+		}
+		if cfg.LayerEnabled("task_ui") {
+			registerTaskUITools(srv, deps)
+		}
 	}
 
 	if cfg.Integrations.Jira != nil && cfg.Integrations.Jira.IsEnabled() {
