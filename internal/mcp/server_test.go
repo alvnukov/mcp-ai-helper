@@ -115,7 +115,7 @@ func TestStartupSurfaceBudgetStaysCompact(t *testing.T) {
 	if len(data) > 48000 {
 		t.Fatalf("startup surface too large: %d bytes", len(data))
 	}
-	for _, name := range []string{"fetch_url", "task_add", "task_update", "task_tree", "reasoning_patterns", "task_packet", "plan_task_execution"} {
+	for _, name := range []string{"fetch_url", "task_add", "task_update", "task_tree", "reasoning_patterns", "task_packet", "plan_task_execution", "git_status", "git_diff", "git_commit_owned", "git_log", "git_log_diff", "git_stash_list", "git_branch_list", "git_remote_list", "git_tag_list", "git_blame", "git_prepare_task_worktree", "collect_command_output", "command_get", "command_abort", "command_list", "filter_command_history", "cleanup_command_history", "project_health", "read_file", "read_files", "search_files", "snapshot_file", "list_dir", "write_file", "apply_guarded_replace", "task_current", "task_get", "task_list", "task_search", "task_set_status", "task_batch_upsert", "task_upsert", "task_delete"} {
 		if _, ok := srv.ListTools()[name]; ok {
 			t.Fatalf("duplicate/legacy tool %s should not be registered", name)
 		}
@@ -312,7 +312,7 @@ func TestTaskGraphAndContextToolsAdvertiseUsageContract(t *testing.T) {
 		t.Fatalf("marshal task_graph schema: %v", err)
 	}
 	graphHelp := graphTool.Tool.Description + " " + string(graphSchema)
-	for _, want := range []string{"task-123", "parent_child", "provenance=explicit", "truncated", "next_call", "task_current"} {
+	for _, want := range []string{"task-123", "parent_child", "provenance=explicit", "truncated", "next_call", "task action=current"} {
 		if !strings.Contains(graphHelp, want) {
 			t.Fatalf("task_graph help missing %q: %s", want, graphHelp)
 		}
@@ -327,7 +327,7 @@ func TestTaskGraphAndContextToolsAdvertiseUsageContract(t *testing.T) {
 		t.Fatalf("marshal task_context schema: %v", err)
 	}
 	contextHelp := contextTool.Tool.Description + " " + string(contextSchema)
-	for _, want := range []string{"task-123", "task_current", "task_graph", "usage_contract", "truncated", "next_call"} {
+	for _, want := range []string{"task-123", "task action=current", "task_graph", "usage_contract", "truncated", "next_call"} {
 		if !strings.Contains(contextHelp, want) {
 			t.Fatalf("task_context help missing %q: %s", want, contextHelp)
 		}

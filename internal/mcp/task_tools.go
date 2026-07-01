@@ -205,7 +205,7 @@ func taskActionDelete(ctx context.Context, req basemcp.CallToolRequest, deps *Se
 
 func registerTaskAdvancedTools(srv *server.MCPServer, deps *Server) {
 	srv.AddTool(basemcp.NewTool("task_graph",
-		basemcp.WithDescription("Bounded task graph after task_current. focus_task_id=task-123 centers one task. Edges: kind=parent_child, provenance=explicit. Reports truncated data; next_call: task_current or retry focused."),
+		basemcp.WithDescription("Bounded task graph after task action=current. focus_task_id=task-123 centers one task. Edges: kind=parent_child, provenance=explicit. Reports truncated data; next_call: task action=current or retry focused."),
 		basemcp.WithString("repo_path", basemcp.Required(), basemcp.Description("Repository root.")),
 		basemcp.WithString("focus_task_id", basemcp.Description("Optional task id to center the graph.")),
 		basemcp.WithNumber("max_nodes", basemcp.Description("Max nodes; truncation reports omissions.")),
@@ -233,9 +233,9 @@ func registerTaskAdvancedTools(srv *server.MCPServer, deps *Server) {
 		return structured(graph)
 	})
 	srv.AddTool(basemcp.NewTool("task_context",
-		basemcp.WithDescription("Compact execution context for task_id=task-123 after task_current. Includes goals, boundaries, criteria, verification, warnings, usage_contract, truncated metadata. Use task_graph for dependency overview. next_call: task_current on missing ids."),
+		basemcp.WithDescription("Compact execution context for task_id=task-123 after task action=current. Includes goals, boundaries, criteria, verification, warnings, usage_contract, truncated metadata. Use task_graph for dependency overview. next_call: task action=current on missing ids."),
 		basemcp.WithString("repo_path", basemcp.Required(), basemcp.Description("Repository root.")),
-		basemcp.WithString("task_id", basemcp.Required(), basemcp.Description("Task id; discover with task_current.")),
+		basemcp.WithString("task_id", basemcp.Required(), basemcp.Description("Task id; discover with task action=current.")),
 		basemcp.WithNumber("max_nodes", basemcp.Description("Max items per section.")),
 		basemcp.WithNumber("max_bytes", basemcp.Description("Max response bytes.")),
 	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
@@ -373,7 +373,7 @@ func taskListResponse(backend taskBackend, visible []tasks.Task, counted []tasks
 		"tasks_returned":   len(visible),
 		"tasks_total":      len(counted),
 		"details_omitted":  []string{"body", "acceptance_criteria", "verification_plan", "created_at", "updated_at"},
-		"next_call":        "Use task_get for one full task or task_context for execution context after choosing an id.",
+		"next_call":        "Use task action=get for one full task or task_context for execution context after choosing an id.",
 	}
 	if provider, ok := backend.(taskListMetadataProvider); ok {
 		meta := provider.ListMetadata()

@@ -35,7 +35,7 @@ const defaultAssistantGuidance = `mcp-ai-helper operating guidance:
 2. Focus: call task_context for the chosen task when available. Use task_graph only for dependency/parent context. If unavailable, say surface_mismatch/blocker or proceed only with confirmed task action=current facts.
 3. Inspect: use file action=read/snapshot for exact files/ranges. Use command action=run or run_workflow command steps only for narrow commands with filters.
 4. Decide before editing: state selected task, exact owned_files, forbidden files, acceptance criteria, minimal gate, and finalization path.
-5. Execute: prefer one self-contained run_workflow: minimal edits -> formatting -> focused checks -> task status transition -> git_commit_owned. Never split code commit and task status into a post-hoc status commit.
+5. Execute: prefer one self-contained run_workflow: minimal edits -> formatting -> focused checks -> task status transition -> git action=commit. Never split code commit and task status into a post-hoc status commit.
 6. Close only when acceptance criteria, relevant gate, task transition, and owned-files commit all succeeded. If there is no such unified commit means the task is not done.
 7. On failure: inspect actual state once, form a new hypothesis, and run the next minimal check. Do not repeat the same failed command without new information.
 

@@ -9,72 +9,86 @@ import (
 	"github.com/zol/mcp-ai-helper/internal/gitops"
 )
 
-// registerGitTools registers the core git tools that are always available when
-// the server starts: status, diff, and owned-file commit. These are the only
-// git operations a model needs for the standard edit-check-commit workflow.
-func registerGitTools(srv *server.MCPServer) {
-	srv.AddTool(basemcp.NewTool("git_status",
-		basemcp.WithDescription("Structured git status: branch, staged, modified, untracked, ahead/behind."),
+func registerGitTools(srv *server.MCPServer, deps *Server) {
+	srv.AddTool(basemcp.NewTool("git",
+		basemcp.WithDescription("Git operations. Required: repo_path, action. Actions (always available): status — structured git status; diff (cached?, path?) — structured git diff; commit (files[], message) — commit only explicit owned files. Actions (require git_advanced layer): log (limit?, path?, author?, since?, until?, grep?) — git log; log_diff (hash) — show commit details; stash_list — git stash list; branch_list (all?) — git branch list; remote_list — git remote list; tag_list (pattern?) — git tag list; blame (file) — git blame; prepare_task_worktree (task_id, task_type) — create or reuse .worktrees/<task_id>."),
 		basemcp.WithString("repo_path", basemcp.Required()),
+		basemcp.WithString("action", basemcp.Required(), basemcp.Enum("status", "diff", "commit", "log", "log_diff", "stash_list", "branch_list", "remote_list", "tag_list", "blame", "prepare_task_worktree")),
+		basemcp.WithArray("files", basemcp.Description("Files to commit (commit action).")),
+		basemcp.WithString("message", basemcp.Description("Commit message (commit action).")),
+		basemcp.WithBoolean("cached", basemcp.Description("Show staged changes instead of working tree (diff action).")),
+		basemcp.WithString("path", basemcp.Description("Optional file path filter (diff/log actions).")),
+		basemcp.WithNumber("limit", basemcp.Description("Max commits to return (log action, default 20).")),
+		basemcp.WithString("author", basemcp.Description("Optional author filter (log action).")),
+		basemcp.WithString("since", basemcp.Description("Optional since date filter (log action).")),
+		basemcp.WithString("until", basemcp.Description("Optional until date filter (log action).")),
+		basemcp.WithString("grep", basemcp.Description("Optional message grep filter (log action).")),
+		basemcp.WithString("hash", basemcp.Description("Commit hash (log_diff action).")),
+		basemcp.WithBoolean("all", basemcp.Description("Include remote branches (branch_list action).")),
+		basemcp.WithString("pattern", basemcp.Description("Optional glob pattern filter (tag_list action).")),
+		basemcp.WithString("file", basemcp.Description("File path for blame (blame action).")),
+		basemcp.WithString("task_id", basemcp.Description("Task ID for worktree (prepare_task_worktree action).")),
+		basemcp.WithString("task_type", basemcp.Description("Branch type for worktree (prepare_task_worktree action).")),
 	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
-		var args gitops.StatusRequest
-		if err := bind(req, &args); err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
+		argsMap, _ := req.Params.Arguments.(map[string]any)
+		action, _ := argsMap["action"].(string)
+		switch action {
+		case "status":
+			return gitActionStatus(ctx, req)
+		case "diff":
+			return gitActionDiff(ctx, req)
+		case "commit":
+			return gitActionCommit(ctx, req)
+		case "log", "log_diff", "stash_list", "branch_list", "remote_list", "tag_list", "blame", "prepare_task_worktree":
+			if deps != nil && deps.cfg != nil && !deps.cfg.LayerEnabled("git_advanced") {
+				return basemcp.NewToolResultError("git action=" + action + " requires git_advanced layer to be enabled"), nil
+			}
+			return gitActionAdvanced(ctx, req, action)
+		default:
+			return basemcp.NewToolResultError("git: unknown action: " + action), nil
 		}
-		result, err := gitops.Status(ctx, args)
-		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
-		}
-		return structured(result)
-	})
-	srv.AddTool(basemcp.NewTool("git_diff",
-		basemcp.WithDescription("Structured git diff: files, hunks, lines. Set cached=true for staged changes."),
-		basemcp.WithString("repo_path", basemcp.Required()),
-		basemcp.WithBoolean("cached", basemcp.Description("Show staged changes instead of working tree.")),
-		basemcp.WithString("path", basemcp.Description("Optional single file to diff.")),
-	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
-		var args gitops.DiffRequest
-		if err := bind(req, &args); err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
-		}
-		result, err := gitops.Diff(ctx, args)
-		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
-		}
-		return structured(result)
-	})
-	srv.AddTool(basemcp.NewTool("git_commit_owned",
-		basemcp.WithDescription("Commit only explicit owned files. Never stages all files."),
-		basemcp.WithString("repo_path", basemcp.Required()),
-		basemcp.WithArray("files", basemcp.Required()),
-		basemcp.WithString("message", basemcp.Required()),
-	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
-		var args gitops.CommitRequest
-		if err := bind(req, &args); err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
-		}
-		result, err := gitops.CommitOwned(ctx, args)
-		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
-		}
-		return structured(result)
 	})
 }
 
-// registerGitAdvancedTools registers history/inspection git tools that are only
-// visible when the git_advanced layer is enabled. These are useful for
-// archaeology and review but not required for the standard workflow.
-func registerGitAdvancedTools(srv *server.MCPServer) {
-	srv.AddTool(basemcp.NewTool("git_log",
-		basemcp.WithDescription("Structured git log: hash, author, date, message per commit."),
-		basemcp.WithString("repo_path", basemcp.Required()),
-		basemcp.WithNumber("limit", basemcp.Description("Max commits to return (default 20).")),
-		basemcp.WithString("path", basemcp.Description("Optional file path filter.")),
-		basemcp.WithString("author", basemcp.Description("Optional author filter.")),
-		basemcp.WithString("since", basemcp.Description("Optional since date filter.")),
-		basemcp.WithString("until", basemcp.Description("Optional until date filter.")),
-		basemcp.WithString("grep", basemcp.Description("Optional message grep filter.")),
-	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+func gitActionStatus(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+	var args gitops.StatusRequest
+	if err := bind(req, &args); err != nil {
+		return basemcp.NewToolResultError(err.Error()), nil
+	}
+	result, err := gitops.Status(ctx, args)
+	if err != nil {
+		return basemcp.NewToolResultError(err.Error()), nil
+	}
+	return structured(result)
+}
+
+func gitActionDiff(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+	var args gitops.DiffRequest
+	if err := bind(req, &args); err != nil {
+		return basemcp.NewToolResultError(err.Error()), nil
+	}
+	result, err := gitops.Diff(ctx, args)
+	if err != nil {
+		return basemcp.NewToolResultError(err.Error()), nil
+	}
+	return structured(result)
+}
+
+func gitActionCommit(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+	var args gitops.CommitRequest
+	if err := bind(req, &args); err != nil {
+		return basemcp.NewToolResultError(err.Error()), nil
+	}
+	result, err := gitops.CommitOwned(ctx, args)
+	if err != nil {
+		return basemcp.NewToolResultError(err.Error()), nil
+	}
+	return structured(result)
+}
+
+func gitActionAdvanced(ctx context.Context, req basemcp.CallToolRequest, action string) (*basemcp.CallToolResult, error) {
+	switch action {
+	case "log":
 		var args gitops.LogRequest
 		if err := bind(req, &args); err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
@@ -84,12 +98,7 @@ func registerGitAdvancedTools(srv *server.MCPServer) {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
 		return structured(result)
-	})
-	srv.AddTool(basemcp.NewTool("git_log_diff",
-		basemcp.WithDescription("Structured git show: commit details with files, hunks, stats."),
-		basemcp.WithString("repo_path", basemcp.Required()),
-		basemcp.WithString("hash", basemcp.Required()),
-	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+	case "log_diff":
 		var args gitops.LogDiffRequest
 		if err := bind(req, &args); err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
@@ -99,11 +108,7 @@ func registerGitAdvancedTools(srv *server.MCPServer) {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
 		return structured(result)
-	})
-	srv.AddTool(basemcp.NewTool("git_stash_list",
-		basemcp.WithDescription("Structured git stash list: index, hash, message."),
-		basemcp.WithString("repo_path", basemcp.Required()),
-	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+	case "stash_list":
 		var args gitops.StashRequest
 		if err := bind(req, &args); err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
@@ -113,12 +118,7 @@ func registerGitAdvancedTools(srv *server.MCPServer) {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
 		return structured(result)
-	})
-	srv.AddTool(basemcp.NewTool("git_branch_list",
-		basemcp.WithDescription("Structured git branch list: name, hash, current, remote."),
-		basemcp.WithString("repo_path", basemcp.Required()),
-		basemcp.WithBoolean("all", basemcp.Description("Include remote branches.")),
-	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+	case "branch_list":
 		var args gitops.BranchRequest
 		if err := bind(req, &args); err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
@@ -128,11 +128,7 @@ func registerGitAdvancedTools(srv *server.MCPServer) {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
 		return structured(result)
-	})
-	srv.AddTool(basemcp.NewTool("git_remote_list",
-		basemcp.WithDescription("Structured git remote list: name, url."),
-		basemcp.WithString("repo_path", basemcp.Required()),
-	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+	case "remote_list":
 		var args gitops.RemoteRequest
 		if err := bind(req, &args); err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
@@ -142,12 +138,7 @@ func registerGitAdvancedTools(srv *server.MCPServer) {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
 		return structured(result)
-	})
-	srv.AddTool(basemcp.NewTool("git_tag_list",
-		basemcp.WithDescription("Structured git tag list: name, hash, annotated, message."),
-		basemcp.WithString("repo_path", basemcp.Required()),
-		basemcp.WithString("pattern", basemcp.Description("Optional glob pattern filter.")),
-	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+	case "tag_list":
 		var args gitops.TagRequest
 		if err := bind(req, &args); err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
@@ -157,12 +148,7 @@ func registerGitAdvancedTools(srv *server.MCPServer) {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
 		return structured(result)
-	})
-	srv.AddTool(basemcp.NewTool("git_blame",
-		basemcp.WithDescription("Structured git blame: hash, author, date, line, content per line."),
-		basemcp.WithString("repo_path", basemcp.Required()),
-		basemcp.WithString("file", basemcp.Required()),
-	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+	case "blame":
 		var args gitops.BlameRequest
 		if err := bind(req, &args); err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
@@ -172,13 +158,7 @@ func registerGitAdvancedTools(srv *server.MCPServer) {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
 		return structured(result)
-	})
-	srv.AddTool(basemcp.NewTool("git_prepare_task_worktree",
-		basemcp.WithDescription("Create or reuse .worktrees/<task_id> on branch <task_type>/<task_id>."),
-		basemcp.WithString("repo_path", basemcp.Required()),
-		basemcp.WithString("task_id", basemcp.Required()),
-		basemcp.WithString("task_type", basemcp.Required()),
-	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+	case "prepare_task_worktree":
 		var args gitops.PrepareTaskWorktreeRequest
 		if err := bind(req, &args); err != nil {
 			return basemcp.NewToolResultError(err.Error()), nil
@@ -188,5 +168,7 @@ func registerGitAdvancedTools(srv *server.MCPServer) {
 			return basemcp.NewToolResultError(err.Error()), nil
 		}
 		return structured(result)
-	})
+	default:
+		return basemcp.NewToolResultError("git: unknown advanced action: " + action), nil
+	}
 }

@@ -192,11 +192,7 @@ func New(cfg *config.Config) *server.MCPServer {
 
 	registerLanguageTools(srv)
 	registerFileTools(srv)
-	registerGitTools(srv)
-
-	if cfg.LayerEnabled("git_advanced") {
-		registerGitAdvancedTools(srv)
-	}
+	registerGitTools(srv, deps)
 
 	if cfg.LayerEnabled("models") {
 		registerGuidance(srv, deps)
