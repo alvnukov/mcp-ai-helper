@@ -11,173 +11,196 @@ import (
 )
 
 func registerTaskTools(srv *server.MCPServer, deps *Server) {
-	srv.AddTool(basemcp.NewTool("task_list",
-		basemcp.WithDescription("List per-repository tasks, optionally filtered by exact status and query."),
+	srv.AddTool(basemcp.NewTool("task",
+		basemcp.WithDescription("Per-repository task registry. Required: repo_path, action. Actions: current (no extra args, returns active tasks); get (id); list (status?, query?); search (query, status?); upsert (id?, title, status?, task_type?, priority?, model_level?, body?, tags?, acceptance_criteria?, verification_plan?, parent_id?); set_status (id, status); batch_upsert (tasks[], close_missing?, missing_status?, active_statuses?); delete (id)."),
 		basemcp.WithString("repo_path", basemcp.Required()),
-		basemcp.WithString("status"),
-		basemcp.WithString("query"),
-	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
-		var args tasks.ListRequest
-		if err := bind(req, &args); err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
-		}
-		backend, err := deps.loadTaskBackendForRepo(args.RepoPath)
-		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
-		}
-		list, source, err := backend.ListAll(ctx, args.RepoPath)
-		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
-		}
-		return structured(taskListResponse(backend, filterTasks(list, args), list, source))
-	})
-	srv.AddTool(basemcp.NewTool("task_search",
-		basemcp.WithDescription("Search per-repository tasks by id, status, title, body, priority, or tag."),
-		basemcp.WithString("repo_path", basemcp.Required()),
-		basemcp.WithString("query", basemcp.Required()),
-		basemcp.WithString("status"),
-	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
-		var args tasks.ListRequest
-		if err := bind(req, &args); err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
-		}
-		backend, err := deps.loadTaskBackendForRepo(args.RepoPath)
-		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
-		}
-		list, source, err := backend.ListAll(ctx, args.RepoPath)
-		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
-		}
-		return structured(taskListResponse(backend, filterTasks(list, args), list, source))
-	})
-	srv.AddTool(basemcp.NewTool("task_set_status",
-		basemcp.WithDescription("Set one per-repository task status."),
-		basemcp.WithString("repo_path", basemcp.Required()),
-		basemcp.WithString("id", basemcp.Required()),
-		basemcp.WithString("status", basemcp.Required()),
-	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
-		var args tasks.StatusRequest
-		if err := bind(req, &args); err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
-		}
-		backend, err := deps.loadTaskBackendForRepo(args.RepoPath)
-		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
-		}
-		result, err := backend.SetStatus(ctx, args)
-		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
-		}
-		return structured(result)
-	})
-	srv.AddTool(basemcp.NewTool("task_batch_upsert",
-		basemcp.WithDescription("Synchronize many per-repository tasks in one call and optionally close active tasks omitted from the batch."),
-		basemcp.WithString("repo_path", basemcp.Required()),
-		basemcp.WithArray("tasks", basemcp.Required(), basemcp.Items(taskUpsertItemSchema())),
-		basemcp.WithBoolean("close_missing"),
-		basemcp.WithString("missing_status"),
-		basemcp.WithArray("active_statuses"),
-	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
-		var args tasks.BatchUpsertRequest
-		if err := bind(req, &args); err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
-		}
-		backend, err := deps.loadTaskBackendForRepo(args.RepoPath)
-		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
-		}
-		result, err := backend.BatchUpsert(ctx, args)
-		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
-		}
-		return structured(result)
-	})
-	srv.AddTool(basemcp.NewTool("task_upsert",
-		basemcp.WithDescription("Create or update one task. Use task_set_status for status-only changes."),
-		basemcp.WithString("repo_path", basemcp.Required()),
-		basemcp.WithString("id", basemcp.Description("Task id. Creates new if not found, updates if exists.")),
-		basemcp.WithString("title", basemcp.Required()),
-		basemcp.WithString("status", basemcp.Description("Task status: todo, in_progress, blocked, done.")),
-		basemcp.WithString("task_type", basemcp.Description("Branch type for task worktree, e.g. feature, bug, hotfix, chore, docs, refactor, test, ci.")),
+		basemcp.WithString("action", basemcp.Required(), basemcp.Enum("current", "get", "list", "search", "upsert", "set_status", "batch_upsert", "delete")),
+		basemcp.WithString("id", basemcp.Description("Task id. Required for get, set_status, delete. Optional for upsert (creates new if absent).")),
+		basemcp.WithString("title", basemcp.Description("Task title. Required for upsert.")),
+		basemcp.WithString("status", basemcp.Description("Filter by status for list/search; target status for set_status (todo, in_progress, blocked, done).")),
+		basemcp.WithString("query", basemcp.Description("Search query. Required for search, optional for list.")),
+		basemcp.WithString("task_type", basemcp.Description("Branch type for task worktree: feature, bug, hotfix, chore, docs, refactor, test, ci.")),
 		basemcp.WithString("priority", basemcp.Description("Task priority: low, medium, high, critical.")),
-		basemcp.WithString("model_level", basemcp.Description("Minimum model level for the task: low, medium, high, very_high.")),
+		basemcp.WithString("model_level", basemcp.Description("Minimum model level: low, medium, high, very_high.")),
 		basemcp.WithString("body", basemcp.Description("Task description.")),
+		basemcp.WithString("parent_id", basemcp.Description("Optional parent task id for hierarchy.")),
 		basemcp.WithArray("tags", basemcp.Description("Optional tags.")),
 		basemcp.WithArray("acceptance_criteria", basemcp.Description("Structured completion criteria.")),
 		basemcp.WithArray("verification_plan", basemcp.Description("Structured verification steps.")),
-		basemcp.WithString("parent_id", basemcp.Description("Optional parent task id for hierarchy.")),
+		basemcp.WithArray("tasks", basemcp.Items(taskUpsertItemSchema()), basemcp.Description("Batch upsert task array. Each item requires id and title.")),
+		basemcp.WithBoolean("close_missing", basemcp.Description("Batch: close active tasks omitted from the batch.")),
+		basemcp.WithString("missing_status", basemcp.Description("Batch: status for omitted tasks.")),
+		basemcp.WithArray("active_statuses", basemcp.Description("Batch: statuses considered active for close_missing.")),
 	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
-		var args tasks.AddRequest
-		if err := bind(req, &args); err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
+		argsMap, _ := req.Params.Arguments.(map[string]any)
+		action, _ := argsMap["action"].(string)
+		switch action {
+		case "current":
+			return taskActionCurrent(ctx, req, deps)
+		case "get":
+			return taskActionGet(ctx, req, deps)
+		case "list":
+			return taskActionList(ctx, req, deps)
+		case "search":
+			return taskActionSearch(ctx, req, deps)
+		case "upsert":
+			return taskActionUpsert(ctx, req, deps)
+		case "set_status":
+			return taskActionSetStatus(ctx, req, deps)
+		case "batch_upsert":
+			return taskActionBatchUpsert(ctx, req, deps)
+		case "delete":
+			return taskActionDelete(ctx, req, deps)
+		default:
+			return basemcp.NewToolResultError("task: unknown action: " + action), nil
 		}
-		backend, err := deps.loadTaskBackendForRepo(args.RepoPath)
-		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
-		}
-		result, err := backend.Upsert(ctx, args)
-		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
-		}
-		return structured(result)
 	})
-	srv.AddTool(basemcp.NewTool("task_current",
-		basemcp.WithDescription("Return active per-repository tasks with todo or in_progress status."),
-		basemcp.WithString("repo_path", basemcp.Required()),
-	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
-		var args tasks.ListRequest
-		if err := bind(req, &args); err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
-		}
-		backend, err := deps.loadTaskBackendForRepo(args.RepoPath)
-		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
-		}
-		list, source, err := backend.ListCurrent(ctx, args.RepoPath)
-		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
-		}
-		return structured(taskListResponse(backend, list, list, source))
-	})
-	srv.AddTool(basemcp.NewTool("task_get",
-		basemcp.WithDescription("Read one per-repository task by id."),
-		basemcp.WithString("repo_path", basemcp.Required()),
-		basemcp.WithString("id", basemcp.Required()),
-	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
-		var args tasks.GetRequest
-		if err := bind(req, &args); err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
-		}
-		backend, err := deps.loadTaskBackendForRepo(args.RepoPath)
-		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
-		}
-		task, _, err := backend.Get(ctx, args.RepoPath, args.ID)
-		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
-		}
-		return structured(task)
-	})
-	srv.AddTool(basemcp.NewTool("task_delete",
-		basemcp.WithDescription("Delete one per-repository task by id."),
-		basemcp.WithString("repo_path", basemcp.Required()),
-		basemcp.WithString("id", basemcp.Required()),
-	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
-		var args tasks.DeleteRequest
-		if err := bind(req, &args); err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
-		}
-		backend, err := deps.loadTaskBackendForRepo(args.RepoPath)
-		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
-		}
-		result, err := backend.Delete(ctx, args)
-		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
-		}
-		return structured(result)
-	})
+}
+
+func taskActionCurrent(ctx context.Context, req basemcp.CallToolRequest, deps *Server) (*basemcp.CallToolResult, error) {
+	var args tasks.ListRequest
+	if err := bind(req, &args); err != nil {
+		return basemcp.NewToolResultError(err.Error()), nil
+	}
+	backend, err := deps.loadTaskBackendForRepo(args.RepoPath)
+	if err != nil {
+		return basemcp.NewToolResultError(err.Error()), nil
+	}
+	list, source, err := backend.ListCurrent(ctx, args.RepoPath)
+	if err != nil {
+		return basemcp.NewToolResultError(err.Error()), nil
+	}
+	return structured(taskListResponse(backend, list, list, source))
+}
+
+func taskActionGet(ctx context.Context, req basemcp.CallToolRequest, deps *Server) (*basemcp.CallToolResult, error) {
+	var args tasks.GetRequest
+	if err := bind(req, &args); err != nil {
+		return basemcp.NewToolResultError(err.Error()), nil
+	}
+	if strings.TrimSpace(args.ID) == "" {
+		return basemcp.NewToolResultError("task action=get requires id"), nil
+	}
+	backend, err := deps.loadTaskBackendForRepo(args.RepoPath)
+	if err != nil {
+		return basemcp.NewToolResultError(err.Error()), nil
+	}
+	task, _, err := backend.Get(ctx, args.RepoPath, args.ID)
+	if err != nil {
+		return basemcp.NewToolResultError(err.Error()), nil
+	}
+	return structured(task)
+}
+
+func taskActionList(ctx context.Context, req basemcp.CallToolRequest, deps *Server) (*basemcp.CallToolResult, error) {
+	var args tasks.ListRequest
+	if err := bind(req, &args); err != nil {
+		return basemcp.NewToolResultError(err.Error()), nil
+	}
+	backend, err := deps.loadTaskBackendForRepo(args.RepoPath)
+	if err != nil {
+		return basemcp.NewToolResultError(err.Error()), nil
+	}
+	list, source, err := backend.ListAll(ctx, args.RepoPath)
+	if err != nil {
+		return basemcp.NewToolResultError(err.Error()), nil
+	}
+	return structured(taskListResponse(backend, filterTasks(list, args), list, source))
+}
+
+func taskActionSearch(ctx context.Context, req basemcp.CallToolRequest, deps *Server) (*basemcp.CallToolResult, error) {
+	var args tasks.ListRequest
+	if err := bind(req, &args); err != nil {
+		return basemcp.NewToolResultError(err.Error()), nil
+	}
+	if strings.TrimSpace(args.Query) == "" {
+		return basemcp.NewToolResultError("task action=search requires query"), nil
+	}
+	backend, err := deps.loadTaskBackendForRepo(args.RepoPath)
+	if err != nil {
+		return basemcp.NewToolResultError(err.Error()), nil
+	}
+	list, source, err := backend.ListAll(ctx, args.RepoPath)
+	if err != nil {
+		return basemcp.NewToolResultError(err.Error()), nil
+	}
+	return structured(taskListResponse(backend, filterTasks(list, args), list, source))
+}
+
+func taskActionUpsert(ctx context.Context, req basemcp.CallToolRequest, deps *Server) (*basemcp.CallToolResult, error) {
+	var args tasks.AddRequest
+	if err := bind(req, &args); err != nil {
+		return basemcp.NewToolResultError(err.Error()), nil
+	}
+	if strings.TrimSpace(args.Title) == "" {
+		return basemcp.NewToolResultError("task action=upsert requires title"), nil
+	}
+	backend, err := deps.loadTaskBackendForRepo(args.RepoPath)
+	if err != nil {
+		return basemcp.NewToolResultError(err.Error()), nil
+	}
+	result, err := backend.Upsert(ctx, args)
+	if err != nil {
+		return basemcp.NewToolResultError(err.Error()), nil
+	}
+	return structured(result)
+}
+
+func taskActionSetStatus(ctx context.Context, req basemcp.CallToolRequest, deps *Server) (*basemcp.CallToolResult, error) {
+	var args tasks.StatusRequest
+	if err := bind(req, &args); err != nil {
+		return basemcp.NewToolResultError(err.Error()), nil
+	}
+	if strings.TrimSpace(args.ID) == "" {
+		return basemcp.NewToolResultError("task action=set_status requires id"), nil
+	}
+	if strings.TrimSpace(args.Status) == "" {
+		return basemcp.NewToolResultError("task action=set_status requires status"), nil
+	}
+	backend, err := deps.loadTaskBackendForRepo(args.RepoPath)
+	if err != nil {
+		return basemcp.NewToolResultError(err.Error()), nil
+	}
+	result, err := backend.SetStatus(ctx, args)
+	if err != nil {
+		return basemcp.NewToolResultError(err.Error()), nil
+	}
+	return structured(result)
+}
+
+func taskActionBatchUpsert(ctx context.Context, req basemcp.CallToolRequest, deps *Server) (*basemcp.CallToolResult, error) {
+	var args tasks.BatchUpsertRequest
+	if err := bind(req, &args); err != nil {
+		return basemcp.NewToolResultError(err.Error()), nil
+	}
+	backend, err := deps.loadTaskBackendForRepo(args.RepoPath)
+	if err != nil {
+		return basemcp.NewToolResultError(err.Error()), nil
+	}
+	result, err := backend.BatchUpsert(ctx, args)
+	if err != nil {
+		return basemcp.NewToolResultError(err.Error()), nil
+	}
+	return structured(result)
+}
+
+func taskActionDelete(ctx context.Context, req basemcp.CallToolRequest, deps *Server) (*basemcp.CallToolResult, error) {
+	var args tasks.DeleteRequest
+	if err := bind(req, &args); err != nil {
+		return basemcp.NewToolResultError(err.Error()), nil
+	}
+	if strings.TrimSpace(args.ID) == "" {
+		return basemcp.NewToolResultError("task action=delete requires id"), nil
+	}
+	backend, err := deps.loadTaskBackendForRepo(args.RepoPath)
+	if err != nil {
+		return basemcp.NewToolResultError(err.Error()), nil
+	}
+	result, err := backend.Delete(ctx, args)
+	if err != nil {
+		return basemcp.NewToolResultError(err.Error()), nil
+	}
+	return structured(result)
 }
 
 func registerTaskAdvancedTools(srv *server.MCPServer, deps *Server) {

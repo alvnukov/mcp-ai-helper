@@ -173,7 +173,7 @@ func initTaskRegistry(args taskRegistryInitRequest) (map[string]any, error) {
 		"repo_config_path":   configPath,
 		"write_repo_config":  writeRepoConfig,
 		"actions":            planned,
-		"next_call":          "task_current",
+		"next_call":          "task action=current",
 	}
 	if args.DryRun {
 		result["status"] = "would_initialize"

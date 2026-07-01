@@ -48,7 +48,7 @@ func TestNewExposesAssistantGuidance(t *testing.T) {
 	cfg.Layers.TaskAdvanced.Enabled = &enabled
 	cfg.Layers.Web.Enabled = &enabled
 	srv := New(cfg)
-	for _, name := range []string{"assistant_guidance", "server_setup_guidance", "tool_manifest", "task_batch_upsert", "task_set_status", "task_graph", "task_context", "web_fetch"} {
+	for _, name := range []string{"assistant_guidance", "server_setup_guidance", "tool_manifest", "task", "task_graph", "task_context", "web_fetch"} {
 		if _, ok := srv.ListTools()[name]; !ok {
 			t.Fatalf("%s tool is not registered", name)
 		}
@@ -132,7 +132,7 @@ func TestNewHidesDisabledLayers(t *testing.T) {
 	cfg.Layers.Workflows.Enabled = &disabled
 	srv := New(cfg)
 	tools := srv.ListTools()
-	for _, name := range []string{"assistant_guidance", "list_models", "collect_command_output", "command_get", "run_workflow", "task_batch_upsert", "web_fetch"} {
+	for _, name := range []string{"assistant_guidance", "list_models", "collect_command_output", "command_get", "run_workflow", "task", "web_fetch"} {
 		if _, ok := tools[name]; ok {
 			t.Fatalf("tool %s should be hidden", name)
 		}
@@ -259,14 +259,14 @@ func TestRunPipelineSchemaIncludesTaskStatusFields(t *testing.T) {
 	}
 }
 
-func TestTaskBatchUpsertSchemaAdvertisesTaskObjects(t *testing.T) {
+func TestTaskSchemaAdvertisesTaskObjects(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{AssistantGuidance: config.DefaultAssistantGuidance()}
 	srv := New(cfg)
-	tool, ok := srv.ListTools()["task_batch_upsert"]
+	tool, ok := srv.ListTools()["task"]
 	if !ok {
-		t.Fatal("task_batch_upsert tool is not registered")
+		t.Fatal("task tool is not registered")
 	}
 
 	schemaBytes, err := json.Marshal(tool.Tool.InputSchema)
@@ -279,7 +279,7 @@ func TestTaskBatchUpsertSchemaAdvertisesTaskObjects(t *testing.T) {
 	}
 	properties, ok := inputSchema["properties"].(map[string]any)
 	if !ok {
-		t.Fatalf("task_batch_upsert schema properties missing: %s", string(schemaBytes))
+		t.Fatalf("task schema properties missing: %s", string(schemaBytes))
 	}
 	tasksSchema, ok := properties["tasks"].(map[string]any)
 	if !ok {
@@ -290,7 +290,7 @@ func TestTaskBatchUpsertSchemaAdvertisesTaskObjects(t *testing.T) {
 		t.Fatalf("tasks item schema missing: %s", string(schemaBytes))
 	}
 	if got := items["type"]; got != "object" {
-		t.Fatalf("task_batch_upsert.tasks must advertise object items, got %v: %s", got, string(schemaBytes))
+		t.Fatalf("task.tasks must advertise object items, got %v: %s", got, string(schemaBytes))
 	}
 	itemProperties, ok := items["properties"].(map[string]any)
 	if !ok || itemProperties["id"] == nil || itemProperties["title"] == nil || itemProperties["acceptance_criteria"] == nil {
@@ -402,14 +402,16 @@ func TestNewHidesDisabledIssuesLayer(t *testing.T) {
 			t.Fatalf("tool %s should be hidden", name)
 		}
 	}
-	if _, ok := tools["task_current"]; !ok {
-		t.Fatal("task_current should stay visible when only issues layer is disabled")
+	if _, ok := tools["task"]; !ok {
+		t.Fatal("task should stay visible when only issues layer is disabled")
 	}
 }
 
 func TestConfigToolsRegistered(t *testing.T) {
 	t.Parallel()
 	cfg := &config.Config{AssistantGuidance: config.DefaultAssistantGuidance()}
+	enabled := true
+	cfg.Layers.ConfigAdvanced.Enabled = &enabled
 	srv := New(cfg)
 	tools := srv.ListTools()
 	for _, name := range []string{"task_registry_init", "config_schema", "config_read", "config_reload", "config_option_set", "config_option_reset", "feature_list", "feature_get", "feature_enable", "feature_disable", "feature_reset"} {
@@ -429,7 +431,7 @@ func TestTaskRegistryInitDryRunDoesNotWrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result["status"] != "would_initialize" || result["next_call"] != "task_current" {
+	if result["status"] != "would_initialize" || result["next_call"] != "task action=current" {
 		t.Fatalf("unexpected dry-run result: %#v", result)
 	}
 	if _, err := os.Stat(filepath.Join(repo, "obsidian-tasks")); !errors.Is(err, os.ErrNotExist) {
@@ -444,7 +446,7 @@ func TestTaskRegistryInitCreatesObsidianRegistryAndRepoConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result["status"] != "ok" || result["next_call"] != "task_current" {
+	if result["status"] != "ok" || result["next_call"] != "task action=current" {
 		t.Fatalf("unexpected init result: %#v", result)
 	}
 	if info, err := os.Stat(filepath.Join(repo, "obsidian-tasks")); err != nil || !info.IsDir() {
