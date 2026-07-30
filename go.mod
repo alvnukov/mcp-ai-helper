@@ -3,6 +3,7 @@ module github.com/zol/mcp-ai-helper
 go 1.26.3
 
 require (
+	github.com/BurntSushi/toml v1.6.0
 	github.com/andygrunwald/go-jira v1.17.0
 	github.com/mark3labs/mcp-go v0.52.0
 	github.com/virtomize/confluence-go-api v1.5.1

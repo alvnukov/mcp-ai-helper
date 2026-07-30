@@ -45,6 +45,30 @@ For local development of this repository, use the stable wrapper instead:
 
 After connecting, restart or rediscover MCP tools in the client and call `server_setup_guidance`, then `assistant_guidance`, then `list_models`. If a tool layer is enabled or disabled in config, restart the MCP client because tool visibility is discovered at session startup.
 
+### Self-install
+
+The binary registers itself, so the per-client stanzas below are reference rather than work:
+
+```sh
+bin/mcp-ai-helper setup -c claude,codex,opencode
+bin/mcp-ai-helper remove -c claude,codex,opencode   # alias: uninstall
+```
+
+Each client gets three things: the MCP server entry, an `mcp-ai-helper` block in the file it reads for instructions (`CLAUDE.md` for Claude Code, `AGENTS.md` for Codex and opencode), and the `mcp-ai-helper-tasks` and `mcp-ai-helper-edits` skills. `remove` takes back exactly those, leaving other servers, other skills and the rest of the file alone.
+
+| Flag | Effect |
+|---|---|
+| `-c`, `--clients` | Clients to act on: `claude`, `codex`, `opencode`. Comma-separated or repeated. Required. |
+| `--global` | Write the user-wide config instead of the project one. Codex is user-wide either way. |
+| `--dry-run` | Report what would change without writing it. |
+| `--no-instructions` | Leave `CLAUDE.md` / `AGENTS.md` alone. |
+| `--no-skills` | Leave the skill files alone. |
+| `--config PATH` | Pin `--config PATH` in the command line the client runs. Omit it to let the server fall back to `~/.mcp-ai-helper/config.yaml`. |
+
+Both commands are idempotent: every write is compared against what is on disk first, so a re-run reports `already up to date` rather than reformatting a config or duplicating a block. The command registered is the absolute path of the binary you invoked, which is what makes it work from a client launched by a GUI with a thin `PATH`. For repo development, run `setup` from `bin/mcp-ai-helper-dev` — it registers itself the same way, wrapper arguments included.
+
+Two caveats worth knowing before the first run. Re-registering preserves per-entry settings you added yourself, such as Codex `approval_mode` under `[mcp_servers.mcp-ai-helper.tools.*]`, but the TOML and JSON files are rewritten through a parser, so comments and key order in them do not survive. And a config left holding nothing but the helper is deleted rather than left as an empty husk.
+
 ### opencode
 
 Add the server to `opencode.json` or the opencode config file you use for the project:

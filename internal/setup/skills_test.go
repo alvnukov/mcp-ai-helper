@@ -1,0 +1,163 @@
+package setup
+
+import (
+	"regexp"
+	"strings"
+	"testing"
+)
+
+// TestEverySkillSatisfiesTheAgentSkillsFrontmatterContract checks the tighter of
+// the two clients' bounds, so a skill that passes here loads in both.
+func TestEverySkillSatisfiesTheAgentSkillsFrontmatterContract(t *testing.T) {
+	validName := regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
+	for _, s := range skills {
+		if len(s.name) == 0 || len(s.name) > 64 || !validName.MatchString(s.name) {
+			t.Errorf("%q is not a valid skill name", s.name)
+		}
+
+		rest, ok := strings.CutPrefix(s.body, "---\n")
+		if !ok {
+			t.Fatalf("%s has no frontmatter", s.name)
+		}
+		front, _, ok := strings.Cut(rest, "\n---\n")
+		if !ok {
+			t.Fatalf("%s has no frontmatter terminator", s.name)
+		}
+
+		named := frontmatterField(front, "name: ")
+		if named != s.name {
+			t.Errorf("%s: the frontmatter name must repeat the directory name, got %q", s.name, named)
+		}
+
+		description := frontmatterField(front, "description: ")
+		if len(description) == 0 || len(description) > 1024 {
+			t.Errorf("%s: a description is capped at 1024 characters, this one is %d", s.name, len(description))
+		}
+	}
+}
+
+func frontmatterField(front string, prefix string) string {
+	for _, line := range strings.Split(front, "\n") {
+		if value, ok := strings.CutPrefix(line, prefix); ok {
+			return value
+		}
+	}
+	return ""
+}
+
+func TestTheSkillsHaveDistinctNames(t *testing.T) {
+	seen := map[string]bool{}
+	for _, s := range skills {
+		if seen[s.name] {
+			t.Errorf("two skills both called %s", s.name)
+		}
+		seen[s.name] = true
+	}
+}
+
+// toolActions pins what the action-dispatch tools actually accept. It is the
+// enum in internal/mcp, restated here so that guidance promising an action the
+// server does not have fails a test rather than sending a model into an error it
+// cannot recover from.
+var toolActions = map[string][]string{
+	"file":    {"read", "read_many", "list", "search", "snapshot"},
+	"edit":    {"replace", "write"},
+	"command": {"run", "cleanup", "abort", "list", "get", "filter", "health"},
+	"git": {"status", "diff", "commit", "log", "log_diff", "stash_list", "branch_list",
+		"remote_list", "tag_list", "blame", "prepare_task_worktree"},
+	"task": {"current", "get", "list", "search", "upsert", "set_status", "batch_upsert", "delete"},
+	"run":  {"pipeline", "workflow", "schema"},
+}
+
+// workflowSteps pins the step types run action=workflow dispatches on.
+var workflowSteps = []string{
+	"command", "guarded_replace", "task_batch_upsert", "task_transition",
+	"git_commit_owned", "git_prepare_task_worktree",
+}
+
+var actionMention = regexp.MustCompile(`([a-z_]+) action=([a-z_]+)`)
+
+func TestNoInstalledTextNamesAnActionTheToolsDoNotHave(t *testing.T) {
+	texts := map[string]string{"instructions block": blockBody}
+	for _, s := range skills {
+		texts[s.name] = s.body
+	}
+
+	for where, text := range texts {
+		for _, match := range actionMention.FindAllStringSubmatch(text, -1) {
+			tool, action := match[1], match[2]
+			known, ok := toolActions[tool]
+			if !ok {
+				t.Errorf("%s mentions tool %q, which is not one of %v", where, tool, keysOf(toolActions))
+				continue
+			}
+			if !contains(known, action) {
+				t.Errorf("%s mentions %s action=%s, which is not one of %v", where, tool, action, known)
+			}
+		}
+	}
+}
+
+func TestTheTasksSkillNamesOnlyRealWorkflowSteps(t *testing.T) {
+	// The skill lists the workflow step types by name, which is exactly the
+	// place a stale name would send a model into an unrecoverable step error.
+	body := skills[0].body
+	if skills[0].name != "mcp-ai-helper-tasks" {
+		t.Fatalf("expected the tasks skill first, got %s", skills[0].name)
+	}
+	for _, step := range workflowSteps {
+		if !strings.Contains(body, step) {
+			t.Errorf("the tasks skill should name the %q workflow step", step)
+		}
+	}
+	// And the reverse, over the section that presents the steps: every
+	// snake_case identifier there is claimed to be a step, so every one of them
+	// has to be. Elsewhere in the skill the same shape is a tool name.
+	closing := section(body, "## Closing a task")
+	if closing == "" {
+		t.Fatal("the tasks skill should have a 'Closing a task' section")
+	}
+	for _, match := range regexp.MustCompile("`([a-z]+_[a-z_]+)`").FindAllStringSubmatch(closing, -1) {
+		if !contains(workflowSteps, match[1]) && !contains([]string{"owned_files", "current_task_id"}, match[1]) {
+			t.Errorf("the closing section names %q, which is neither a workflow step %v nor one of its arguments", match[1], workflowSteps)
+		}
+	}
+}
+
+// section returns the body of a markdown heading, up to the next one at any
+// level.
+func section(text string, heading string) string {
+	_, rest, ok := strings.Cut(text, heading)
+	if !ok {
+		return ""
+	}
+	if before, _, ok := strings.Cut(rest, "\n## "); ok {
+		return before
+	}
+	return rest
+}
+
+func TestTheInstructionsBlockStaysShortEnoughToLoadEverySession(t *testing.T) {
+	// The block is paid for on every session in every repo the helper serves, so
+	// growth here is growth everywhere. The skills are where detail belongs.
+	if lines := strings.Count(blockBody, "\n") + 1; lines > 45 {
+		t.Errorf("the instructions block is %d lines; move detail into a skill", lines)
+	}
+}
+
+func keysOf(m map[string][]string) []string {
+	out := make([]string, 0, len(m))
+	for key := range m {
+		out = append(out, key)
+	}
+	return out
+}
+
+func contains(haystack []string, needle string) bool {
+	for _, item := range haystack {
+		if item == needle {
+			return true
+		}
+	}
+	return false
+}
