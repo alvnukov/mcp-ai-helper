@@ -187,6 +187,31 @@ func (h *History) Filter(commandID string, filter Filter) (Result, error) {
 	}, nil
 }
 
+// UpdateRunningOutput refreshes the in-memory output snapshot for a running command.
+// Persistent records are finalized once the command exits; live inspection only needs
+// the current process-local snapshot.
+func (h *History) UpdateRunningOutput(commandID string, stdoutLines []string, stderrLines []string, combined []string, truncated bool, outputHash string) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	record, ok := h.records[commandID]
+	if !ok {
+		return fmt.Errorf("command %q not found in history", commandID)
+	}
+	if record.Status != "running" {
+		return nil
+	}
+	record.Stdout = append([]string(nil), stdoutLines...)
+	record.Stderr = append([]string(nil), stderrLines...)
+	record.Combined = append([]string(nil), combined...)
+	record.Truncated = truncated
+	record.OutputHash = outputHash
+	if !record.StartedAt.IsZero() {
+		record.DurationMS = time.Since(record.StartedAt).Milliseconds()
+	}
+	h.records[commandID] = record
+	return nil
+}
+
 func (h *History) getRecord(commandID string) (Record, bool, error) {
 	h.mu.RLock()
 	record, ok := h.records[commandID]
@@ -242,9 +267,9 @@ func (h *History) Cleanup() error {
 
 // ListRequest controls which command records to return.
 type ListRequest struct {
-	Status  string `json:"status,omitempty"`
+	Status   string `json:"status,omitempty"`
 	RepoPath string `json:"repo_path,omitempty"`
-	Limit   int    `json:"limit,omitempty"`
+	Limit    int    `json:"limit,omitempty"`
 }
 
 // ListEntry is a compact summary of one command record for listing.
@@ -337,14 +362,14 @@ func matchesFilter(r Record, req ListRequest) bool {
 
 func recordToEntry(r Record) ListEntry {
 	e := ListEntry{
-		CommandID: r.CommandID,
-		Status:    r.Status,
-		RepoPath:  r.RepoPath,
-		Command:   r.Command,
-		CWD:       r.CWD,
-		ExitCode:  r.ExitCode,
+		CommandID:  r.CommandID,
+		Status:     r.Status,
+		RepoPath:   r.RepoPath,
+		Command:    r.Command,
+		CWD:        r.CWD,
+		ExitCode:   r.ExitCode,
 		DurationMS: r.DurationMS,
-		CreatedAt: r.CreatedAt,
+		CreatedAt:  r.CreatedAt,
 	}
 	if r.Status == "running" && !r.StartedAt.IsZero() {
 		e.DurationMS = time.Since(r.StartedAt).Milliseconds()
