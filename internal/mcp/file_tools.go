@@ -1,8 +1,6 @@
 package mcp
 
 import (
-	"context"
-
 	basemcp "github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
@@ -10,39 +8,33 @@ import (
 )
 
 func registerFileTools(srv *server.MCPServer) {
+	fileActions := actions{
+		"read":      ignoringContext(fileActionRead),
+		"read_many": ignoringContext(fileActionReadMany),
+		"list":      ignoringContext(fileActionList),
+		"search":    ignoringContext(fileActionSearch),
+		"snapshot":  ignoringContext(fileActionSnapshot),
+	}
 	srv.AddTool(basemcp.NewTool("file",
 		basemcp.WithDescription("Repo file reading and inspection. Required: repo_path, action. Actions: read (path, offset?, limit?) — read single file with line numbers; read_many (paths[]) — read up to 8 files in one call; list (path?) — structured directory listing; search (path?, pattern, max_matches?) — search text in files under a directory; snapshot (path) — read file hash/size before guarded edits."),
 		basemcp.WithString("repo_path", basemcp.Required()),
-		basemcp.WithString("action", basemcp.Required(), basemcp.Enum("read", "read_many", "list", "search", "snapshot")),
+		basemcp.WithString("action", basemcp.Required(), actionEnum(fileActions)),
 		basemcp.WithString("path", basemcp.Description("Repo-relative file or directory path. Required for read/snapshot; optional dir for list/search (defaults to repo root).")),
 		basemcp.WithArray("paths", basemcp.Description("Repo-relative file paths to read (max 8). Required for read_many."), basemcp.WithStringItems(), basemcp.MinItems(1), basemcp.MaxItems(8)),
 		basemcp.WithString("pattern", basemcp.Description("Search pattern. Required for search.")),
 		basemcp.WithNumber("offset", basemcp.Description("1-based line number to start reading from (read action).")),
 		basemcp.WithNumber("limit", basemcp.Description("Maximum lines to return (read action).")),
 		basemcp.WithNumber("max_matches", basemcp.Description("Maximum total matches (search action). Defaults to 100.")),
-	), func(_ context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
-		argsMap, _ := req.Params.Arguments.(map[string]any)
-		action, _ := argsMap["action"].(string)
-		switch action {
-		case "read":
-			return fileActionRead(req)
-		case "read_many":
-			return fileActionReadMany(req)
-		case "list":
-			return fileActionList(req)
-		case "search":
-			return fileActionSearch(req)
-		case "snapshot":
-			return fileActionSnapshot(req)
-		default:
-			return basemcp.NewToolResultError("file: unknown action: " + action), nil
-		}
-	})
+	), dispatch("file", fileActions))
 
+	editActions := actions{
+		"replace": ignoringContext(editActionReplace),
+		"write":   ignoringContext(editActionWrite),
+	}
 	srv.AddTool(basemcp.NewTool("edit",
 		basemcp.WithDescription("Repo file writing and guarded replacement. Required: repo_path, action. Actions: replace (path, expected_hash, old|old_b64, new|new_b64) — replace one unique text span only if file hash matches; write (path, content|content_b64, expected_hash?, mode?) — write content to a file, creating parent dirs if needed."),
 		basemcp.WithString("repo_path", basemcp.Required()),
-		basemcp.WithString("action", basemcp.Required(), basemcp.Enum("replace", "write")),
+		basemcp.WithString("action", basemcp.Required(), actionEnum(editActions)),
 		basemcp.WithString("path", basemcp.Required(), basemcp.Description("Repo-relative file path.")),
 		basemcp.WithString("expected_hash", basemcp.Description("SHA-256 hash guard. Required for replace; optional overwrite guard for write.")),
 		basemcp.WithString("old", basemcp.Description("Text to replace (replace action). Omit when using old_b64.")),
@@ -52,18 +44,7 @@ func registerFileTools(srv *server.MCPServer) {
 		basemcp.WithString("content", basemcp.Description("File content as string (write action). Omit when using content_b64.")),
 		basemcp.WithString("content_b64", basemcp.Description("Base64-encoded content (write action). Use instead of content for safe transport.")),
 		basemcp.WithNumber("mode", basemcp.Description("File permission mode (write action, default 0644).")),
-	), func(_ context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
-		argsMap, _ := req.Params.Arguments.(map[string]any)
-		action, _ := argsMap["action"].(string)
-		switch action {
-		case "replace":
-			return editActionReplace(req)
-		case "write":
-			return editActionWrite(req)
-		default:
-			return basemcp.NewToolResultError("edit: unknown action: " + action), nil
-		}
-	})
+	), dispatch("edit", editActions))
 }
 
 func fileActionRead(req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {

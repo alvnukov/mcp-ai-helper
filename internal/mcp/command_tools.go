@@ -112,9 +112,18 @@ func (a commandFilterArgs) filter() command.Filter {
 }
 
 func registerCommandTools(srv *server.MCPServer, deps *Server) {
+	commandActions := actions{
+		"run":     withDeps(commandActionRun, deps),
+		"cleanup": withDeps(commandActionCleanup, deps),
+		"abort":   withDeps(commandActionAbort, deps),
+		"list":    withDeps(commandActionList, deps),
+		"get":     withDeps(commandActionGet, deps),
+		"filter":  withDeps(commandActionFilter, deps),
+		"health":  withDeps(commandActionHealth, deps),
+	}
 	srv.AddTool(basemcp.NewTool("command",
 		basemcp.WithDescription("Command execution and history management. Required: action. Actions: run (command, repo_path, cwd?, timeout_seconds?, mcp_wait_seconds?) — run a command under policy limits; cleanup () — remove old command log records; abort (command_id) — abort a running command; list (repo_path?, status?, limit?) — list recent command history; get (command_id, mode?, include?, exclude?, preset?, max_lines?, context_before?, context_after?) — get durable command status/result; filter (command_id, include?, exclude?, preset?, max_lines?, context_before?, context_after?) — grep retained command output; health (repo_path) — quick build/vet/test check."),
-		basemcp.WithString("action", basemcp.Required(), basemcp.Enum("run", "cleanup", "abort", "list", "get", "filter", "health")),
+		basemcp.WithString("action", basemcp.Required(), actionEnum(commandActions)),
 		basemcp.WithString("command", basemcp.Description("Shell command. Required for run.")),
 		basemcp.WithString("repo_path", basemcp.Description("Repository root. Required for run and health; optional for list.")),
 		basemcp.WithString("cwd", basemcp.Description("Optional repo-relative working directory (run action).")),
@@ -131,28 +140,7 @@ func registerCommandTools(srv *server.MCPServer, deps *Server) {
 		basemcp.WithNumber("context_before", basemcp.Description("Lines of context before each match (get/filter).")),
 		basemcp.WithNumber("context_after", basemcp.Description("Lines of context after each match (get/filter).")),
 		basemcp.WithObject("filter", basemcp.Description("Structured filter object (run action).")),
-	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
-		argsMap, _ := req.Params.Arguments.(map[string]any)
-		action, _ := argsMap["action"].(string)
-		switch action {
-		case "run":
-			return commandActionRun(ctx, req, deps)
-		case "cleanup":
-			return commandActionCleanup(ctx, req, deps)
-		case "abort":
-			return commandActionAbort(ctx, req, deps)
-		case "list":
-			return commandActionList(ctx, req, deps)
-		case "get":
-			return commandActionGet(ctx, req, deps)
-		case "filter":
-			return commandActionFilter(ctx, req, deps)
-		case "health":
-			return commandActionHealth(ctx, req, deps)
-		default:
-			return basemcp.NewToolResultError("command: unknown action: " + action), nil
-		}
-	})
+	), dispatch("command", commandActions))
 }
 
 func commandActionRun(ctx context.Context, req basemcp.CallToolRequest, deps *Server) (*basemcp.CallToolResult, error) {
@@ -234,7 +222,7 @@ func commandActionList(_ context.Context, req basemcp.CallToolRequest, deps *Ser
 func commandActionGet(_ context.Context, req basemcp.CallToolRequest, deps *Server) (*basemcp.CallToolResult, error) {
 	var args struct {
 		CommandID string `json:"command_id"`
-		Mode       string `json:"mode"`
+		Mode      string `json:"mode"`
 		commandFilterArgs
 	}
 	if err := bind(req, &args); err != nil {

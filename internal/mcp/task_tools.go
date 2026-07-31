@@ -11,10 +11,20 @@ import (
 )
 
 func registerTaskTools(srv *server.MCPServer, deps *Server) {
+	taskActions := actions{
+		"current":      withDeps(taskActionCurrent, deps),
+		"get":          withDeps(taskActionGet, deps),
+		"list":         withDeps(taskActionList, deps),
+		"search":       withDeps(taskActionSearch, deps),
+		"upsert":       withDeps(taskActionUpsert, deps),
+		"set_status":   withDeps(taskActionSetStatus, deps),
+		"batch_upsert": withDeps(taskActionBatchUpsert, deps),
+		"delete":       withDeps(taskActionDelete, deps),
+	}
 	srv.AddTool(basemcp.NewTool("task",
 		basemcp.WithDescription("Per-repository task registry. Required: repo_path, action. Actions: current (no extra args, returns active tasks); get (id); list (status?, query?); search (query, status?); upsert (id?, title, status?, task_type?, priority?, model_level?, body?, tags?, acceptance_criteria?, verification_plan?, parent_id?); set_status (id, status); batch_upsert (tasks[], close_missing?, missing_status?, active_statuses?); delete (id)."),
 		basemcp.WithString("repo_path", basemcp.Required()),
-		basemcp.WithString("action", basemcp.Required(), basemcp.Enum("current", "get", "list", "search", "upsert", "set_status", "batch_upsert", "delete")),
+		basemcp.WithString("action", basemcp.Required(), actionEnum(taskActions)),
 		basemcp.WithString("id", basemcp.Description("Task id. Required for get, set_status, delete. Optional for upsert (creates new if absent).")),
 		basemcp.WithString("title", basemcp.Description("Task title. Required for upsert.")),
 		basemcp.WithString("status", basemcp.Description("Filter by status for list/search; target status for set_status (todo, in_progress, blocked, done).")),
@@ -31,30 +41,7 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 		basemcp.WithBoolean("close_missing", basemcp.Description("Batch: close active tasks omitted from the batch.")),
 		basemcp.WithString("missing_status", basemcp.Description("Batch: status for omitted tasks.")),
 		basemcp.WithArray("active_statuses", basemcp.Description("Batch: statuses considered active for close_missing.")),
-	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
-		argsMap, _ := req.Params.Arguments.(map[string]any)
-		action, _ := argsMap["action"].(string)
-		switch action {
-		case "current":
-			return taskActionCurrent(ctx, req, deps)
-		case "get":
-			return taskActionGet(ctx, req, deps)
-		case "list":
-			return taskActionList(ctx, req, deps)
-		case "search":
-			return taskActionSearch(ctx, req, deps)
-		case "upsert":
-			return taskActionUpsert(ctx, req, deps)
-		case "set_status":
-			return taskActionSetStatus(ctx, req, deps)
-		case "batch_upsert":
-			return taskActionBatchUpsert(ctx, req, deps)
-		case "delete":
-			return taskActionDelete(ctx, req, deps)
-		default:
-			return basemcp.NewToolResultError("task: unknown action: " + action), nil
-		}
-	})
+	), dispatch("task", taskActions))
 }
 
 func taskActionCurrent(ctx context.Context, req basemcp.CallToolRequest, deps *Server) (*basemcp.CallToolResult, error) {

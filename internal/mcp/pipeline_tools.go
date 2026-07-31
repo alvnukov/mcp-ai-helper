@@ -10,9 +10,16 @@ import (
 )
 
 func registerPipelineTools(srv *server.MCPServer, deps *Server) {
+	runActions := actions{
+		"pipeline": withDeps(runActionPipeline, deps),
+		"workflow": withDeps(runActionWorkflow, deps),
+		"schema": func(context.Context, basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+			return runActionSchema()
+		},
+	}
 	srv.AddTool(basemcp.NewTool("run",
 		basemcp.WithDescription("Run pipelines and workflows. Required: action, repo_path (except schema). Actions: pipeline (command, repo_path, cwd?, timeout_seconds?, mcp_wait_seconds?, current_task_id?, task_on_start?, task_on_success?, task_on_failure?, compact_output?, secret_handles?) — run command with evidence extraction; workflow (repo_path, steps[], owned_files?, commit_message?, current_task_id?, task_on_start?, task_on_success?, task_on_failure?, secret_handles?, preview?) — run guarded edits, checks, and optional commit; schema () — return valid workflow step types and parameters."),
-		basemcp.WithString("action", basemcp.Required(), basemcp.Enum("pipeline", "workflow", "schema")),
+		basemcp.WithString("action", basemcp.Required(), actionEnum(runActions)),
 		basemcp.WithString("repo_path", basemcp.Required()),
 		basemcp.WithString("command", basemcp.Description("Shell command (pipeline action).")),
 		basemcp.WithString("cwd", basemcp.Description("Optional repo-relative working directory.")),
@@ -42,20 +49,7 @@ func registerPipelineTools(srv *server.MCPServer, deps *Server) {
 		basemcp.WithArray("owned_files", basemcp.Description("Repo-relative files the workflow is allowed to modify or commit.")),
 		basemcp.WithString("commit_message", basemcp.Description("Optional commit message used by git workflow steps.")),
 		basemcp.WithBoolean("preview", basemcp.Description("Set to true for dry-run: returns steps that would execute without running them.")),
-	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
-		argsMap, _ := req.Params.Arguments.(map[string]any)
-		action, _ := argsMap["action"].(string)
-		switch action {
-		case "pipeline":
-			return runActionPipeline(ctx, req, deps)
-		case "workflow":
-			return runActionWorkflow(ctx, req, deps)
-		case "schema":
-			return runActionSchema()
-		default:
-			return basemcp.NewToolResultError("run: unknown action: " + action), nil
-		}
-	})
+	), dispatch("run", runActions))
 }
 
 func runActionPipeline(ctx context.Context, req basemcp.CallToolRequest, deps *Server) (*basemcp.CallToolResult, error) {
