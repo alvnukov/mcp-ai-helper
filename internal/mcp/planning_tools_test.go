@@ -26,7 +26,7 @@ func TestPlanTaskExecutionMediumTaskCanProceed(t *testing.T) {
 	if len(result.AllowedDelegateLevels) != 3 || result.AllowedDelegateLevels[0] != "medium" {
 		t.Fatalf("allowed delegate levels = %#v", result.AllowedDelegateLevels)
 	}
-	if len(result.RequiredPipeline) == 0 || result.RequiredPipeline[len(result.RequiredPipeline)-1] != "run_workflow" {
+	if len(result.RequiredPipeline) == 0 || result.RequiredPipeline[len(result.RequiredPipeline)-1] != "run action=workflow" {
 		t.Fatalf("pipeline = %#v", result.RequiredPipeline)
 	}
 }

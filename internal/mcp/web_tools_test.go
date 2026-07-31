@@ -14,14 +14,39 @@ import (
 	"github.com/zol/mcp-ai-helper/internal/websearch"
 )
 
+// The web tools sit behind an opt-in layer, so a config that does not ask for
+// them registers nothing and every assertion below would be about an absent
+// tool. webConfig turns the layer on, which is what a user who wants these tools
+// has to do too.
+func webLayer() config.LayerPolicy {
+	enabled := true
+	return config.LayerPolicy{Web: config.LayerConfig{Enabled: &enabled}}
+}
+
+func webConfig(t *testing.T, contentType string) *config.Config {
+	t.Helper()
+	return &config.Config{
+		AssistantGuidance: config.DefaultAssistantGuidance(),
+		Layers:            webLayer(),
+		WebPolicy: config.WebPolicy{
+			CacheDir:             t.TempDir(),
+			MaxSourceBytes:       1024,
+			TimeoutSeconds:       2,
+			MaxRedirects:         3,
+			AllowedSchemes:       []string{"http"},
+			AllowedHosts:         []string{"127.0.0.1"},
+			AcceptedContentTypes: []string{contentType},
+		},
+	}
+}
+
 func TestWebFetchToolReturnsBoundedMetadata(t *testing.T) {
 	srvHTTP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		_, _ = w.Write([]byte("<html><body>full page body must stay cached</body></html>"))
 	}))
 	defer srvHTTP.Close()
-	cfg := &config.Config{AssistantGuidance: config.DefaultAssistantGuidance(), WebPolicy: config.WebPolicy{CacheDir: t.TempDir(), MaxSourceBytes: 1024, TimeoutSeconds: 2, MaxRedirects: 3, AllowedSchemes: []string{"http"}, AllowedHosts: []string{"127.0.0.1"}, AcceptedContentTypes: []string{"text/html"}}}
-	srv := New(cfg)
+	srv := New(webConfig(t, "text/html"))
 	st, ok := srv.ListTools()["web_fetch"]
 	if !ok {
 		t.Fatal("web_fetch tool is not registered")
@@ -49,7 +74,7 @@ func TestWebFetchToolReturnsBoundedMetadata(t *testing.T) {
 }
 
 func TestWebToolDescriptionsExposeEfficientWorkflow(t *testing.T) {
-	srv := New(&config.Config{AssistantGuidance: config.DefaultAssistantGuidance()})
+	srv := New(webConfig(t, "text/html"))
 	checks := map[string][]string{
 		"web_search":       {"Step 1 of web research", "search hits are not evidence", "Next: choose URLs and call web_fetch", "Unsupported providers fail closed"},
 		"web_fetch":        {"Step 2 after web_search", "returns doc_id", "never page body", "Next: fetched_doc_find"},
@@ -76,8 +101,7 @@ func TestFetchedDocReadAndFindToolsReturnBoundedFragments(t *testing.T) {
 		_, _ = w.Write([]byte("alpha needle beta needle gamma needle delta"))
 	}))
 	defer srvHTTP.Close()
-	cfg := &config.Config{AssistantGuidance: config.DefaultAssistantGuidance(), WebPolicy: config.WebPolicy{CacheDir: t.TempDir(), MaxSourceBytes: 1024, TimeoutSeconds: 2, MaxRedirects: 3, AllowedSchemes: []string{"http"}, AllowedHosts: []string{"127.0.0.1"}, AcceptedContentTypes: []string{"text/plain"}}}
-	srv := New(cfg)
+	srv := New(webConfig(t, "text/plain"))
 	fetch := srv.ListTools()["web_fetch"].Handler
 	fetchReq := basemcp.CallToolRequest{}
 	fetchReq.Params.Arguments = map[string]any{"url": srvHTTP.URL}
@@ -117,7 +141,7 @@ func TestWebSearchReturnsCompactHits(t *testing.T) {
 		_, _ = w.Write([]byte(`<html><body><div class="result"><a class="result__a" href="/l/?uddg=https%3A%2F%2Fexample.com%2Falpha">Alpha result</a><a class="result__snippet">compact snippet</a></div><script>raw search markup must not leak</script></body></html>`))
 	}))
 	defer srvHTTP.Close()
-	cfg := &config.Config{AssistantGuidance: config.DefaultAssistantGuidance(), WebPolicy: config.WebPolicy{SearchProvider: websearch.ProviderDuckDuckGoHTML, SearchURL: srvHTTP.URL, TimeoutSeconds: 2, AllowedSchemes: []string{"http"}, AllowedHosts: []string{"127.0.0.1"}, UserAgent: "test-agent", MaxSearchResults: 5}}
+	cfg := &config.Config{AssistantGuidance: config.DefaultAssistantGuidance(), Layers: webLayer(), WebPolicy: config.WebPolicy{SearchProvider: websearch.ProviderDuckDuckGoHTML, SearchURL: srvHTTP.URL, TimeoutSeconds: 2, AllowedSchemes: []string{"http"}, AllowedHosts: []string{"127.0.0.1"}, UserAgent: "test-agent", MaxSearchResults: 5}}
 	srv := New(cfg)
 	st, ok := srv.ListTools()["web_search"]
 	if !ok {
@@ -152,7 +176,7 @@ func TestWebSearchGoogleProviderThroughMCP(t *testing.T) {
 		_, _ = w.Write([]byte(`{"searchInformation":{"totalResults":"1"},"items":[{"title":"Google result","link":"https://example.com/google","displayLink":"example.com","snippet":"google snippet"}]}`))
 	}))
 	defer srvHTTP.Close()
-	cfg := &config.Config{AssistantGuidance: config.DefaultAssistantGuidance(), WebPolicy: config.WebPolicy{GoogleCSEURL: srvHTTP.URL, GoogleCSEID: "engine-id", GoogleAPIKey: "secret-key", TimeoutSeconds: 2, AllowedSchemes: []string{"http"}, AllowedHosts: []string{"127.0.0.1"}, MaxSearchResults: 5}}
+	cfg := &config.Config{AssistantGuidance: config.DefaultAssistantGuidance(), Layers: webLayer(), WebPolicy: config.WebPolicy{GoogleCSEURL: srvHTTP.URL, GoogleCSEID: "engine-id", GoogleAPIKey: "secret-key", TimeoutSeconds: 2, AllowedSchemes: []string{"http"}, AllowedHosts: []string{"127.0.0.1"}, MaxSearchResults: 5}}
 	srv := New(cfg)
 	req := basemcp.CallToolRequest{}
 	req.Params.Arguments = map[string]any{"query": "bounded fetch", "provider": websearch.ProviderGoogleCSE}
@@ -174,7 +198,7 @@ func TestWebSearchGoogleProviderThroughMCP(t *testing.T) {
 }
 
 func TestWebSearchFailsClosedWithoutProvider(t *testing.T) {
-	srv := New(&config.Config{AssistantGuidance: config.DefaultAssistantGuidance()})
+	srv := New(&config.Config{AssistantGuidance: config.DefaultAssistantGuidance(), Layers: webLayer()})
 	st, ok := srv.ListTools()["web_search"]
 	if !ok {
 		t.Fatal("web_search tool is not registered")

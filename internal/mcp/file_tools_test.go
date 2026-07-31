@@ -42,6 +42,16 @@ func writeTestFile(t *testing.T, dir, name, content string) {
 
 func resultMap(t *testing.T, r *basemcp.CallToolResult) map[string]any {
 	t.Helper()
+	// An error result carries no structured content, so without this the caller
+	// reads a nil map and panics — which takes the whole package down and hides
+	// every test after it. Reporting the tool's own message instead says what
+	// actually went wrong.
+	if r == nil {
+		t.Fatal("tool returned no result")
+	}
+	if r.IsError {
+		t.Fatalf("tool returned an error: %s", resultText(t, r))
+	}
 	data, err := json.Marshal(r.StructuredContent)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -49,6 +59,9 @@ func resultMap(t *testing.T, r *basemcp.CallToolResult) map[string]any {
 	var m map[string]any
 	if err := json.Unmarshal(data, &m); err != nil {
 		t.Fatalf("unmarshal: %v", err)
+	}
+	if m == nil {
+		t.Fatalf("tool returned no structured content: %s", resultText(t, r))
 	}
 	return m
 }
@@ -94,7 +107,7 @@ func TestReadFilesTwoValid(t *testing.T) {
 	req := basemcp.CallToolRequest{}
 	req.Params.Arguments = map[string]any{
 		"repo_path": dir,
-		"action":   "read_many",
+		"action":    "read_many",
 		"paths":     []any{"a.txt", "b.txt"},
 	}
 	r, err := handler(context.Background(), req)
@@ -138,7 +151,7 @@ func TestReadFilesOneMissing(t *testing.T) {
 	req := basemcp.CallToolRequest{}
 	req.Params.Arguments = map[string]any{
 		"repo_path": dir,
-		"action":   "read_many",
+		"action":    "read_many",
 		"paths":     []any{"present.txt", "missing.txt"},
 	}
 	r, err := handler(context.Background(), req)
@@ -178,7 +191,7 @@ func TestReadFilesEmptyPaths(t *testing.T) {
 	req := basemcp.CallToolRequest{}
 	req.Params.Arguments = map[string]any{
 		"repo_path": dir,
-		"action":   "read_many",
+		"action":    "read_many",
 		"paths":     []any{},
 	}
 	r, err := handler(context.Background(), req)
@@ -202,7 +215,7 @@ func TestReadFilesTooManyPaths(t *testing.T) {
 	req := basemcp.CallToolRequest{}
 	req.Params.Arguments = map[string]any{
 		"repo_path": dir,
-		"action":   "read_many",
+		"action":    "read_many",
 		"paths":     paths,
 	}
 	r, err := handler(context.Background(), req)
@@ -226,7 +239,7 @@ func TestReadFilesPerFileByteLimit(t *testing.T) {
 	req := basemcp.CallToolRequest{}
 	req.Params.Arguments = map[string]any{
 		"repo_path": dir,
-		"action":   "read_many",
+		"action":    "read_many",
 		"paths":     []any{"big.txt", "small.txt"},
 	}
 	r, err := handler(context.Background(), req)
@@ -265,7 +278,7 @@ func TestReadFilesTotalByteLimit(t *testing.T) {
 	req := basemcp.CallToolRequest{}
 	req.Params.Arguments = map[string]any{
 		"repo_path": dir,
-		"action":   "read_many",
+		"action":    "read_many",
 		"paths":     []any{"f1.txt", "f2.txt", "f3.txt"},
 	}
 	r, err := handler(context.Background(), req)

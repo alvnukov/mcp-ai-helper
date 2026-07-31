@@ -299,7 +299,13 @@ func TestTaskSchemaAdvertisesTaskObjects(t *testing.T) {
 func TestTaskGraphAndContextToolsAdvertiseUsageContract(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.Config{AssistantGuidance: config.DefaultAssistantGuidance()}
+	// task_graph and task_context belong to the opt-in task_advanced layer, so a
+	// default config registers neither and there would be nothing to assert on.
+	enabled := true
+	cfg := &config.Config{
+		AssistantGuidance: config.DefaultAssistantGuidance(),
+		Layers:            config.LayerPolicy{TaskAdvanced: config.LayerConfig{Enabled: &enabled}},
+	}
 	srv := New(cfg)
 	tools := srv.ListTools()
 
