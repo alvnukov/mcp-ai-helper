@@ -321,8 +321,7 @@ func (r *Runner) RunWorkflow(ctx context.Context, req WorkflowRequest) (result W
 func (r *Runner) runWorkflowSteps(ctx context.Context, req WorkflowRequest) (WorkflowResult, error) {
 	result := WorkflowResult{Status: "ok"}
 	stepResults := map[string]WorkflowStepResult{}
-	changedSet := map[string]struct{}{}
-	fileHashes := map[string]string{}
+	files := newWorkflowFiles()
 
 	waves := buildStepWaves(req.Steps)
 
@@ -352,7 +351,7 @@ func (r *Runner) runWorkflowSteps(ctx context.Context, req WorkflowRequest) (Wor
 				stateMu.Unlock()
 
 				fileLocks.lock(paths)
-				sr, execErr := r.executeWorkflowStep(ctx, req.RepoPath, *step, changedSet, fileHashes, commitPtr(req.Commit))
+				sr, execErr := r.executeWorkflowStep(ctx, req.RepoPath, *step, files, commitPtr(req.Commit))
 				fileLocks.unlock(paths)
 
 				if execErr != nil {
@@ -373,7 +372,7 @@ func (r *Runner) runWorkflowSteps(ctx context.Context, req WorkflowRequest) (Wor
 				if commitResult, ok := sr.Output.(gitops.CommitResult); ok {
 					result.CommitResult = &commitResult
 				}
-				result.ChangedFiles = sortedKeys(changedSet)
+				result.ChangedFiles = files.changedFiles()
 				if sr.Status != "ok" && sr.Status != "skipped" && step.OnFailure != "continue" && result.Status == "ok" {
 					result.Status = sr.Status
 					result.Reason = sr.Reason
@@ -389,7 +388,7 @@ func (r *Runner) runWorkflowSteps(ctx context.Context, req WorkflowRequest) (Wor
 		}
 	}
 
-	result.ChangedFiles = sortedKeys(changedSet)
+	result.ChangedFiles = files.changedFiles()
 	return result, nil
 }
 
@@ -587,7 +586,49 @@ func (s *fileLockSet) unlock(paths []string) {
 	s.mu.Unlock()
 }
 
-func (r *Runner) executeWorkflowStep(ctx context.Context, repoPath string, step WorkflowStep, changedSet map[string]struct{}, fileHashes map[string]string, topLevelCommit *WorkflowCommit) (WorkflowStepResult, error) {
+// workflowFiles is what the steps of a workflow learn about each other's edits:
+// which files have changed, and the hash each one now carries so a later guarded
+// replace can chain onto it without re-reading the file.
+//
+// Steps inside a wave run concurrently and the file locks only serialise the
+// ones touching the same path, so two steps editing different files reach this
+// at the same time. It carries its own lock rather than borrowing the caller's,
+// because it is also read from the result-assembly path.
+type workflowFiles struct {
+	mu      sync.Mutex
+	changed map[string]struct{}
+	hashes  map[string]string
+}
+
+func newWorkflowFiles() *workflowFiles {
+	return &workflowFiles{changed: map[string]struct{}{}, hashes: map[string]string{}}
+}
+
+// recordEdit notes that path now holds hash, and that the workflow changed it.
+func (f *workflowFiles) recordEdit(path string, hash string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.changed[path] = struct{}{}
+	f.hashes[path] = hash
+}
+
+// hash reports the hash an earlier step left on path, if any.
+func (f *workflowFiles) hash(path string) (string, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	value, ok := f.hashes[path]
+	return value, ok
+}
+
+// changedFiles lists the files edited so far, sorted so a commit built from them
+// is reproducible.
+func (f *workflowFiles) changedFiles() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return sortedKeys(f.changed)
+}
+
+func (r *Runner) executeWorkflowStep(ctx context.Context, repoPath string, step WorkflowStep, files *workflowFiles, topLevelCommit *WorkflowCommit) (WorkflowStepResult, error) {
 	base := WorkflowStepResult{ID: step.ID, Tool: step.Tool, Status: "ok"}
 	switch step.Tool {
 	case "guarded_replace":
@@ -596,7 +637,7 @@ func (r *Runner) executeWorkflowStep(ctx context.Context, repoPath string, step 
 			return WorkflowStepResult{}, err
 		}
 		replaceReq := fileops.ReplaceRequest{RepoPath: repoPath, Path: args.Path, ExpectedHash: args.ExpectedHash, Old: args.Old, New: args.New}
-		if currentHash, ok := fileHashes[args.Path]; ok {
+		if currentHash, ok := files.hash(args.Path); ok {
 			replaceReq.ExpectedHash = currentHash
 		}
 		if replaceReq.ExpectedHash == "" {
@@ -619,8 +660,7 @@ func (r *Runner) executeWorkflowStep(ctx context.Context, repoPath string, step 
 		base.Reason = editResult.Reason
 		base.Output = editResult
 		if editResult.Changed {
-			changedSet[args.Path] = struct{}{}
-			fileHashes[args.Path] = editResult.NewHash
+			files.recordEdit(args.Path, editResult.NewHash)
 		}
 		return base, nil
 	case "command":
@@ -650,18 +690,18 @@ func (r *Runner) executeWorkflowStep(ctx context.Context, repoPath string, step 
 		if err := bindStepArgs(step.Args, &args); err != nil {
 			return WorkflowStepResult{}, err
 		}
-		files := args.Files
-		if len(files) == 0 && topLevelCommit != nil {
-			files = topLevelCommit.Files
+		commitFiles := args.Files
+		if len(commitFiles) == 0 && topLevelCommit != nil {
+			commitFiles = topLevelCommit.Files
 		}
-		if len(files) == 0 {
-			files = sortedKeys(changedSet)
+		if len(commitFiles) == 0 {
+			commitFiles = files.changedFiles()
 		}
 		message := args.Message
 		if message == "" && topLevelCommit != nil {
 			message = topLevelCommit.Message
 		}
-		commitResult, err := gitops.CommitOwned(ctx, gitops.CommitRequest{RepoPath: repoPath, Files: files, Message: message})
+		commitResult, err := gitops.CommitOwned(ctx, gitops.CommitRequest{RepoPath: repoPath, Files: commitFiles, Message: message})
 		if err != nil {
 			return WorkflowStepResult{}, err
 		}
