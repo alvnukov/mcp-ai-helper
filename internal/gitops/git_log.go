@@ -106,7 +106,7 @@ type LogDiffResult struct {
 }
 
 type FileStat struct {
-	Path     string `json:"path"`
+	Path      string `json:"path"`
 	Additions int    `json:"additions"`
 	Deletions int    `json:"deletions"`
 }

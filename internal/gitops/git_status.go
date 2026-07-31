@@ -111,4 +111,3 @@ func Status(ctx context.Context, req StatusRequest) (StatusResult, error) {
 
 	return result, nil
 }
-

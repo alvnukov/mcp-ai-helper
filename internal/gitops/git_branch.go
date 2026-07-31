@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	
+
 	"strings"
 )
 
@@ -181,10 +181,10 @@ type TagRequest struct {
 }
 
 type Tag struct {
-	Name       string `json:"name"`
-	Hash       string `json:"hash"`
+	Name        string `json:"name"`
+	Hash        string `json:"hash"`
 	IsAnnotated bool   `json:"is_annotated,omitempty"`
-	Message    string `json:"message,omitempty"`
+	Message     string `json:"message,omitempty"`
 }
 
 type TagResult struct {

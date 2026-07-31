@@ -14,4 +14,6 @@ CLAUDE.md
 .backups/
 .mcp-ai-helper.yaml
 obsidian-tasks/.obsidian/
-mcp-ai-helper-dev
+# The dev binary built at the repo root. Anchored, because unanchored this also
+# matches cmd/mcp-ai-helper-dev/ and silently hides every new file added there.
+/mcp-ai-helper-dev
