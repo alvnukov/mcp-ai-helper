@@ -38,7 +38,7 @@ jobs:
       # The Lean-backed tests build and run a real lake workspace, so the
       # default 10m panic timeout is not enough headroom on a cold runner.
       - name: Test
-        run: go test ./... -count=1 -timeout=900s
+        run: go test ./... -count=1 -timeout=1500s
 
       - name: Vet
         run: go vet ./...

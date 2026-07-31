@@ -100,8 +100,12 @@ go build ./...
 (`internal/mcp`, `internal/lake`). Они остаются в `make test` и в CI. Полный
 прогон перед сменой контракта task registry:
 ```
-make test           # всё, включая Lean, ~5 минут
+make test           # всё, включая Lean, ~10 минут
 ```
+
+Почему так долго: каждая мутация task registry делает `ResetAfterCall`, то есть
+убивает общий `lake serve` и следующий вызов платит за холодный старт. Это
+свойство дизайна, а не тестов.
 
 ### Targeted проверки
 

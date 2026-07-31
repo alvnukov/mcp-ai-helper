@@ -17,7 +17,7 @@ vet:
 # does not already find in test-short — and instrumenting them makes the run
 # long enough to be useless as a gate.
 test:
-	go test ./... -count=1 -timeout=1200s
+	go test ./... -count=1 -timeout=1500s
 
 # The fast loop: every package, minus the tests that build and run Lean.
 # Defined by exclusion rather than by a list of packages, so a new package is
