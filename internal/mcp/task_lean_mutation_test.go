@@ -5,10 +5,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/zol/mcp-ai-helper/internal/command"
 	"github.com/zol/mcp-ai-helper/internal/config"
+	"github.com/zol/mcp-ai-helper/internal/leanfixture"
 	"github.com/zol/mcp-ai-helper/internal/pipeline"
 	"github.com/zol/mcp-ai-helper/internal/tasks"
 )
@@ -43,7 +45,7 @@ func TestLeanTransitionServerRejectsInvalidStatusWithTypedDiagnostic(t *testing.
 }
 
 func TestLeanUpsertBootstrapsEmptyTaskRepo(t *testing.T) {
-	repo := t.TempDir()
+	repo := emptyLeanRepo(t)
 	result, err := upsertTask(context.Background(), tasks.AddRequest{RepoPath: repo, ID: "task-first", Status: "todo", Title: "First task"}, commandRunnerForRepo(repo), legacyStoreForTest(t))
 	if err != nil {
 		t.Fatalf("upsertTask returned error: %v", err)
@@ -199,26 +201,23 @@ func TestLeanMutationRequiresLeanRegistry(t *testing.T) {
 	}
 }
 
+// preparedLeanFixture is built once for the whole test binary. Every Lean-backed
+// test used to compile and link the project from scratch, which cost more than
+// the package's own timeout allowed once there were a dozen of them.
+var preparedLeanFixture = sync.OnceValues(func() (string, error) {
+	return leanfixture.Prepare(taskRegistryBootstrapTemplates, "task_registry_templates")
+})
+
 func copyLeanRepoFixture(t *testing.T) string {
 	t.Helper()
+	requiresLeanToolchain(t)
+	prepared, err := preparedLeanFixture()
+	if err != nil {
+		t.Fatalf("prepare lean fixture: %v", err)
+	}
 	repo := t.TempDir()
-	for _, dir := range []string{"MCPAIHelperProject"} {
-		if err := os.MkdirAll(filepath.Join(repo, dir), 0o700); err != nil {
-			t.Fatalf("create fixture dir: %v", err)
-		}
-	}
-	for _, file := range []string{"lean-toolchain", "lakefile.lean", "MCPAIHelperProject.lean", "MCPAIHelperProject/ProjectState.lean", "MCPAIHelperProject/Samples.lean", "MCPAIHelperProject/Registry.lean", "MCPAIHelperProject/TaskRegistryExport.lean"} {
-		data, err := taskRegistryBootstrapTemplates.ReadFile("task_registry_templates/" + file)
-		if err != nil {
-			t.Fatalf("read embedded fixture %s: %v", file, err)
-		}
-		if err := os.WriteFile(filepath.Join(repo, file), data, 0o600); err != nil {
-			t.Fatalf("write fixture file %s: %v", file, err)
-		}
-	}
-	activePath := filepath.Join(repo, "MCPAIHelperProject", "ActiveTasks.lean")
-	if err := os.WriteFile(activePath, []byte(emptyActiveTasksLeanSource), 0o600); err != nil {
-		t.Fatalf("write empty ActiveTasks.lean: %v", err)
+	if err := leanfixture.Clone(prepared, repo); err != nil {
+		t.Fatalf("clone lean fixture: %v", err)
 	}
 	return repo
 }

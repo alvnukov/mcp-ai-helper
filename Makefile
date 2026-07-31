@@ -1,27 +1,29 @@
-.PHONY: all vet test test-core test-pkg lint build quality clean
+.PHONY: all vet test test-short test-pkg lint build build-binary quality full clean
 
 all: quality
 
 # Full quality gate — run before commit
-quality: vet test-core build
+quality: vet test-short build
 	@echo "quality gate passed"
 
 # Static analysis
 vet:
 	go vet ./...
 
-# All tests with race detector
+# Everything, including the tests that drive a real Lean toolchain
 test:
-	go test ./... -count=1 -race -timeout=120s
+	go test ./... -count=1 -race -timeout=900s
 
-# Core packages only (fast, no known races)
-test-core:
-	go test ./internal/config/... ./internal/command/... ./internal/fileops/... ./internal/gitops/... ./internal/evidence/... ./internal/features/... ./internal/security/... ./internal/tasks/... ./internal/language/... ./internal/setup/... -count=1 -race -timeout=120s
+# The fast loop: every package, minus the tests that build and run Lean.
+# Defined by exclusion rather than by a list of packages, so a new package is
+# covered the day it is added instead of the day someone remembers the Makefile.
+test-short:
+	go test ./... -count=1 -race -short -timeout=300s
 
 # Targeted tests for a specific package
 # Usage: make test-pkg PKG=./internal/command/...
 test-pkg:
-	go test $(PKG) -count=1 -race -timeout=60s
+	go test $(PKG) -count=1 -race -timeout=120s
 
 # Lint (requires golangci-lint)
 lint:
@@ -35,8 +37,8 @@ build:
 build-binary:
 	go build -o bin/mcp-ai-helper ./cmd/mcp-ai-helper
 
-# Run everything including lint
-full: quality lint
+# Run everything, including the Lean tests and lint
+full: vet test build lint
 	@echo "full gate passed"
 
 clean:

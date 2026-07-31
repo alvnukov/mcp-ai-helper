@@ -13,11 +13,13 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/zol/mcp-ai-helper/internal/command"
 	"github.com/zol/mcp-ai-helper/internal/config"
+	"github.com/zol/mcp-ai-helper/internal/leanfixture"
 )
 
 func TestTaskRegistryExporterGetTaskThroughLakeExe(t *testing.T) {
@@ -315,28 +317,23 @@ func runTaskRegistryExporter(t *testing.T, repoRoot string, args ...string) Comm
 	return result
 }
 
+// preparedLeanFixture is the same build every test in this package starts from;
+// see the leanfixture package for why it is worth caching. The templates live
+// with the mcp package, which is the one that installs them into a real repo.
+var preparedLeanFixture = sync.OnceValues(func() (string, error) {
+	return leanfixture.Prepare(os.DirFS(filepath.Clean("../mcp")), "task_registry_templates")
+})
+
 func prepareLakeTestRepo(t *testing.T) string {
 	t.Helper()
+	requiresLeanToolchain(t)
+	prepared, err := preparedLeanFixture()
+	if err != nil {
+		t.Fatalf("prepare lean fixture: %v", err)
+	}
 	repo := t.TempDir()
-	templateRoot := filepath.Clean("../mcp/task_registry_templates")
-	for _, dir := range []string{"MCPAIHelperProject"} {
-		if err := os.MkdirAll(filepath.Join(repo, dir), 0o700); err != nil {
-			t.Fatalf("create fixture dir: %v", err)
-		}
-	}
-	for _, file := range []string{"lean-toolchain", "lakefile.lean", "MCPAIHelperProject.lean", "MCPAIHelperProject/ProjectState.lean", "MCPAIHelperProject/Samples.lean", "MCPAIHelperProject/Registry.lean", "MCPAIHelperProject/TaskRegistryExport.lean"} {
-		data, err := os.ReadFile(filepath.Join(templateRoot, file))
-		if err != nil {
-			t.Fatalf("read template %s: %v", file, err)
-		}
-		if err := os.WriteFile(filepath.Join(repo, file), data, 0o600); err != nil {
-			t.Fatalf("write fixture file %s: %v", file, err)
-		}
-	}
-	activePath := filepath.Join(repo, "MCPAIHelperProject", "ActiveTasks.lean")
-	emptySource := []byte("import MCPAIHelperProject.ProjectState\n\nnamespace MCPAIHelperProject\nnamespace ActiveTasks\n\ndef activeArtifacts : List Artifact :=\n  []\n\ndef activeRelations : List ArtifactRelation :=\n  []\n\nend ActiveTasks\nend MCPAIHelperProject\n")
-	if err := os.WriteFile(activePath, emptySource, 0o600); err != nil {
-		t.Fatalf("write empty ActiveTasks.lean: %v", err)
+	if err := leanfixture.Clone(prepared, repo); err != nil {
+		t.Fatalf("clone lean fixture: %v", err)
 	}
 	return repo
 }

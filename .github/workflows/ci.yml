@@ -35,8 +35,10 @@ jobs:
       - name: Format check
         run: test -z "$(gofmt -l .)"
 
+      # The Lean-backed tests build and run a real lake workspace, so the
+      # default 10m panic timeout is not enough headroom on a cold runner.
       - name: Test
-        run: go test ./...
+        run: go test ./... -count=1 -timeout=900s
 
       - name: Vet
         run: go vet ./...

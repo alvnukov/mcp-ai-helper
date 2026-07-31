@@ -148,7 +148,7 @@ func TestExportRoundTrip(t *testing.T) {
 }
 
 func TestExportLeanToCleanObsidianPreservesAllProjectedFields(t *testing.T) {
-	repo := t.TempDir()
+	repo := emptyLeanRepo(t)
 	source := newLakeTaskBackend(commandRunnerForRepo(repo), legacyStoreForTest(t))
 	targetDir := t.TempDir()
 	target := newObsidianTaskBackend(targetDir)

@@ -51,7 +51,7 @@ func TestReadTaskPrefersLeanExporter(t *testing.T) {
 }
 
 func TestReadTaskExporterFailureDoesNotFallbackToLegacy(t *testing.T) {
-	repoRoot := t.TempDir()
+	repoRoot := emptyLeanRepo(t)
 	_, source, err := readTask(context.Background(), repoRoot, "missing-task", commandRunnerForRepo(repoRoot), legacyStoreForTest(t))
 	if err == nil {
 		t.Fatal("expected missing Lean task error")
@@ -62,7 +62,7 @@ func TestReadTaskExporterFailureDoesNotFallbackToLegacy(t *testing.T) {
 }
 
 func TestReadCurrentTasksBootstrapsEmptyRepo(t *testing.T) {
-	repo := t.TempDir()
+	repo := emptyLeanRepo(t)
 	list, source, err := readCurrentTasks(context.Background(), repo, commandRunnerForRepo(repo), legacyStoreForTest(t))
 	if err != nil {
 		t.Fatalf("readCurrentTasks returned error: %v", err)
