@@ -91,7 +91,7 @@ func Schema() map[string]any {
 			{Path: "web_policy.google_api_key", Type: "string", Description: "Literal Google API key for provider google_cse. Supported but not recommended; omitted from config JSON output."},
 			{Path: "web_policy.google_cse_url", Type: "string", Default: "https://www.googleapis.com/customsearch/v1", Description: "Google Custom Search JSON API endpoint. Override only for tests or compatible proxies."},
 			{Path: "secrets.<handle>.value", Type: "string", Description: "Server-side secret value. It is never serialized to model-facing config JSON; models may reference only the handle through secret_handles."},
-			{Path: "secrets.<handle>.enabled", Type: "bool", Default: "false", Description: "Enables a named secret handle for run_pipeline/run_workflow injection. Disabled or unknown handles fail closed before command execution."},
+			{Path: "secrets.<handle>.enabled", Type: "bool", Default: "false", Description: "Enables a named secret handle for run action=pipeline and run action=workflow injection. Disabled or unknown handles fail closed before command execution."},
 			{Path: "features.overrides.<id>.enabled", Type: "bool", Description: "Feature override value. Global overrides live in helper-owned feature state; repo-local overrides live in .mcp-ai-helper.yaml and take precedence over global overrides."},
 			{Path: "features.audit", Type: "[]record", Description: "Compact helper-owned audit trail for feature changes: scope, previous value/source, new value/source, timestamp, and optional reason."},
 			{Path: "permissions.tools.deny", Type: "[]string", Description: "Repo-local only (.mcp-ai-helper.yaml). MCP tool names denied for LLM in this repo. User-editable; config_replace refuses to write repo configs."},

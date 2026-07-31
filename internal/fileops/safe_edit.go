@@ -780,12 +780,12 @@ type ListDirRequest struct {
 
 // DirEntry is one item in a directory listing.
 type DirEntry struct {
-	Name         string    `json:"name"`
-	Path         string    `json:"path"`
-	IsDir        bool      `json:"is_dir"`
-	Size         int64     `json:"size,omitempty"`
-	ModifiedAt   string    `json:"modified_at,omitempty"`
-	IsSymlink    bool      `json:"is_symlink,omitempty"`
+	Name       string `json:"name"`
+	Path       string `json:"path"`
+	IsDir      bool   `json:"is_dir"`
+	Size       int64  `json:"size,omitempty"`
+	ModifiedAt string `json:"modified_at,omitempty"`
+	IsSymlink  bool   `json:"is_symlink,omitempty"`
 }
 
 // ListDirResult holds structured directory listing.
@@ -846,7 +846,7 @@ func ListDir(req ListDirRequest) (ListDirResult, error) {
 	return result, nil
 }
 
-const protectedLeanGenericToolMessage = "policy_denied: generic file access to protected task registry source is disabled for this path only; continue with task_current/task_get/task_graph/task_context or use a focused search that skips protected registry files"
+const protectedLeanGenericToolMessage = "policy_denied: generic file access to protected task registry source is disabled for this path only; continue with task action=current, task action=get, task_graph or task_context or use a focused search that skips protected registry files"
 
 func rejectProtectedLeanPath(path string) error {
 	if isProtectedLeanPath(path) {

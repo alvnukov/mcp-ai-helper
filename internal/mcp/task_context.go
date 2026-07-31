@@ -95,7 +95,7 @@ func BuildTaskContext(all []tasks.Task, req TaskContextRequest) (TaskContext, er
 	}
 
 	if strings.TrimSpace(req.TaskID) == "" {
-		return TaskContext{}, fmt.Errorf("task_id is required; use task_current to list available tasks")
+		return TaskContext{}, fmt.Errorf("task_id is required; use task action=current to list available tasks")
 	}
 
 	var selected *tasks.Task
@@ -107,7 +107,7 @@ func BuildTaskContext(all []tasks.Task, req TaskContextRequest) (TaskContext, er
 		}
 	}
 	if selected == nil {
-		return TaskContext{}, fmt.Errorf("task %q not found; use task_current to list available tasks", req.TaskID)
+		return TaskContext{}, fmt.Errorf("task %q not found; use task action=current to list available tasks", req.TaskID)
 	}
 
 	grid := buildGoalChain(selected, taskMap)
@@ -119,7 +119,7 @@ func BuildTaskContext(all []tasks.Task, req TaskContextRequest) (TaskContext, er
 	boundaries, nonGoals := extractBoundaries(selected.Body)
 	warnings := buildWarnings(selected, taskMap, blockers)
 	if len(boundaries) == 0 && len(nonGoals) == 0 {
-		warnings = append(warnings, "execution boundaries and non-goals not found in task body; verify scope with task_get or parent task")
+		warnings = append(warnings, "execution boundaries and non-goals not found in task body; verify scope with task action=get or parent task")
 	}
 
 	result := TaskContext{
@@ -273,8 +273,8 @@ func extractBoundaries(body string) ([]string, []string) {
 
 func buildUsageContract() TaskContextUsageContract {
 	return TaskContextUsageContract{
-		IntendedUse: "execution context for a single selected task. Use task_current to discover active tasks, and task_context to get detailed context before editing.",
-		MustNot:     "do not use as a substitute for task_current or full registry dumps; do not fill missing data with speculation; do not mutate task state without task tools",
+		IntendedUse: "execution context for a single selected task. Use task action=current to discover active tasks, and task_context to get detailed context before editing.",
+		MustNot:     "do not use as a substitute for task action=current or full registry dumps; do not fill missing data with speculation; do not mutate task state without task tools",
 		IfTruncated: "if truncated, retry with larger max_nodes or max_bytes, or use task_graph for broader overview",
 	}
 }
@@ -388,7 +388,7 @@ func validateTaskContextRequest(req TaskContextRequest) error {
 		return fmt.Errorf("repo_path is required")
 	}
 	if strings.TrimSpace(req.TaskID) == "" {
-		return fmt.Errorf("task_id is required; use task_current to list available tasks")
+		return fmt.Errorf("task_id is required; use task action=current to list available tasks")
 	}
 	if req.MaxNodes < 0 {
 		return fmt.Errorf("max_nodes must be >= 0, got %d", req.MaxNodes)

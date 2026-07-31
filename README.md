@@ -141,59 +141,63 @@ claude mcp add mcp-ai-helper /path/to/mcp-ai-helper/bin/mcp-ai-helper -- --confi
 
 ## MCP tools
 
-- `config_schema`
-- `config_read`
-- `config_replace`
-- `config_reload`
-- `language_profiles`
-- `language_detect`
-- `list_models`
-- `assistant_guidance`
-- `server_setup_guidance`
-- `query_model`
-- `collect_command_output`
-- `command_get`
-- `filter_command_history`
-- `cleanup_command_history`
-- `run_pipeline`
-- `run_workflow`
-- `snapshot_file`
-- `apply_guarded_replace`
-- `git_commit_owned`
-- `task_add`
-- `task_update`
-- `task_set_status`
-- `task_batch_upsert`
-- `task_search`
-- `task_list`
-- `task_current`
-- `task_get`
-- `task_delete`
-- `issue_add`
-- `issue_list`
-- `issue_accept`
+Six action-dispatch tools carry the everyday surface. Each takes an `action`, and
+the tool's own schema lists the actions it accepts — that list is generated from
+the handlers, so it cannot drift from what the server will answer.
+
+| Tool | Actions |
+| --- | --- |
+| `file` | `read`, `read_many`, `list`, `search`, `snapshot` |
+| `edit` | `replace`, `write` |
+| `command` | `run`, `get`, `filter`, `list`, `abort`, `cleanup`, `health` |
+| `git` | `status`, `diff`, `commit`; with the `git_advanced` layer also `log`, `log_diff`, `blame`, `stash_list`, `branch_list`, `remote_list`, `tag_list`, `prepare_task_worktree` |
+| `task` | `current`, `get`, `list`, `search`, `upsert`, `set_status`, `batch_upsert`, `delete` |
+| `run` | `pipeline`, `workflow`, `schema` |
+
+Alongside them:
+
+- guidance — `assistant_guidance`, `server_setup_guidance`, `tool_manifest`
+- config — `config_schema`, `config_read`, `config_option_set`, `config_option_reset`, `config_reload`
+- models — `list_models`, `query_model`
+- language — `language_profiles`, `language_detect`
+- planning — `plan_task_execution`, `task_packet`, `reasoning_patterns`
+- health — `health`
+- task registry — `task_registry_init`
+
+And behind opt-in layers:
+
+- `task_advanced` — `task_graph`, `task_context`, `task_export`
+- `task_ui` — `task_ui_start`, `task_ui_stop`
+- `web` — `web_search`, `web_fetch`, `fetched_doc_find`, `fetched_doc_read`
+- `issues` — `issue_add`, `issue_list`, `issue_accept`
+- `lake` — `lake_smoke`, `lake_init`
+- `config_advanced` — `feature_list`, `feature_get`, `feature_enable`, `feature_disable`, `feature_reset`
+- `jira` / Confluence integrations — `jira_*`, `conf_*`
+
+Call `tool_manifest` for the surface the running server actually exposes; a
+hardcoded list in a prompt goes stale, this one does not.
 
 The server is intentionally policy-first. Local tools require `repo_path` from the caller; command `cwd` and file `path` are interpreted as repo-relative where applicable. It refuses unsafe command working directories, hash-mismatched file edits, repo path escapes, and broad git staging.
 
 On discovery, clients should read `assistant_guidance`, the `mcp-ai-helper://guidance` resource, or the `mcp-ai-helper-guidance` prompt. They publish the workflow-first operating rules from `~/.mcp-ai-helper/config.yaml`. Use `server_setup_guidance` to learn how to configure the server.
 
-When `layers.issues.enabled` is changed from false to true via `config_replace`, runtime config is reloaded immediately, but newly visible MCP tools such as `issue_add` require MCP client rediscovery/restart if they were hidden at process startup. Keep issues enabled in dev config when feedback intake is expected.
+When `layers.issues.enabled` is changed from false to true via `config_option_set`, runtime config is reloaded immediately, but newly visible MCP tools such as `issue_add` require MCP client rediscovery or restart if they were hidden at process startup. Keep issues enabled in dev config when feedback intake is expected.
 
-Models can configure the helper without a restart: call `config_schema` to understand every field, `config_read` to inspect the sanitized active config, `config_replace` to validate and atomically write a complete YAML config, and `config_reload` after external edits. `config_replace` reloads runtime clients by default. Tool visibility still changes on process restart because MCP clients discover tools at session startup.
+Models can configure the helper without a restart: call `config_schema` to understand every field, `config_read` to inspect the sanitized active config, `config_option_set` and `config_option_reset` to change one option at a time, and `config_reload` after external edits. Tool visibility still changes on process restart because MCP clients discover tools at session startup.
 
 Language profiles give callers deterministic guardrails before code edits. The built-in Go profile tells the model to run `gofmt` only on files whose extension is exactly `.go`, prefer targeted `go test <affected_packages>` before `go test ./...`, run `go vet ./...`, and treat missing imports or undefined symbols as compile blockers. Use `language_detect` with owned files when constructing a workflow.
 
-`run_pipeline` collapses successful command output by default: callers get only `status`, `command_id`, `exit_code`, and a short handoff. Set `compact_output=false` or use `filter_command_history` with `command_id` when details are needed. Failed commands keep relevant error details.
+`run action=pipeline` collapses successful command output by default: callers get only `status`, `command_id`, `exit_code`, and a short handoff. Set `compact_output=false` or use `command action=filter` with `command_id` when details are needed. Failed commands keep relevant error details.
 
-`run_workflow` is the preferred tool for code work. The caller sends the whole task in one request: guarded text edits, checks, task transitions, and optional commit. The workflow stops before commit on edit conflicts or failed checks.
+`run action=workflow` is the preferred tool for code work. The caller sends the whole task in one request: guarded text edits, checks, task transitions, and optional commit. The workflow stops before commit on edit conflicts or failed checks.
 
-`run_workflow` also accepts a stable `steps` DSL so future workflow improvements do not require changing the MCP schema. Supported step tools today include `guarded_replace`, `command`, `task_transition`, `task_batch_upsert`, and `git_commit_owned`. Supported deterministic conditions include `always`, command status or exit code checks such as `steps.check.status == ok`, output checks such as `steps.probe.output_contains text`, file state checks such as `file_exists path`, task status checks such as `tasks.task-024.status == todo`, and changed-file checks.
+`run action=workflow` also accepts a stable `steps` DSL so future workflow improvements do not require changing the MCP schema. Supported step tools today include `guarded_replace`, `command`, `task_transition`, `task_batch_upsert`, and `git_commit_owned`. Supported deterministic conditions include `always`, command status or exit code checks such as `steps.check.status == ok`, output checks such as `steps.probe.output_contains text`, file state checks such as `file_exists path`, task status checks such as `tasks.task-024.status == todo`, and changed-file checks.
 
 Callers should use one long workflow when intermediate results are not needed by the calling model. A single workflow should include command execution, output filters, conditional branches, file edits, focused checks, task status transitions, and commit. Low-level tools are for bootstrapping and cases where a result must change the caller's next decision.
 
 ### Canonical workflow examples
 
-Before an implementation workflow, gather only the context that can change the decision: `task_current`, targeted `read_file` ranges, `snapshot_file` for owned files, and narrow probes such as `rg` or a focused test. Then state the decision in the calling turn: selected task, owned files, forbidden files, acceptance criteria, and the gate that proves closure. Do not build an editing workflow while the contract or owned files are still unclear.
+Before an implementation workflow, gather only the context that can change the decision: `task action=current`, targeted `file action=read` ranges, `file action=snapshot` for owned files, and narrow probes such as `rg` or a focused test. Then state the decision in the calling turn: selected task, owned files, forbidden files, acceptance criteria, and the gate that proves closure. Do not build an editing workflow while the contract or owned files are still unclear.
 
 Successful edit-check-task-done flow:
 
@@ -207,7 +211,7 @@ Successful edit-check-task-done flow:
       "tool": "guarded_replace",
       "args": {
         "path": "internal/example.go",
-        "expected_hash": "<snapshot_file hash>",
+        "expected_hash": "<hash from file action=snapshot>",
         "old": "old unique span",
         "new": "new unique span"
       }
@@ -300,7 +304,7 @@ Use `on_failure=continue` only for probes where a non-zero exit is part of the d
 
 Do not use `close_missing` in task batches unless the caller already has the complete authoritative task set for that repository. Do not set a task to `done` from a documentation-only review, partial green test, skipped check, missing commit, failed commit, or fallback read from stale task storage. For repo tasks with file changes, no owned-files commit means the task is not done. Keep command output compact: prefer focused tests and filtered probes over whole-project tests or raw logs unless the changed surface creates a concrete regression risk.
 
-Command output is retained under `~/.mcp-ai-helper/repos/<project>/logs` by default. Each execution gets a `command_id`, an index entry, and a bounded record file so callers can later use `filter_command_history` with a more precise filter instead of rerunning the command or flooding context. Retention is controlled by `command_policy.log_retention_days`, `log_max_records`, and `log_compress`.
+Command output is retained under `~/.mcp-ai-helper/repos/<project>/logs` by default. Each execution gets a `command_id`, an index entry, and a bounded record file so callers can later use `command action=filter` with a more precise filter instead of rerunning the command or flooding context. Retention is controlled by `command_policy.log_retention_days`, `log_max_records`, and `log_compress`.
 
 For this repository, project task state is canonical in the Lean/Lake registry under `MCPAIHelperProject/`. The task read and mutation tools require the Lean exporter and expose `source`/`projection_source` diagnostics. Legacy `tasks/*.lean` JSON-comment files are not fallback storage and must not be treated as active state.
 
@@ -322,7 +326,7 @@ lake exe task_registry_export --list-active
 lake exe task_registry_export --get task-042
 ```
 
-MCP callers should inspect work with `task_current`/`task_get`, update work with `task_set_status`, `task_upsert`, `task_batch_upsert`, or `task_delete`, then rerun `lake build`. These tools use the Lean registry and expose `source`/`projection_source` diagnostics. Exporter or validation failures are blockers, not permission to read stale legacy task files.
+MCP callers should inspect work with `task action=current` and `task action=get`, update it with `task action=set_status`, `task action=upsert`, `task action=batch_upsert` or `task action=delete`, then rerun `lake build`. These tools use the Lean registry and expose `source`/`projection_source` diagnostics. Exporter or validation failures are blockers, not permission to read stale legacy task files.
 
 ## Production usage
 
