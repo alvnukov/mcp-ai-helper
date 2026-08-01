@@ -13,6 +13,7 @@ import (
 func runGit(ctx context.Context, repo string, args ...string) (string, error) {
 	runCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
+	// #nosec G204 -- the executable is fixed to git and arguments are passed directly without a shell.
 	cmd := exec.CommandContext(runCtx, "git", args...)
 	cmd.Dir = repo
 	var stdout bytes.Buffer
@@ -76,20 +77,20 @@ func trackedOwnedFiles(ctx context.Context, repo string, owned []string) ([]stri
 	return splitLines(out), nil
 }
 
-func ignoredOwnedFiles(ctx context.Context, repo string, files []string) (map[string]bool, error) {
+func ignoredOwnedFiles(ctx context.Context, repo string, files []string) map[string]bool {
 	if len(files) == 0 {
-		return nil, nil
+		return nil
 	}
 	args := append([]string{"check-ignore", "--"}, files...)
 	out, err := runGit(ctx, repo, args...)
 	if err != nil {
-		return nil, nil
+		return nil
 	}
 	ignored := map[string]bool{}
 	for _, line := range splitLines(out) {
 		ignored[line] = true
 	}
-	return ignored, nil
+	return ignored
 }
 
 func gitBranchExists(ctx context.Context, repo string, branch string) bool {

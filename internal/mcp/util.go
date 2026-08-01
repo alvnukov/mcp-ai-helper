@@ -101,8 +101,12 @@ func buildTaskTree(list []tasks.Task) map[string]any {
 }
 
 func buildSubTree(parentID string, children map[string][]tasks.Task) []map[string]any {
-	var result []map[string]any
-	for _, child := range children[parentID] {
+	directChildren := children[parentID]
+	if len(directChildren) == 0 {
+		return nil
+	}
+	result := make([]map[string]any, 0, len(directChildren))
+	for _, child := range directChildren {
 		node := map[string]any{"task": child}
 		if sub := buildSubTree(child.ID, children); sub != nil {
 			node["children"] = sub

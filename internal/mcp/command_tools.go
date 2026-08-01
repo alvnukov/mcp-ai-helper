@@ -1,3 +1,4 @@
+// Package mcp exposes the helper's MCP tool handlers.
 package mcp
 
 import (

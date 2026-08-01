@@ -48,6 +48,7 @@ func resultMap(t *testing.T, r *basemcp.CallToolResult) map[string]any {
 	// actually went wrong.
 	if r == nil {
 		t.Fatal("tool returned no result")
+		return nil
 	}
 	if r.IsError {
 		t.Fatalf("tool returned an error: %s", resultText(t, r))

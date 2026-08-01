@@ -76,7 +76,7 @@ func TestAnthropicCompleteSuccess(t *testing.T) {
 }
 
 func TestAnthropicPostHTTPError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = w.Write([]byte(`{"error":{"message":"bad request"}}`))
 	}))
@@ -91,7 +91,7 @@ func TestAnthropicPostHTTPError(t *testing.T) {
 }
 
 func TestAnthropicPostInvalidJSON(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`not json`))
 	}))
 	defer server.Close()
@@ -105,7 +105,7 @@ func TestAnthropicPostInvalidJSON(t *testing.T) {
 }
 
 func TestAnthropicPostAPIError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"error": map[string]string{"message": "overloaded"},
 		})
@@ -121,7 +121,7 @@ func TestAnthropicPostAPIError(t *testing.T) {
 }
 
 func TestAnthropicPostEmptyContent(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"content": []map[string]string{},
 		})

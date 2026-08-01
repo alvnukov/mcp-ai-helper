@@ -129,7 +129,11 @@ func TestTaskUIStartServesInProcessHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	t.Cleanup(func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			t.Errorf("close task UI response body: %v", closeErr)
+		}
+	})
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatal(err)

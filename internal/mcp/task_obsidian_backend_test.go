@@ -157,7 +157,7 @@ func TestObsidianRoundTrip(t *testing.T) {
 	backend := newObsidianTaskBackend(dir)
 	createdAt := time.Date(2026, 5, 3, 10, 0, 0, 1, time.UTC)
 	updatedAt := time.Date(2026, 5, 4, 11, 0, 0, 2, time.UTC)
-	result, err := backend.Upsert(nil, tasks.AddRequest{
+	result, err := backend.Upsert(t.Context(), tasks.AddRequest{
 		RepoPath: repo,
 		ID:       "test-task", Status: "todo", Title: "Round Trip Test",
 		Priority: "medium", ModelLevel: "low",
@@ -175,7 +175,7 @@ func TestObsidianRoundTrip(t *testing.T) {
 	if result.Task.ID != "test-task" {
 		t.Fatalf("id = %q", result.Task.ID)
 	}
-	got, _, err := backend.Get(nil, repo, "test-task")
+	got, _, err := backend.Get(t.Context(), repo, "test-task")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -300,14 +300,14 @@ func TestObsidianParsesFrontmatterListItemsStartingWithBacktick(t *testing.T) {
 func TestObsidianWriterQuotesColonScalars(t *testing.T) {
 	dir := t.TempDir()
 	backend := newObsidianTaskBackend(dir)
-	_, err := backend.Upsert(nil, tasks.AddRequest{
+	_, err := backend.Upsert(t.Context(), tasks.AddRequest{
 		ID: "colon-title", Status: "todo", Title: "Config: backend selection",
 		AcceptanceCriteria: []string{"Examples: lean and obsidian"},
 	})
 	if err != nil {
 		t.Fatalf("Upsert: %v", err)
 	}
-	got, _, err := backend.Get(nil, "", "colon-title")
+	got, _, err := backend.Get(t.Context(), "", "colon-title")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -322,7 +322,7 @@ func TestObsidianWriterQuotesColonScalars(t *testing.T) {
 func TestObsidianListAllAutoInitializesMissingRegistryDir(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "missing-registry")
 	backend := newObsidianTaskBackend(dir)
-	all, _, err := backend.ListAll(nil, "")
+	all, _, err := backend.ListAll(t.Context(), "")
 	if err != nil {
 		t.Fatalf("ListAll should auto-initialize missing registry dir: %v", err)
 	}
@@ -341,7 +341,7 @@ func TestObsidianListAllAutoInitializesMissingRegistryDir(t *testing.T) {
 func TestObsidianListAllDegradesOnInvalidNote(t *testing.T) {
 	dir := t.TempDir()
 	backend := newObsidianTaskBackend(dir)
-	_, err := backend.Upsert(nil, tasks.AddRequest{ID: "valid", Status: "todo", Title: "Valid"})
+	_, err := backend.Upsert(t.Context(), tasks.AddRequest{ID: "valid", Status: "todo", Title: "Valid"})
 	if err != nil {
 		t.Fatalf("Upsert: %v", err)
 	}
@@ -349,7 +349,7 @@ func TestObsidianListAllDegradesOnInvalidNote(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "invalid.md"), bad, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	all, _, err := backend.ListAll(nil, "")
+	all, _, err := backend.ListAll(t.Context(), "")
 	if err != nil {
 		t.Fatalf("ListAll should degrade instead of failing: %v", err)
 	}
@@ -375,7 +375,7 @@ func TestObsidianListAllAutoHealsFilenameIDMismatch(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "wrong-name.md"), mismatched, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	all, _, err := backend.ListAll(nil, "")
+	all, _, err := backend.ListAll(t.Context(), "")
 	if err != nil {
 		t.Fatalf("ListAll: %v", err)
 	}
@@ -395,7 +395,7 @@ func TestObsidianListAllAutoHealsFilenameIDMismatch(t *testing.T) {
 	if !stringSliceContains(meta.ChangedFiles, "wrong-name.md") || !stringSliceContains(meta.ChangedFiles, "canonical-task.md") {
 		t.Fatalf("changed files = %#v", meta.ChangedFiles)
 	}
-	got, _, err := backend.Get(nil, "", "canonical-task")
+	got, _, err := backend.Get(t.Context(), "", "canonical-task")
 	if err != nil {
 		t.Fatalf("Get canonical-task after auto-heal: %v", err)
 	}
@@ -407,7 +407,7 @@ func TestObsidianListAllAutoHealsFilenameIDMismatch(t *testing.T) {
 func TestObsidianListAllDoesNotOverwriteConflictingMismatch(t *testing.T) {
 	dir := t.TempDir()
 	backend := newObsidianTaskBackend(dir)
-	_, err := backend.Upsert(nil, tasks.AddRequest{ID: "canonical-task", Status: "todo", Title: "Existing Canonical"})
+	_, err := backend.Upsert(t.Context(), tasks.AddRequest{ID: "canonical-task", Status: "todo", Title: "Existing Canonical"})
 	if err != nil {
 		t.Fatalf("Upsert: %v", err)
 	}
@@ -415,7 +415,7 @@ func TestObsidianListAllDoesNotOverwriteConflictingMismatch(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "wrong-name.md"), mismatched, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	all, _, err := backend.ListAll(nil, "")
+	all, _, err := backend.ListAll(t.Context(), "")
 	if err != nil {
 		t.Fatalf("ListAll: %v", err)
 	}
@@ -446,13 +446,13 @@ func stringSliceContains(items []string, want string) bool {
 func TestObsidianDelete(t *testing.T) {
 	dir := t.TempDir()
 	backend := newObsidianTaskBackend(dir)
-	_, err := backend.Upsert(nil, tasks.AddRequest{
+	_, err := backend.Upsert(t.Context(), tasks.AddRequest{
 		ID: "delete-me", Status: "todo", Title: "To Delete",
 	})
 	if err != nil {
 		t.Fatalf("Upsert: %v", err)
 	}
-	_, err = backend.Delete(nil, tasks.DeleteRequest{ID: "delete-me"})
+	_, err = backend.Delete(t.Context(), tasks.DeleteRequest{ID: "delete-me"})
 	if err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
@@ -464,17 +464,17 @@ func TestObsidianDelete(t *testing.T) {
 func TestObsidianSetStatus(t *testing.T) {
 	dir := t.TempDir()
 	backend := newObsidianTaskBackend(dir)
-	_, err := backend.Upsert(nil, tasks.AddRequest{
+	_, err := backend.Upsert(t.Context(), tasks.AddRequest{
 		ID: "status-test", Status: "todo", Title: "Status Test",
 	})
 	if err != nil {
 		t.Fatalf("Upsert: %v", err)
 	}
-	_, err = backend.SetStatus(nil, tasks.StatusRequest{ID: "status-test", Status: "done"})
+	_, err = backend.SetStatus(t.Context(), tasks.StatusRequest{ID: "status-test", Status: "done"})
 	if err != nil {
 		t.Fatalf("SetStatus: %v", err)
 	}
-	task, _, err := backend.Get(nil, "", "status-test")
+	task, _, err := backend.Get(t.Context(), "", "status-test")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -486,7 +486,7 @@ func TestObsidianSetStatus(t *testing.T) {
 func TestObsidianBatchUpsert(t *testing.T) {
 	dir := t.TempDir()
 	backend := newObsidianTaskBackend(dir)
-	result, err := backend.BatchUpsert(nil, tasks.BatchUpsertRequest{
+	result, err := backend.BatchUpsert(t.Context(), tasks.BatchUpsertRequest{
 		Tasks: []tasks.AddRequest{
 			{ID: "batch-1", Status: "todo", Title: "Batch 1"},
 			{ID: "batch-2", Status: "todo", Title: "Batch 2"},
@@ -495,7 +495,7 @@ func TestObsidianBatchUpsert(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BatchUpsert: %v", err)
 	}
-	all, _, err := backend.ListAll(nil, "")
+	all, _, err := backend.ListAll(t.Context(), "")
 	if err != nil {
 		t.Fatalf("ListAll: %v", err)
 	}
@@ -510,10 +510,16 @@ func TestObsidianBatchUpsert(t *testing.T) {
 func TestObsidianListCurrent(t *testing.T) {
 	dir := t.TempDir()
 	backend := newObsidianTaskBackend(dir)
-	backend.Upsert(nil, tasks.AddRequest{ID: "active-1", Status: "todo", Title: "Active 1"})
-	backend.Upsert(nil, tasks.AddRequest{ID: "active-2", Status: "in_progress", Title: "Active 2"})
-	backend.Upsert(nil, tasks.AddRequest{ID: "done-1", Status: "done", Title: "Done 1"})
-	active, _, err := backend.ListCurrent(nil, "")
+	if _, err := backend.Upsert(t.Context(), tasks.AddRequest{ID: "active-1", Status: "todo", Title: "Active 1"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := backend.Upsert(t.Context(), tasks.AddRequest{ID: "active-2", Status: "in_progress", Title: "Active 2"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := backend.Upsert(t.Context(), tasks.AddRequest{ID: "done-1", Status: "done", Title: "Done 1"}); err != nil {
+		t.Fatal(err)
+	}
+	active, _, err := backend.ListCurrent(t.Context(), "")
 	if err != nil {
 		t.Fatalf("ListCurrent: %v", err)
 	}
@@ -535,11 +541,11 @@ func TestObsidianRoundTripAllFields(t *testing.T) {
 		VerificationPlan:   []string{"Write", "Read back", "Compare"},
 		Body:               "This task has every supported field populated.\nSecond paragraph.",
 	}
-	_, err := backend.Upsert(nil, original)
+	_, err := backend.Upsert(t.Context(), original)
 	if err != nil {
 		t.Fatalf("Upsert: %v", err)
 	}
-	got, _, err := backend.Get(nil, "", "full-task")
+	got, _, err := backend.Get(t.Context(), "", "full-task")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -600,7 +606,7 @@ No title here.
 func TestObsidianLeanSpecificFieldsNotDropped(t *testing.T) {
 	dir := t.TempDir()
 	backend := newObsidianTaskBackend(dir)
-	_, err := backend.Upsert(nil, tasks.AddRequest{
+	_, err := backend.Upsert(t.Context(), tasks.AddRequest{
 		ID: "lean-fields", Status: "todo", Title: "Lean Fields Test",
 		Branch:             "feature/lean-fields",
 		WorktreePath:       ".worktrees/lean-fields",
@@ -610,7 +616,7 @@ func TestObsidianLeanSpecificFieldsNotDropped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Upsert: %v", err)
 	}
-	got, _, err := backend.Get(nil, "", "lean-fields")
+	got, _, err := backend.Get(t.Context(), "", "lean-fields")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -685,5 +691,92 @@ func TestTaskListResponseIncludesCountsAndRegistryMetadata(t *testing.T) {
 	}
 	if changedFiles, ok := response["changed_files"].([]string); !ok || !stringSliceContains(changedFiles, "repaired.md") {
 		t.Fatalf("changed_files = %#v", response["changed_files"])
+	}
+}
+
+func TestObsidianBackendConfinesSymlinkedNoteOperations(t *testing.T) {
+	registryDir := t.TempDir()
+	outsidePath := filepath.Join(t.TempDir(), "outside.md")
+	outsideData := []byte("---\nid: escape\ntitle: Outside\nstatus: todo\n---\n")
+	if err := os.WriteFile(outsidePath, outsideData, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	notePath := filepath.Join(registryDir, "escape.md")
+	if err := os.Symlink(outsidePath, notePath); err != nil {
+		t.Fatal(err)
+	}
+	backend := newObsidianTaskBackend(registryDir)
+
+	if _, _, err := backend.Get(t.Context(), "", "escape"); err == nil {
+		t.Fatal("Get unexpectedly followed a note symlink outside the registry")
+	}
+	if _, err := backend.Delete(t.Context(), tasks.DeleteRequest{ID: "escape"}); err == nil {
+		t.Fatal("Delete unexpectedly followed a note symlink outside the registry")
+	}
+	if _, err := backend.Upsert(t.Context(), tasks.AddRequest{
+		ID: "escape", Status: "todo", Title: "Inside",
+	}); err != nil {
+		t.Fatalf("Upsert should safely replace the registry symlink itself: %v", err)
+	}
+
+	info, err := os.Lstat(notePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Fatal("Upsert left the external symlink in place")
+	}
+	outsideAfter, err := os.ReadFile(outsidePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(outsideAfter) != string(outsideData) {
+		t.Fatalf("outside note changed to %q", outsideAfter)
+	}
+}
+
+func TestObsidianAutoHealRejectsSymlinkedRenameTarget(t *testing.T) {
+	registryDir := t.TempDir()
+	outsidePath := filepath.Join(t.TempDir(), "outside.md")
+	outsideData := []byte("outside")
+	if err := os.WriteFile(outsidePath, outsideData, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mismatched := []byte("---\nid: canonical\ntitle: Canonical\nstatus: todo\n---\n")
+	if err := os.WriteFile(filepath.Join(registryDir, "wrong-name.md"), mismatched, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outsidePath, filepath.Join(registryDir, "canonical.md")); err != nil {
+		t.Fatal(err)
+	}
+	backend := newObsidianTaskBackend(registryDir)
+
+	all, _, err := backend.ListAll(t.Context(), "")
+	if err != nil {
+		t.Fatalf("ListAll: %v", err)
+	}
+	if len(all) != 0 {
+		t.Fatalf("conflicting projection should be skipped, got %#v", all)
+	}
+	if _, err := os.Stat(filepath.Join(registryDir, "wrong-name.md")); err != nil {
+		t.Fatalf("source note must remain after rejected auto-heal: %v", err)
+	}
+	outsideAfter, err := os.ReadFile(outsidePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(outsideAfter) != string(outsideData) {
+		t.Fatalf("outside rename target changed to %q", outsideAfter)
+	}
+	meta := backend.(*obsidianTaskBackend).ListMetadata()
+	foundConflictCheck := false
+	for _, diagnostic := range meta.Diagnostics {
+		if diagnostic.Code == "projection_id_conflict_check_failed" {
+			foundConflictCheck = true
+			break
+		}
+	}
+	if !foundConflictCheck {
+		t.Fatalf("diagnostics = %#v", meta.Diagnostics)
 	}
 }

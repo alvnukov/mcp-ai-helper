@@ -196,7 +196,7 @@ func TestLeanMutationRejectsConflictMarkers(t *testing.T) {
 func TestLeanMutationRequiresLeanRegistry(t *testing.T) {
 	repo := t.TempDir()
 	_, err := upsertTask(context.Background(), tasks.AddRequest{RepoPath: repo, ID: "task-999", Status: "todo", Title: "No fallback"}, nil, legacyStoreForTest(t))
-	if err == nil || !strings.Contains(err.Error(), "Lake workspace blocker") {
+	if err == nil || !strings.Contains(err.Error(), "lake workspace blocker") {
 		t.Fatalf("expected missing Lean workspace blocker, got %v", err)
 	}
 }

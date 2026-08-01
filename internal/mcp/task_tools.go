@@ -294,47 +294,6 @@ func taskUpsertItemSchema() map[string]any {
 	}
 }
 
-func mergeTaskUpdate(existing tasks.Task, update tasks.UpdateRequest) tasks.AddRequest {
-	merged := tasks.AddRequest{RepoPath: update.RepoPath, ID: existing.ID, TaskType: existing.TaskType, Branch: existing.Branch, WorktreePath: existing.WorktreePath, ParentID: existing.ParentID, Status: existing.Status, Title: existing.Title, Body: existing.Body, Priority: existing.Priority, ModelLevel: existing.ModelLevel, Tags: existing.Tags, AcceptanceCriteria: existing.AcceptanceCriteria, VerificationPlan: existing.VerificationPlan}
-	if strings.TrimSpace(update.Status) != "" {
-		merged.Status = strings.TrimSpace(update.Status)
-	}
-	if strings.TrimSpace(update.TaskType) != "" {
-		merged.TaskType = strings.TrimSpace(update.TaskType)
-	}
-	if strings.TrimSpace(update.Branch) != "" {
-		merged.Branch = strings.TrimSpace(update.Branch)
-	}
-	if strings.TrimSpace(update.WorktreePath) != "" {
-		merged.WorktreePath = strings.TrimSpace(update.WorktreePath)
-	}
-	if update.ParentID != "" {
-		merged.ParentID = update.ParentID
-	}
-	if strings.TrimSpace(update.Title) != "" {
-		merged.Title = update.Title
-	}
-	if update.Body != "" {
-		merged.Body = update.Body
-	}
-	if strings.TrimSpace(update.Priority) != "" {
-		merged.Priority = strings.TrimSpace(update.Priority)
-	}
-	if strings.TrimSpace(update.ModelLevel) != "" {
-		merged.ModelLevel = strings.TrimSpace(update.ModelLevel)
-	}
-	if update.Tags != nil {
-		merged.Tags = update.Tags
-	}
-	if update.AcceptanceCriteria != nil {
-		merged.AcceptanceCriteria = update.AcceptanceCriteria
-	}
-	if update.VerificationPlan != nil {
-		merged.VerificationPlan = update.VerificationPlan
-	}
-	return merged
-}
-
 type taskListItem struct {
 	ID                      string   `json:"id"`
 	TaskType                string   `json:"task_type,omitempty"`

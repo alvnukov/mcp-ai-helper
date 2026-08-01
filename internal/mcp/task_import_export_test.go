@@ -17,7 +17,7 @@ func TestExportLeanToObsidian(t *testing.T) {
 	dir := t.TempDir()
 	obsidian := newObsidianTaskBackend(dir)
 	lean := newRecordingTaskBackend()
-	result, err := exportTasks(nil, lean, obsidian, "/repo", ImportExportRequest{})
+	result, err := exportTasks(t.Context(), lean, obsidian, "/repo", ImportExportRequest{})
 	if err != nil {
 		t.Fatalf("exportTasks: %v", err)
 	}
@@ -27,7 +27,7 @@ func TestExportLeanToObsidian(t *testing.T) {
 	if result.Added[0].ID != "task-1" {
 		t.Fatalf("id = %q", result.Added[0].ID)
 	}
-	got, _, err := obsidian.Get(nil, "", "task-1")
+	got, _, err := obsidian.Get(t.Context(), "", "task-1")
 	if err != nil {
 		t.Fatalf("Get from obsidian: %v", err)
 	}
@@ -40,7 +40,7 @@ func TestExportDryRun(t *testing.T) {
 	dir := t.TempDir()
 	obsidian := newObsidianTaskBackend(dir)
 	lean := newRecordingTaskBackend()
-	result, err := exportTasks(nil, lean, obsidian, "/repo", ImportExportRequest{DryRun: true})
+	result, err := exportTasks(t.Context(), lean, obsidian, "/repo", ImportExportRequest{DryRun: true})
 	if err != nil {
 		t.Fatalf("exportTasks: %v", err)
 	}
@@ -55,9 +55,11 @@ func TestExportDryRun(t *testing.T) {
 func TestExportConflictDetection(t *testing.T) {
 	dir := t.TempDir()
 	obsidian := newObsidianTaskBackend(dir)
-	obsidian.Upsert(nil, tasks.AddRequest{ID: "task-1", Status: "done", Title: "Existing"})
+	if _, err := obsidian.Upsert(t.Context(), tasks.AddRequest{ID: "task-1", Status: "done", Title: "Existing"}); err != nil {
+		t.Fatal(err)
+	}
 	lean := newRecordingTaskBackend()
-	result, err := exportTasks(nil, lean, obsidian, "/repo", ImportExportRequest{})
+	result, err := exportTasks(t.Context(), lean, obsidian, "/repo", ImportExportRequest{})
 	if !errors.Is(err, ErrDuplicateID) {
 		t.Fatalf("expected duplicate ID error, got %v", err)
 	}
@@ -71,16 +73,16 @@ func TestExportConflictFailsWithoutPartialWrites(t *testing.T) {
 	targetDir := t.TempDir()
 	source := newObsidianTaskBackend(sourceDir)
 	target := newObsidianTaskBackend(targetDir)
-	if _, err := source.Upsert(nil, tasks.AddRequest{ID: "a-new", Status: "todo", Title: "New"}); err != nil {
+	if _, err := source.Upsert(t.Context(), tasks.AddRequest{ID: "a-new", Status: "todo", Title: "New"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := source.Upsert(nil, tasks.AddRequest{ID: "b-existing", Status: "todo", Title: "Existing From Source"}); err != nil {
+	if _, err := source.Upsert(t.Context(), tasks.AddRequest{ID: "b-existing", Status: "todo", Title: "Existing From Source"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := target.Upsert(nil, tasks.AddRequest{ID: "b-existing", Status: "done", Title: "Existing Target"}); err != nil {
+	if _, err := target.Upsert(t.Context(), tasks.AddRequest{ID: "b-existing", Status: "done", Title: "Existing Target"}); err != nil {
 		t.Fatal(err)
 	}
-	_, err := exportTasks(nil, source, target, "/repo", ImportExportRequest{})
+	_, err := exportTasks(t.Context(), source, target, "/repo", ImportExportRequest{})
 	if !errors.Is(err, ErrDuplicateID) {
 		t.Fatalf("expected duplicate ID error, got %v", err)
 	}
@@ -100,7 +102,7 @@ func TestExportRoundTrip(t *testing.T) {
 	be2 := newObsidianTaskBackend(dir2)
 	createdAt := time.Date(2026, 5, 1, 12, 0, 0, 123, time.UTC)
 	updatedAt := time.Date(2026, 5, 2, 13, 0, 0, 456, time.UTC)
-	be1.Upsert(nil, tasks.AddRequest{
+	if _, err := be1.Upsert(t.Context(), tasks.AddRequest{
 		RepoPath: repo,
 		ID:       "roundtrip", Status: "todo", Title: "Round Trip",
 		Priority: "high", ModelLevel: "medium",
@@ -112,12 +114,14 @@ func TestExportRoundTrip(t *testing.T) {
 		VerificationPlan:   []string{"Export", "Import", "Verify"},
 		CreatedAt:          createdAt,
 		UpdatedAt:          updatedAt,
-	})
-	_, err := exportTasks(nil, be1, be2, repo, ImportExportRequest{})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := exportTasks(t.Context(), be1, be2, repo, ImportExportRequest{})
 	if err != nil {
 		t.Fatalf("first export: %v", err)
 	}
-	got, _, err := be2.Get(nil, repo, "roundtrip")
+	got, _, err := be2.Get(t.Context(), repo, "roundtrip")
 	if err != nil {
 		t.Fatalf("Get from be2: %v", err)
 	}

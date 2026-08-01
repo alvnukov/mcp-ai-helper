@@ -121,7 +121,7 @@ func registerJiraTools(srv *server.MCPServer, deps *Server) {
 		if err != nil {
 			return safeError(deps, err), nil
 		}
-		issues, err := jc.SearchIssues(args.JQL, args.MaxResults)
+		issues, err := jc.SearchIssuesContext(ctx, args.JQL, args.MaxResults)
 		if err != nil {
 			return safeError(deps, err), nil
 		}
@@ -164,11 +164,14 @@ func registerJiraTools(srv *server.MCPServer, deps *Server) {
 		if err != nil {
 			return safeError(deps, err), nil
 		}
-		issue, err := jc.GetIssue(args.IssueKey)
+		issue, err := jc.GetIssueContext(ctx, args.IssueKey)
 		if err != nil {
 			return safeError(deps, err), nil
 		}
-		transitions, _ := jc.GetTransitions(args.IssueKey)
+		transitions, err := jc.GetTransitionsContext(ctx, args.IssueKey)
+		if err != nil {
+			return safeError(deps, err), nil
+		}
 		transitionNames := make([]string, 0, len(transitions))
 		for _, t := range transitions {
 			transitionNames = append(transitionNames, t.Name)
@@ -199,7 +202,7 @@ func registerJiraTools(srv *server.MCPServer, deps *Server) {
 			Key   string      `json:"key"`
 			Value interface{} `json:"value"`
 		}
-		if err := jc.GetIssueProperty(args.IssueKey, args.PropertyKey, &wrapper); err != nil {
+		if err := jc.GetIssuePropertyContext(ctx, args.IssueKey, args.PropertyKey, &wrapper); err != nil {
 			return safeError(deps, err), nil
 		}
 		return structured(map[string]any{
@@ -272,12 +275,12 @@ func registerJiraTools(srv *server.MCPServer, deps *Server) {
 			return safeError(deps, fmt.Errorf("no fields to update")), nil
 		}
 		if len(fields) > 0 {
-			if err := jc.UpdateIssue(args.IssueKey, fields); err != nil {
+			if err := jc.UpdateIssueContext(ctx, args.IssueKey, fields); err != nil {
 				return safeError(deps, err), nil
 			}
 		}
 		for k, v := range props {
-			if err := jc.SetIssueProperty(args.IssueKey, k, v); err != nil {
+			if err := jc.SetIssuePropertyContext(ctx, args.IssueKey, k, v); err != nil {
 				return safeError(deps, err), nil
 			}
 		}
@@ -304,7 +307,7 @@ func registerJiraTools(srv *server.MCPServer, deps *Server) {
 		if err != nil {
 			return safeError(deps, err), nil
 		}
-		if err := jc.DoTransition(args.IssueKey, args.TransitionName); err != nil {
+		if err := jc.DoTransitionContext(ctx, args.IssueKey, args.TransitionName); err != nil {
 			return safeError(deps, err), nil
 		}
 		return structured(map[string]any{"status": "ok", "issue_key": args.IssueKey, "transition": args.TransitionName})
@@ -328,12 +331,12 @@ func registerJiraTools(srv *server.MCPServer, deps *Server) {
 			return safeError(deps, err), nil
 		}
 		if args.Unassign {
-			if err := jc.UnassignIssue(args.IssueKey); err != nil {
+			if err := jc.UnassignIssueContext(ctx, args.IssueKey); err != nil {
 				return safeError(deps, err), nil
 			}
 			return structured(map[string]any{"status": "ok", "issue_key": args.IssueKey, "assigned": false})
 		}
-		if err := jc.AssignIssue(args.IssueKey, args.Username); err != nil {
+		if err := jc.AssignIssueContext(ctx, args.IssueKey, args.Username); err != nil {
 			return safeError(deps, err), nil
 		}
 		return structured(map[string]any{"status": "ok", "issue_key": args.IssueKey, "assigned": args.Username})
@@ -360,7 +363,7 @@ func registerJiraTools(srv *server.MCPServer, deps *Server) {
 		if err != nil {
 			return safeError(deps, err), nil
 		}
-		records, err := jc.GetWorklogs(args.IssueKey, since, until)
+		records, err := jc.GetWorklogsContext(ctx, args.IssueKey, since, until)
 		if err != nil {
 			return safeError(deps, err), nil
 		}
@@ -394,7 +397,7 @@ func registerJiraTools(srv *server.MCPServer, deps *Server) {
 		if err != nil {
 			return safeError(deps, err), nil
 		}
-		entries, err := jc.GetWorklogsByUser(args.Username, since, until)
+		entries, err := jc.GetWorklogsByUserContext(ctx, args.Username, since, until)
 		if err != nil {
 			return safeError(deps, err), nil
 		}
@@ -454,7 +457,7 @@ func registerJiraTools(srv *server.MCPServer, deps *Server) {
 			}
 			started = &t
 		}
-		record, err := jc.AddWorklog(args.IssueKey, args.TimeSpent, args.Comment, started)
+		record, err := jc.AddWorklogContext(ctx, args.IssueKey, args.TimeSpent, args.Comment, started)
 		if err != nil {
 			return safeError(deps, err), nil
 		}
@@ -479,7 +482,7 @@ func registerJiraTools(srv *server.MCPServer, deps *Server) {
 		if err != nil {
 			return safeError(deps, err), nil
 		}
-		if err := jc.UpdateWorklog(args.IssueKey, args.WorklogID, args.TimeSpent, args.Comment); err != nil {
+		if err := jc.UpdateWorklogContext(ctx, args.IssueKey, args.WorklogID, args.TimeSpent, args.Comment); err != nil {
 			return safeError(deps, err), nil
 		}
 		return structured(map[string]any{"status": "ok", "issue_key": args.IssueKey, "worklog_id": args.WorklogID})
@@ -501,7 +504,7 @@ func registerJiraTools(srv *server.MCPServer, deps *Server) {
 		if err != nil {
 			return safeError(deps, err), nil
 		}
-		if err := jc.DeleteWorklog(args.IssueKey, args.WorklogID); err != nil {
+		if err := jc.DeleteWorklogContext(ctx, args.IssueKey, args.WorklogID); err != nil {
 			return safeError(deps, err), nil
 		}
 		return structured(map[string]any{"status": "ok", "issue_key": args.IssueKey, "deleted_worklog_id": args.WorklogID})

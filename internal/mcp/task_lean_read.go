@@ -20,7 +20,8 @@ const (
 	leanTaskRegistryTimeoutSeconds = 300
 )
 
-var ErrLeanTaskExporterMissing = errors.New("Lean task registry exporter is not configured")
+// ErrLeanTaskExporterMissing indicates that the configured workspace cannot expose task registry data.
+var ErrLeanTaskExporterMissing = errors.New("lean task registry exporter is not configured")
 
 type leanTaskListPayload struct {
 	Tasks []leanTaskProjection `json:"tasks"`
@@ -44,6 +45,7 @@ type leanTaskProjection struct {
 	UpdatedAt          string   `json:"updated_at"`
 }
 
+// ErrNoLakeWorkspace indicates that task registry reads cannot locate a Lean Lake workspace.
 var ErrNoLakeWorkspace = errors.New("no Lake workspace detected; run lake_init to bootstrap a Lean project")
 
 func readCurrentTasks(ctx context.Context, repoPath string, commands *command.Runner, _ *tasks.Store) ([]tasks.Task, string, error) {
@@ -115,7 +117,7 @@ func readLeanTaskList(ctx context.Context, repoPath string, commands *command.Ru
 	if commands != nil {
 		if err := validateLeanRegistryBuild(ctx, repoPath, commands, "before read"); err != nil {
 			lake.ResetServerRPC(repoPath)
-			return nil, true, fmt.Errorf("Lean task read failed: %w", err)
+			return nil, true, fmt.Errorf("lean task read failed: %w", err)
 		}
 	}
 	active, err := leanTaskListMode(args)
@@ -155,7 +157,7 @@ func readLeanTask(ctx context.Context, repoPath string, id string, commands *com
 	if commands != nil {
 		if err := validateLeanRegistryBuild(ctx, repoPath, commands, "before read"); err != nil {
 			lake.ResetServerRPC(repoPath)
-			return tasks.Task{}, true, fmt.Errorf("Lean task read failed: %w", err)
+			return tasks.Task{}, true, fmt.Errorf("lean task read failed: %w", err)
 		}
 	}
 	envelope, err := callLeanTaskRead(ctx, repoPath, "MCPAIHelperProject.TaskRegistryExport.taskGet", "task.get", map[string]string{"id": id})
@@ -193,7 +195,7 @@ func callLeanTaskRead(ctx context.Context, repoPath string, method string, opera
 		return leanRegistryEnvelope{}, err
 	}
 	if result.Blocker != "" {
-		return leanRegistryEnvelope{}, fmt.Errorf("Lean task read blocker: %s", result.Blocker)
+		return leanRegistryEnvelope{}, fmt.Errorf("lean task read blocker: %s", result.Blocker)
 	}
 	var envelope leanRegistryEnvelope
 	if err := json.Unmarshal(result.Result, &envelope); err != nil {
@@ -206,7 +208,7 @@ func callLeanTaskRead(ctx context.Context, repoPath string, method string, opera
 		return leanRegistryEnvelope{}, fmt.Errorf("unexpected Lean task read operation: %q", envelope.Operation)
 	}
 	if !envelope.OK {
-		return leanRegistryEnvelope{}, fmt.Errorf("Lean task read rejected: %s", leanRegistryDiagnosticsMessage(envelope.Diagnostics))
+		return leanRegistryEnvelope{}, fmt.Errorf("lean task read rejected: %s", leanRegistryDiagnosticsMessage(envelope.Diagnostics))
 	}
 	return envelope, nil
 }

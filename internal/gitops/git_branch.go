@@ -9,21 +9,25 @@ import (
 	"strings"
 )
 
+// StashRequest selects the repository whose stash entries should be listed.
 type StashRequest struct {
 	RepoPath string `json:"repo_path"`
 }
 
+// StashEntry describes one entry in a repository stash stack.
 type StashEntry struct {
 	Index   int    `json:"index"`
 	Hash    string `json:"hash"`
 	Message string `json:"message"`
 }
 
+// StashResult contains the parsed stash stack and its total size.
 type StashResult struct {
 	Entries []StashEntry `json:"entries"`
 	Total   int          `json:"total"`
 }
 
+// StashList returns the repository stash stack without modifying it.
 func StashList(ctx context.Context, req StashRequest) (StashResult, error) {
 	if strings.TrimSpace(req.RepoPath) == "" {
 		return StashResult{}, errors.New("repo_path is required")
@@ -51,18 +55,22 @@ func StashList(ctx context.Context, req StashRequest) (StashResult, error) {
 			Hash:    parts[0],
 			Message: parts[2],
 		}
-		fmt.Sscanf(parts[1], "stash@{%d}", &entry.Index)
+		if _, err := fmt.Sscanf(parts[1], "stash@{%d}", &entry.Index); err != nil {
+			continue
+		}
 		result.Entries = append(result.Entries, entry)
 	}
 	result.Total = len(result.Entries)
 	return result, nil
 }
 
+// BranchRequest selects local branches and optionally remote-tracking branches.
 type BranchRequest struct {
 	RepoPath string `json:"repo_path"`
 	All      bool   `json:"all,omitempty"`
 }
 
+// Branch describes one local or remote-tracking branch reference.
 type Branch struct {
 	Name      string `json:"name"`
 	IsCurrent bool   `json:"is_current"`
@@ -70,11 +78,13 @@ type Branch struct {
 	Hash      string `json:"hash"`
 }
 
+// BranchResult contains branch references and the current branch name.
 type BranchResult struct {
 	Branches []Branch `json:"branches"`
 	Current  string   `json:"current"`
 }
 
+// BranchList returns structured branch references for a repository.
 func BranchList(ctx context.Context, req BranchRequest) (BranchResult, error) {
 	if strings.TrimSpace(req.RepoPath) == "" {
 		return BranchResult{}, errors.New("repo_path is required")
@@ -117,20 +127,24 @@ func BranchList(ctx context.Context, req BranchRequest) (BranchResult, error) {
 	return result, nil
 }
 
+// RemoteRequest selects the repository whose remotes should be listed.
 type RemoteRequest struct {
 	RepoPath string `json:"repo_path"`
 }
 
+// Remote describes one configured remote and its fetch URL.
 type Remote struct {
 	Name  string `json:"name"`
 	URL   string `json:"url"`
 	Fetch string `json:"fetch,omitempty"`
 }
 
+// RemoteResult contains the configured repository remotes.
 type RemoteResult struct {
 	Remotes []Remote `json:"remotes"`
 }
 
+// RemoteList returns structured remote configuration without modifying it.
 func RemoteList(ctx context.Context, req RemoteRequest) (RemoteResult, error) {
 	if strings.TrimSpace(req.RepoPath) == "" {
 		return RemoteResult{}, errors.New("repo_path is required")
@@ -160,10 +174,11 @@ func RemoteList(ctx context.Context, req RemoteRequest) (RemoteResult, error) {
 		if _, ok := remotes[name]; !ok {
 			remotes[name] = &Remote{Name: name}
 		}
-		if direction == "(fetch)" {
+		switch direction {
+		case "(fetch)":
 			remotes[name].URL = url
 			remotes[name].Fetch = url
-		} else if direction == "(push)" {
+		case "(push)":
 			remotes[name].URL = url
 		}
 	}
@@ -175,11 +190,13 @@ func RemoteList(ctx context.Context, req RemoteRequest) (RemoteResult, error) {
 	return result, nil
 }
 
+// TagRequest selects repository tags, optionally filtered by a Git glob pattern.
 type TagRequest struct {
 	RepoPath string `json:"repo_path"`
 	Pattern  string `json:"pattern,omitempty"`
 }
 
+// Tag describes one lightweight or annotated repository tag.
 type Tag struct {
 	Name        string `json:"name"`
 	Hash        string `json:"hash"`
@@ -187,11 +204,13 @@ type Tag struct {
 	Message     string `json:"message,omitempty"`
 }
 
+// TagResult contains matching repository tags and their returned count.
 type TagResult struct {
 	Tags  []Tag `json:"tags"`
 	Total int   `json:"total"`
 }
 
+// TagList returns structured repository tags matching the optional pattern.
 func TagList(ctx context.Context, req TagRequest) (TagResult, error) {
 	if strings.TrimSpace(req.RepoPath) == "" {
 		return TagResult{}, errors.New("repo_path is required")

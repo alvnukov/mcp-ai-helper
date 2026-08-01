@@ -169,6 +169,68 @@ func TestBuildTaskContext_MaxNodesTruncation(t *testing.T) {
 	}
 }
 
+func TestApplyContextLimits(t *testing.T) {
+	item := func(id string) TaskContextItem { return TaskContextItem{ID: id} }
+	t.Run("goal chain keeps closest", func(t *testing.T) {
+		ctx := applyContextLimits(TaskContext{}, []TaskContextItem{item("g1"), item("g2"), item("g3")}, nil, 2)
+		if len(ctx.GoalChain) != 2 || ctx.GoalChain[0].ID != "g2" || ctx.GoalChain[1].ID != "g3" || ctx.Truncated.OmittedGoalChain != 1 {
+			t.Fatalf("goal chain = %#v, truncation = %#v", ctx.GoalChain, ctx.Truncated)
+		}
+	})
+	t.Run("prerequisites keep first", func(t *testing.T) {
+		ctx := applyContextLimits(TaskContext{}, nil, []TaskContextItem{item("p1"), item("p2"), item("p3")}, 2)
+		if len(ctx.Prerequisites) != 2 || ctx.Prerequisites[0].ID != "p1" || ctx.Prerequisites[1].ID != "p2" || ctx.Truncated.OmittedPrerequisites != 1 {
+			t.Fatalf("prerequisites = %#v, truncation = %#v", ctx.Prerequisites, ctx.Truncated)
+		}
+	})
+	t.Run("planned next has priority", func(t *testing.T) {
+		ctx := TaskContext{PlannedNext: []TaskContextItem{item("p1"), item("p2")}, AlreadyDone: []TaskContextItem{item("d1"), item("d2")}}
+		ctx = applyContextLimits(ctx, nil, nil, 3)
+		if len(ctx.PlannedNext) != 2 || len(ctx.AlreadyDone) != 1 || ctx.AlreadyDone[0].ID != "d1" || ctx.Truncated.OmittedPlannedNext != 0 || ctx.Truncated.OmittedAlreadyDone != 1 {
+			t.Fatalf("related = %#v/%#v, truncation = %#v", ctx.PlannedNext, ctx.AlreadyDone, ctx.Truncated)
+		}
+	})
+	t.Run("planned alone consumes budget", func(t *testing.T) {
+		ctx := TaskContext{PlannedNext: []TaskContextItem{item("p1"), item("p2"), item("p3")}, AlreadyDone: []TaskContextItem{item("d1"), item("d2")}}
+		ctx = applyContextLimits(ctx, nil, nil, 2)
+		if len(ctx.PlannedNext) != 2 || len(ctx.AlreadyDone) != 0 || ctx.Truncated.OmittedPlannedNext != 1 || ctx.Truncated.OmittedAlreadyDone != 2 {
+			t.Fatalf("related = %#v/%#v, truncation = %#v", ctx.PlannedNext, ctx.AlreadyDone, ctx.Truncated)
+		}
+	})
+}
+
+func TestEnforceContextMaxBytes(t *testing.T) {
+	ctx := TaskContext{
+		NonGoals:           []string{"non-goal-1", "non-goal-2"},
+		Boundaries:         []string{"boundary-1", "boundary-2"},
+		VerificationPlan:   []string{"verification-1", "verification-2"},
+		AcceptanceCriteria: []string{"acceptance-1", "acceptance-2"},
+		Warnings:           []string{"warning-1", "warning-2"},
+	}
+	result := enforceContextMaxBytes(ctx, 1)
+	if result.Truncated == nil || !strings.Contains(result.Truncated.Reason, "max_bytes") {
+		t.Fatalf("truncation = %#v", result.Truncated)
+	}
+	if result.Truncated.OmittedNonGoals != len(ctx.NonGoals)-len(result.NonGoals) ||
+		result.Truncated.OmittedBoundaries != len(ctx.Boundaries)-len(result.Boundaries) ||
+		result.Truncated.OmittedVerificationPlan != len(ctx.VerificationPlan)-len(result.VerificationPlan) ||
+		result.Truncated.OmittedAcceptanceCriteria != len(ctx.AcceptanceCriteria)-len(result.AcceptanceCriteria) ||
+		result.Truncated.OmittedWarnings != len(ctx.Warnings)-len(result.Warnings) {
+		t.Fatalf("omissions do not match retained sections: %#v", result.Truncated)
+	}
+	if result.Truncated.OmittedNonGoals+result.Truncated.OmittedBoundaries+result.Truncated.OmittedVerificationPlan+result.Truncated.OmittedAcceptanceCriteria+result.Truncated.OmittedWarnings == 0 {
+		t.Fatal("expected removable sections to be omitted")
+	}
+}
+
+func TestEnforceContextMaxBytesAppendsReason(t *testing.T) {
+	ctx := TaskContext{NonGoals: []string{"non-goal"}, Truncated: &TaskContextTruncation{Reason: "max_nodes limit reached (1)"}}
+	result := enforceContextMaxBytes(ctx, 1)
+	if !strings.Contains(result.Truncated.Reason, "max_nodes limit reached (1)") || !strings.Contains(result.Truncated.Reason, "max_bytes limit reached (1)") {
+		t.Fatalf("reason = %q", result.Truncated.Reason)
+	}
+}
+
 // === Validation ===
 
 func TestValidateTaskContextRequest(t *testing.T) {

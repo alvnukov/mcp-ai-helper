@@ -118,7 +118,7 @@ func setTaskStatus(ctx context.Context, req tasks.StatusRequest, commands *comma
 
 func ensureLeanTaskRegistryBootstrap(ctx context.Context, repoPath string, commands *command.Runner) error {
 	if commands == nil {
-		return errors.New("Lake workspace blocker: command runner is required for Lean task registry bootstrap")
+		return errors.New("lake workspace blocker: command runner is required for Lean task registry bootstrap")
 	}
 	absPath, err := filepath.Abs(strings.TrimSpace(repoPath))
 	if err != nil {
@@ -265,7 +265,7 @@ func callLeanTaskMutation(ctx context.Context, repoPath string, commands *comman
 		return leanRegistryEnvelope{}, err
 	}
 	if result.Blocker != "" {
-		return leanRegistryEnvelope{}, fmt.Errorf("Lean task mutation blocker: %s", result.Blocker)
+		return leanRegistryEnvelope{}, fmt.Errorf("lean task mutation blocker: %s", result.Blocker)
 	}
 	var envelope leanRegistryEnvelope
 	if err := json.Unmarshal(result.Result, &envelope); err != nil {
@@ -278,10 +278,10 @@ func callLeanTaskMutation(ctx context.Context, repoPath string, commands *comman
 		return leanRegistryEnvelope{}, fmt.Errorf("unexpected Lean task mutation operation: %q", envelope.Operation)
 	}
 	if !envelope.OK {
-		return leanRegistryEnvelope{}, fmt.Errorf("Lean task mutation rejected: %s", leanRegistryDiagnosticsMessage(envelope.Diagnostics))
+		return leanRegistryEnvelope{}, fmt.Errorf("lean task mutation rejected: %s", leanRegistryDiagnosticsMessage(envelope.Diagnostics))
 	}
 	if !envelope.Validation.Checked {
-		return leanRegistryEnvelope{}, errors.New("Lean task mutation envelope did not report checked validation")
+		return leanRegistryEnvelope{}, errors.New("lean task mutation envelope did not report checked validation")
 	}
 	return envelope, nil
 }
@@ -325,7 +325,7 @@ func writeLeanActiveTasksSource(ctx context.Context, repoPath string, source str
 		return err
 	}
 	if result.Blocker != "" {
-		return fmt.Errorf("Lean active tasks rollback blocker: %s", result.Blocker)
+		return fmt.Errorf("lean active tasks rollback blocker: %s", result.Blocker)
 	}
 	return nil
 }
@@ -364,7 +364,7 @@ func validateLeanTaskTransitionWithServer(ctx context.Context, repoPath string, 
 		return nil, "", err
 	}
 	if serverTask.ID != projected.ID || serverTask.Status != projected.Status {
-		return nil, "", fmt.Errorf("Lean task transition mismatch: server=%s/%s projected=%s/%s", serverTask.ID, serverTask.Status, projected.ID, projected.Status)
+		return nil, "", fmt.Errorf("lean task transition mismatch: server=%s/%s projected=%s/%s", serverTask.ID, serverTask.Status, projected.ID, projected.Status)
 	}
 	return append([]string(nil), envelope.ChangedFiles...), envelope.Validation.Summary, nil
 }

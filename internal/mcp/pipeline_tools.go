@@ -81,13 +81,13 @@ func runActionWorkflow(ctx context.Context, req basemcp.CallToolRequest, deps *S
 	if err := bind(req, &args); err != nil {
 		return basemcp.NewToolResultError(err.Error()), nil
 	}
-	if len(args.OwnedFiles) > 0 && len(args.WorkflowRequest.Commit.Files) == 0 {
-		args.WorkflowRequest.Commit.Files = args.OwnedFiles
-		args.WorkflowRequest.Commit.Enabled = true
+	if len(args.OwnedFiles) > 0 && len(args.Commit.Files) == 0 {
+		args.Commit.Files = args.OwnedFiles
+		args.Commit.Enabled = true
 	}
-	if args.CommitMessage != "" && args.WorkflowRequest.Commit.Message == "" {
-		args.WorkflowRequest.Commit.Message = args.CommitMessage
-		args.WorkflowRequest.Commit.Enabled = true
+	if args.CommitMessage != "" && args.Commit.Message == "" {
+		args.Commit.Message = args.CommitMessage
+		args.Commit.Enabled = true
 	}
 	if args.Preview {
 		preview := map[string]any{"preview": true, "repo_path": args.RepoPath}

@@ -93,8 +93,12 @@ func parseSetupArgs(name string, argv []string) (setup.Options, error) {
 	noSkills := fs.Bool("no-skills", false, "leave the mcp-ai-helper skills alone")
 	configPath := fs.String("config", "", "pin --config PATH in the command line the client runs; omit to let the server use its own default")
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), "Usage: mcp-ai-helper %s -c claude,codex,opencode [flags]\n\n", name)
-		fmt.Fprintf(fs.Output(), "The MCP server entry, the instructions block and the skills are %s each client.\n\n", past)
+		if _, err := fmt.Fprintf(fs.Output(), "Usage: mcp-ai-helper %s -c claude,codex,opencode [flags]\n\n", name); err != nil {
+			return
+		}
+		if _, err := fmt.Fprintf(fs.Output(), "The MCP server entry, the instructions block and the skills are %s each client.\n\n", past); err != nil {
+			return
+		}
 		fs.PrintDefaults()
 	}
 
@@ -133,13 +137,15 @@ func (l *clientList) Set(value string) error {
 
 func usage() {
 	out := flag.CommandLine.Output()
-	fmt.Fprint(out, `Usage: mcp-ai-helper [flags]              start the stdio MCP server
+	if _, err := fmt.Fprint(out, `Usage: mcp-ai-helper [flags]              start the stdio MCP server
        mcp-ai-helper setup -c CLIENTS     register the server in your AI clients
        mcp-ai-helper remove -c CLIENTS    remove it again (alias: uninstall)
 
 Clients: claude, codex, opencode. Run a subcommand with -h for its flags.
 
 Server flags:
-`)
+`); err != nil {
+		return
+	}
 	flag.PrintDefaults()
 }

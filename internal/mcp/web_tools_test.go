@@ -41,7 +41,7 @@ func webConfig(t *testing.T, contentType string) *config.Config {
 }
 
 func TestWebFetchToolReturnsBoundedMetadata(t *testing.T) {
-	srvHTTP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srvHTTP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		_, _ = w.Write([]byte("<html><body>full page body must stay cached</body></html>"))
 	}))
@@ -96,7 +96,7 @@ func TestWebToolDescriptionsExposeEfficientWorkflow(t *testing.T) {
 }
 
 func TestFetchedDocReadAndFindToolsReturnBoundedFragments(t *testing.T) {
-	srvHTTP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srvHTTP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		_, _ = w.Write([]byte("alpha needle beta needle gamma needle delta"))
 	}))

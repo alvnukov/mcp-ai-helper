@@ -2,6 +2,7 @@ package fileops
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -899,5 +900,145 @@ func TestWriteFileRequiresContent(t *testing.T) {
 	_, err := WriteFile(WriteFileRequest{Path: filepath.Join(dir, "f.txt")})
 	if err == nil {
 		t.Fatal("expected error for empty content")
+	}
+}
+
+func TestFileMutationsRejectUnsafeMode(t *testing.T) {
+	testCases := []struct {
+		name string
+		mode int
+	}{
+		{name: "negative", mode: -1},
+		{name: "special bit", mode: 0o1000},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if _, err := CreateIfAbsent(CreateIfAbsentRequest{RepoPath: dir, Path: "create.txt", Content: "x", Mode: testCase.mode}); err == nil {
+				t.Fatal("CreateIfAbsent accepted unsafe mode")
+			}
+			if _, err := WriteFile(WriteFileRequest{RepoPath: dir, Path: "write.txt", Content: "x", Mode: testCase.mode}); err == nil {
+				t.Fatal("WriteFile accepted unsafe mode")
+			}
+		})
+	}
+}
+
+func TestRepoMutationsRejectSymlinkedFileEscape(t *testing.T) {
+	repoPath := t.TempDir()
+	outsidePath := filepath.Join(t.TempDir(), "outside.txt")
+	original := []byte("original\n")
+	if err := os.WriteFile(outsidePath, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outsidePath, filepath.Join(repoPath, "escape.txt")); err != nil {
+		t.Fatal(err)
+	}
+
+	operations := []struct {
+		name string
+		run  func() error
+	}{
+		{
+			name: "guarded replace",
+			run: func() error {
+				_, err := ApplyGuardedReplace(ReplaceRequest{
+					RepoPath: repoPath, Path: "escape.txt", ExpectedHash: Hash(original),
+					Old: "original", New: "changed",
+				})
+				return err
+			},
+		},
+		{
+			name: "create if absent",
+			run: func() error {
+				_, err := CreateIfAbsent(CreateIfAbsentRequest{
+					RepoPath: repoPath, Path: "escape.txt", Content: "changed",
+				})
+				return err
+			},
+		},
+		{
+			name: "append unique",
+			run: func() error {
+				_, err := AppendUnique(AppendUniqueRequest{
+					RepoPath: repoPath, Path: "escape.txt", ExpectedHash: Hash(original), Content: "changed",
+				})
+				return err
+			},
+		},
+		{
+			name: "delete exact block",
+			run: func() error {
+				_, err := DeleteExactBlock(DeleteExactBlockRequest{
+					RepoPath: repoPath, Path: "escape.txt", ExpectedHash: Hash(original), Block: "original\n",
+				})
+				return err
+			},
+		},
+		{
+			name: "write file",
+			run: func() error {
+				_, err := WriteFile(WriteFileRequest{
+					RepoPath: repoPath, Path: "escape.txt", Content: "changed",
+				})
+				return err
+			},
+		},
+	}
+
+	for _, operation := range operations {
+		t.Run(operation.name, func(t *testing.T) {
+			if err := operation.run(); err == nil {
+				t.Fatal("operation unexpectedly followed a symlink outside the repository")
+			}
+			data, err := os.ReadFile(outsidePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(data) != string(original) {
+				t.Fatalf("outside file changed to %q", data)
+			}
+		})
+	}
+}
+
+func TestRepoOperationsRejectSymlinkedParentEscape(t *testing.T) {
+	repoPath := t.TempDir()
+	outsideDir := t.TempDir()
+	if err := os.Symlink(outsideDir, filepath.Join(repoPath, "linked")); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := WriteFile(WriteFileRequest{
+		RepoPath: repoPath,
+		Path:     "linked/nested/file.txt",
+		Content:  "changed",
+	}); err == nil {
+		t.Fatal("WriteFile unexpectedly created a file through a symlinked parent")
+	}
+	if _, err := CreateIfAbsent(CreateIfAbsentRequest{
+		RepoPath: repoPath,
+		Path:     "linked/file.txt",
+		Content:  "changed",
+	}); err == nil {
+		t.Fatal("CreateIfAbsent unexpectedly created a file through a symlinked parent")
+	}
+	if _, err := ListDir(ListDirRequest{RepoPath: repoPath, Path: "linked"}); err == nil {
+		t.Fatal("ListDir unexpectedly traversed a symlinked directory")
+	}
+	search, err := SearchFilesInRepo(repoPath, "linked", "secret", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if search.Total != 0 {
+		t.Fatalf("SearchFilesInRepo returned %d matches outside the repository", search.Total)
+	}
+	if _, err := os.Stat(filepath.Join(outsideDir, "file.txt")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("outside file error = %v, want not exist", err)
+	}
+	if _, err := os.Stat(filepath.Join(outsideDir, "nested", "file.txt")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("outside nested file error = %v, want not exist", err)
 	}
 }

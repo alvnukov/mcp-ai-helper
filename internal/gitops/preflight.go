@@ -69,7 +69,7 @@ func PreflightCommit(ctx context.Context, req PreflightRequest) (PreflightResult
 		Status:   "ok",
 	}
 
-	if err := classifyOwnedFiles(ctx, repo, owned, ownedSet, &result); err != nil {
+	if err := classifyOwnedFiles(ctx, repo, owned, &result); err != nil {
 		return PreflightResult{}, err
 	}
 	if err := detectStagedOutsideOwned(ctx, repo, ownedSet, &result); err != nil {
@@ -87,7 +87,7 @@ func PreflightCommit(ctx context.Context, req PreflightRequest) (PreflightResult
 }
 
 // classifyOwnedFiles partitions owned files into new, modified, and deleted.
-func classifyOwnedFiles(ctx context.Context, repo string, owned []string, ownedSet map[string]struct{}, result *PreflightResult) error {
+func classifyOwnedFiles(ctx context.Context, repo string, owned []string, result *PreflightResult) error {
 	tracked, err := trackedOwnedFiles(ctx, repo, owned)
 	if err != nil {
 		return err

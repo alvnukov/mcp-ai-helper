@@ -68,6 +68,7 @@ type Result struct {
 	Handoff    string              `json:"handoff"`
 }
 
+// MarshalJSON emits a compact success envelope when compact output is enabled.
 func (r Result) MarshalJSON() ([]byte, error) {
 	if r.Compact && r.Status == "ok" && r.Command.ExitCode == 0 {
 		return json.Marshal(struct {
@@ -323,7 +324,10 @@ func (r *Runner) runWorkflowSteps(ctx context.Context, req WorkflowRequest) (Wor
 	stepResults := map[string]WorkflowStepResult{}
 	files := newWorkflowFiles()
 
-	waves := buildStepWaves(req.Steps)
+	waves, err := buildStepWaves(req.Steps)
+	if err != nil {
+		return WorkflowResult{}, err
+	}
 
 	var stateMu sync.Mutex
 	fileLocks := newFileLockSet()
@@ -392,89 +396,153 @@ func (r *Runner) runWorkflowSteps(ctx context.Context, req WorkflowRequest) (Wor
 	return result, nil
 }
 
-// buildStepWaves topologically sorts steps into parallel-execution waves.
-func buildStepWaves(steps []WorkflowStep) [][]WorkflowStep {
+// buildStepWaves validates and topologically sorts steps into parallel-execution waves.
+func buildStepWaves(steps []WorkflowStep) ([][]WorkflowStep, error) {
 	if len(steps) == 0 {
-		return nil
+		return nil, nil
 	}
-	idx := map[string]int{}
-	for i, s := range steps {
-		if s.ID != "" {
-			idx[s.ID] = i
+
+	indices := make(map[string]int, len(steps))
+	for i, step := range steps {
+		id := strings.TrimSpace(step.ID)
+		if id == "" {
+			continue
 		}
+		if _, exists := indices[id]; exists {
+			return nil, fmt.Errorf("duplicate workflow step id %q", id)
+		}
+		indices[id] = i
 	}
-	deps := make([][]int, len(steps))
+
 	reverse := make([][]int, len(steps))
-	// Gather all guarded_replace step indices for implicit changedSet dependencies.
+	inDegree := make([]int, len(steps))
+	seenDependencies := make([]map[int]struct{}, len(steps))
+	addDependency := func(stepIndex, dependencyIndex int) {
+		if seenDependencies[stepIndex] == nil {
+			seenDependencies[stepIndex] = map[int]struct{}{}
+		}
+		if _, exists := seenDependencies[stepIndex][dependencyIndex]; exists {
+			return
+		}
+		seenDependencies[stepIndex][dependencyIndex] = struct{}{}
+		inDegree[stepIndex]++
+		reverse[dependencyIndex] = append(reverse[dependencyIndex], stepIndex)
+	}
+
 	var editIndices []int
-	for i, s := range steps {
-		if s.Tool == "guarded_replace" {
+	for i, step := range steps {
+		if step.Tool == "guarded_replace" {
 			editIndices = append(editIndices, i)
 		}
 	}
-	for i, s := range steps {
-		for _, depID := range s.DependsOn {
-			if j, ok := idx[depID]; ok {
-				deps[i] = append(deps[i], j)
-				reverse[j] = append(reverse[j], i)
+
+	// Explicit and condition dependencies define caller intent and must be
+	// complete before implicit serialization edges are considered.
+	for i, step := range steps {
+		for _, rawDependencyID := range step.DependsOn {
+			dependencyID := strings.TrimSpace(rawDependencyID)
+			dependencyIndex, exists := indices[dependencyID]
+			if !exists {
+				return nil, fmt.Errorf("workflow step %q depends on unknown step %q", step.ID, rawDependencyID)
 			}
+			addDependency(i, dependencyIndex)
 		}
-		for _, depID := range parseStepConditionDeps(s.If) {
-			if j, ok := idx[depID]; ok {
-				deps[i] = append(deps[i], j)
-				reverse[j] = append(reverse[j], i)
+		for _, dependencyID := range parseStepConditionDeps(step.If) {
+			dependencyIndex, exists := indices[dependencyID]
+			if !exists {
+				return nil, fmt.Errorf("workflow step %q condition references unknown step %q", step.ID, dependencyID)
 			}
+			addDependency(i, dependencyIndex)
 		}
-		if s.Tool == "guarded_replace" {
-			p := stepFilePath(&s)
-			for j := i - 1; j >= 0 && p != ""; j-- {
-				if steps[j].Tool == "guarded_replace" && stepFilePath(&steps[j]) == p {
-					deps[i] = append(deps[i], j)
-					reverse[j] = append(reverse[j], i)
-					break
-				}
+	}
+
+	dependencyPathExists := func(from, to int) bool {
+		visited := make([]bool, len(steps))
+		stack := []int{from}
+		for len(stack) > 0 {
+			current := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			if current == to {
+				return true
 			}
+			if visited[current] {
+				continue
+			}
+			visited[current] = true
+			stack = append(stack, reverse[current]...)
 		}
-		// Steps that read changedSet implicitly depend on all guarded_replace steps.
-		if readsChangedSet(&s) {
-			for _, j := range editIndices {
-				if j != i {
-					deps[i] = append(deps[i], j)
-					reverse[j] = append(reverse[j], i)
-				}
+		return false
+	}
+
+	// Serialize edits to the same file unless the caller already ordered the
+	// pair in the opposite direction through explicit dependencies.
+	for i, step := range steps {
+		if step.Tool != "guarded_replace" {
+			continue
+		}
+		path := stepFilePath(&step)
+		for j := i - 1; j >= 0 && path != ""; j-- {
+			if steps[j].Tool != "guarded_replace" || stepFilePath(&steps[j]) != path {
+				continue
+			}
+			if !dependencyPathExists(i, j) {
+				addDependency(i, j)
+			}
+			break
+		}
+	}
+
+	// Steps that inspect changed files must observe every edit result.
+	for i, step := range steps {
+		if !readsChangedSet(&step) {
+			continue
+		}
+		for _, editIndex := range editIndices {
+			if editIndex != i {
+				addDependency(i, editIndex)
 			}
 		}
 	}
-	inDegree := make([]int, len(steps))
-	for i := range steps {
-		inDegree[i] = len(deps[i])
-	}
+
 	var waves [][]WorkflowStep
 	processed := 0
 	for processed < len(steps) {
 		var wave []WorkflowStep
+		var waveIndices []int
 		for i := range steps {
-			if inDegree[i] == 0 {
-				wave = append(wave, steps[i])
-				inDegree[i] = -1
-				processed++
+			if inDegree[i] != 0 {
+				continue
 			}
+			wave = append(wave, steps[i])
+			waveIndices = append(waveIndices, i)
+			inDegree[i] = -1
+			processed++
 		}
 		if len(wave) == 0 {
-			return [][]WorkflowStep{steps}
+			unresolved := make([]string, 0, len(steps)-processed)
+			for i, degree := range inDegree {
+				if degree <= 0 {
+					continue
+				}
+				label := strings.TrimSpace(steps[i].ID)
+				if label == "" {
+					label = fmt.Sprintf("#%d", i+1)
+				}
+				unresolved = append(unresolved, label)
+			}
+			sort.Strings(unresolved)
+			return nil, fmt.Errorf("workflow dependency cycle detected among steps: %s", strings.Join(unresolved, ", "))
 		}
-		for _, s := range wave {
-			if j, ok := idx[s.ID]; ok {
-				for _, k := range reverse[j] {
-					if inDegree[k] > 0 {
-						inDegree[k]--
-					}
+		for _, stepIndex := range waveIndices {
+			for _, dependentIndex := range reverse[stepIndex] {
+				if inDegree[dependentIndex] > 0 {
+					inDegree[dependentIndex]--
 				}
 			}
 		}
 		waves = append(waves, wave)
 	}
-	return waves
+	return waves, nil
 }
 
 func parseStepConditionDeps(cond string) []string {
@@ -1172,6 +1240,7 @@ func workflowTaskCloseoutSucceeded(req WorkflowRequest, result WorkflowResult, e
 	return true
 }
 
+// Run executes one command-analysis pipeline and keeps its task lifecycle synchronized with the outcome.
 func (r *Runner) Run(ctx context.Context, req Request) (result Result, err error) {
 	if err := r.updateTaskStatus(ctx, req.CurrentTaskID, taskStatusOrDefault(req.TaskOnStart, "in_progress"), req.RepoPath); err != nil {
 		return Result{}, err

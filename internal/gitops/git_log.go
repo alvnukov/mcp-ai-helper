@@ -8,6 +8,7 @@ import (
 	"strings"
 )
 
+// LogRequest defines bounded filters for repository history.
 type LogRequest struct {
 	RepoPath string `json:"repo_path"`
 	Limit    int    `json:"limit,omitempty"`
@@ -18,6 +19,7 @@ type LogRequest struct {
 	Grep     string `json:"grep,omitempty"`
 }
 
+// LogCommit describes one commit returned by a history query.
 type LogCommit struct {
 	Hash      string   `json:"hash"`
 	ShortHash string   `json:"short_hash"`
@@ -27,11 +29,13 @@ type LogCommit struct {
 	Files     []string `json:"files,omitempty"`
 }
 
+// LogResult contains the bounded commit history and its returned size.
 type LogResult struct {
 	Commits []LogCommit `json:"commits"`
 	Total   int         `json:"total"`
 }
 
+// Log returns structured repository history matching the requested filters.
 func Log(ctx context.Context, req LogRequest) (LogResult, error) {
 	if strings.TrimSpace(req.RepoPath) == "" {
 		return LogResult{}, errors.New("repo_path is required")
@@ -90,11 +94,13 @@ func Log(ctx context.Context, req LogRequest) (LogResult, error) {
 	return result, nil
 }
 
+// LogDiffRequest identifies one commit whose metadata and patch should be inspected.
 type LogDiffRequest struct {
 	RepoPath string `json:"repo_path"`
 	Hash     string `json:"hash"`
 }
 
+// LogDiffResult contains one commit's metadata, structured patch, and file statistics.
 type LogDiffResult struct {
 	Hash      string     `json:"hash"`
 	ShortHash string     `json:"short_hash"`
@@ -105,12 +111,14 @@ type LogDiffResult struct {
 	Stats     []FileStat `json:"stats"`
 }
 
+// FileStat summarizes additions and deletions for one changed path.
 type FileStat struct {
 	Path      string `json:"path"`
 	Additions int    `json:"additions"`
 	Deletions int    `json:"deletions"`
 }
 
+// LogDiff returns metadata and a structured patch for one commit.
 func LogDiff(ctx context.Context, req LogDiffRequest) (LogDiffResult, error) {
 	if strings.TrimSpace(req.RepoPath) == "" {
 		return LogDiffResult{}, errors.New("repo_path is required")

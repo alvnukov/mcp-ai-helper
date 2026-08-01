@@ -130,10 +130,6 @@ func (r *Runner) RunFilteredWithWait(ctx context.Context, cmd string, cwd string
 	return r.runFilteredWithWait(ctx, cmd, cwd, timeoutSeconds, mcpWaitSeconds, filter, "")
 }
 
-func (r *Runner) runFiltered(ctx context.Context, cmd string, cwd string, timeoutSeconds int, filter Filter, repoPath string) (Result, error) {
-	return r.runFilteredWithWait(ctx, cmd, cwd, timeoutSeconds, 0, filter, repoPath)
-}
-
 func (r *Runner) runFilteredWithWait(
 	ctx context.Context,
 	cmd string,
@@ -748,8 +744,7 @@ func applyFilter(lines []string, filter Filter) ([]string, bool, error) {
 }
 
 func normalizeFilter(filter Filter) (Filter, error) {
-	switch filter.Preset {
-	case "errors":
+	if filter.Preset == "errors" {
 		filter.Preset = "errors-only"
 	}
 	if !hasPositiveSelectors(filter) {

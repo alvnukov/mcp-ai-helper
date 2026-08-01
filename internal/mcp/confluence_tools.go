@@ -48,7 +48,7 @@ func registerConfluenceTools(srv *server.MCPServer, deps *Server) {
 		if err != nil {
 			return safeError(deps, err), nil
 		}
-		results, err := jc.Search(args.CQL, args.MaxResults)
+		results, err := jc.SearchContext(ctx, args.CQL, args.MaxResults)
 		if err != nil {
 			return safeError(deps, err), nil
 		}
@@ -67,7 +67,7 @@ func registerConfluenceTools(srv *server.MCPServer, deps *Server) {
 		if err != nil {
 			return safeError(deps, err), nil
 		}
-		page, err := jc.GetContentByID(args.PageID)
+		page, err := jc.GetContentByIDContext(ctx, args.PageID)
 		if err != nil {
 			return safeError(deps, err), nil
 		}
@@ -79,12 +79,12 @@ func registerConfluenceTools(srv *server.MCPServer, deps *Server) {
 
 	srv.AddTool(basemcp.NewTool("conf_spaces",
 		basemcp.WithDescription("List all Confluence spaces."),
-	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+	), func(ctx context.Context, _ basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
 		jc, err := getClient()
 		if err != nil {
 			return safeError(deps, err), nil
 		}
-		spaces, err := jc.GetSpaces()
+		spaces, err := jc.GetSpacesContext(ctx)
 		if err != nil {
 			return safeError(deps, err), nil
 		}

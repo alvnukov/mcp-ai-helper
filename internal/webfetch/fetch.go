@@ -108,9 +108,9 @@ func normalizePolicy(policy config.WebPolicy) config.WebPolicy {
 }
 
 // Fetch downloads and stores a complete accepted source body, returning only metadata.
-func (c *Client) Fetch(ctx context.Context, req FetchRequest) (Result, error) {
+func (c *Client) Fetch(ctx context.Context, req FetchRequest) (result Result, returnErr error) {
 	requested := strings.TrimSpace(req.URL)
-	result := Result{Status: "blocked", RequestedURL: requested, Redirects: []string{}, Cache: CacheInfo{Status: "none"}}
+	result = Result{Status: "blocked", RequestedURL: requested, Redirects: []string{}, Cache: CacheInfo{Status: "none"}}
 	if !c.policy.IsEnabled() {
 		result.Diagnostics = append(result.Diagnostics, diag("web_disabled", "web fetch is disabled by web_policy.enabled"))
 		return result, nil
@@ -134,7 +134,11 @@ func (c *Client) Fetch(ctx context.Context, req FetchRequest) (Result, error) {
 		result.Diagnostics = append(result.Diagnostics, diag("fetch_failed", err.Error()))
 		return result, nil
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("web fetch response body close: %w", err))
+		}
+	}()
 	result.FinalURL = resp.Request.URL.String()
 	result.ContentType = resp.Header.Get("Content-Type")
 	result.Encoding = contentEncoding(result.ContentType)

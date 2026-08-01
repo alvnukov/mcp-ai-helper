@@ -327,6 +327,65 @@ func TestRunWorkflowStepsExplicitDependsOn(t *testing.T) {
 	}
 }
 
+func TestRunWorkflowStepsRejectsInvalidDependencyGraphBeforeExecution(t *testing.T) {
+	edit := func(id string) WorkflowStep {
+		return WorkflowStep{ID: id, Tool: "guarded_replace", Args: map[string]any{"path": "f.txt", "old": "old", "new": "new"}}
+	}
+	unknownDependency := edit("edit")
+	unknownDependency.DependsOn = []string{"missing"}
+	unknownCondition := edit("edit")
+	unknownCondition.If = "steps.missing.status == ok"
+	cycleFirst := edit("first")
+	cycleFirst.DependsOn = []string{"second"}
+	cycleSecond := edit("second")
+	cycleSecond.DependsOn = []string{"first"}
+
+	testCases := []struct {
+		name  string
+		steps []WorkflowStep
+		want  string
+	}{
+		{name: "duplicate ids", steps: []WorkflowStep{edit("duplicate"), edit("duplicate")}, want: "duplicate workflow step id"},
+		{name: "unknown explicit dependency", steps: []WorkflowStep{unknownDependency}, want: "depends on unknown step"},
+		{name: "unknown condition reference", steps: []WorkflowStep{unknownCondition}, want: "condition references unknown step"},
+		{name: "cycle", steps: []WorkflowStep{cycleFirst, cycleSecond}, want: "dependency cycle detected"},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "f.txt")
+			if err := os.WriteFile(path, []byte("old\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			runner := NewRunner(testConfig(dir), nil)
+			result, err := runner.RunWorkflow(t.Context(), WorkflowRequest{RepoPath: dir, Steps: testCase.steps})
+			if err == nil || !strings.Contains(err.Error(), testCase.want) {
+				t.Fatalf("error = %v, want substring %q", err, testCase.want)
+			}
+			if len(result.StepResults) != 0 {
+				t.Fatalf("steps executed for invalid graph: %#v", result.StepResults)
+			}
+			root, openErr := os.OpenRoot(dir)
+			if openErr != nil {
+				t.Fatal(openErr)
+			}
+			t.Cleanup(func() {
+				if closeErr := root.Close(); closeErr != nil {
+					t.Errorf("close test root: %v", closeErr)
+				}
+			})
+			data, readErr := root.ReadFile("f.txt")
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if string(data) != "old\n" {
+				t.Fatalf("file changed for invalid graph: %q", string(data))
+			}
+		})
+	}
+}
+
 func TestRunWorkflowStepsTaskBatchUpsert(t *testing.T) {
 	dir := t.TempDir()
 	runner, _ := newTaskTestRunner(testConfig(dir))
@@ -932,11 +991,12 @@ func TestSecretInjectionEnvVarReachesCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(encoded)
-	if strings.Contains(text, "fake-gh-token-42a7b9c1d3e5f") {
+	switch {
+	case strings.Contains(text, "fake-gh-token-42a7b9c1d3e5f"):
 		t.Error("T1-FAIL: raw secret leaked into model-facing output")
-	} else if strings.Contains(text, "[HELPER_SECRET:GH_TOKEN]") {
+	case strings.Contains(text, "[HELPER_SECRET:GH_TOKEN]"):
 		t.Log("T1-PASS: secret masked correctly in output")
-	} else {
+	default:
 		t.Error("T1-FAIL: secret neither leaked nor masked — injection may have failed")
 	}
 }

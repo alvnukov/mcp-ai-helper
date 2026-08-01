@@ -61,11 +61,16 @@ type TaskContextUsageContract struct {
 
 // TaskContextTruncation records what was omitted due to limits.
 type TaskContextTruncation struct {
-	OmittedGoalChain     int    `json:"omitted_goal_chain,omitempty"`
-	OmittedPrerequisites int    `json:"omitted_prerequisites,omitempty"`
-	OmittedAlreadyDone   int    `json:"omitted_already_done,omitempty"`
-	OmittedPlannedNext   int    `json:"omitted_planned_next,omitempty"`
-	Reason               string `json:"reason,omitempty"`
+	OmittedGoalChain          int    `json:"omitted_goal_chain,omitempty"`
+	OmittedPrerequisites      int    `json:"omitted_prerequisites,omitempty"`
+	OmittedAlreadyDone        int    `json:"omitted_already_done,omitempty"`
+	OmittedPlannedNext        int    `json:"omitted_planned_next,omitempty"`
+	OmittedBoundaries         int    `json:"omitted_boundaries,omitempty"`
+	OmittedNonGoals           int    `json:"omitted_non_goals,omitempty"`
+	OmittedAcceptanceCriteria int    `json:"omitted_acceptance_criteria,omitempty"`
+	OmittedVerificationPlan   int    `json:"omitted_verification_plan,omitempty"`
+	OmittedWarnings           int    `json:"omitted_warnings,omitempty"`
+	Reason                    string `json:"reason,omitempty"`
 }
 
 const (
@@ -280,48 +285,53 @@ func buildUsageContract() TaskContextUsageContract {
 }
 
 func applyContextLimits(ctx TaskContext, grid, prereqs []TaskContextItem, maxNodes int) TaskContext {
-	if len(grid) > maxNodes {
-		ctx.Truncated = &TaskContextTruncation{
-			OmittedGoalChain: len(grid) - maxNodes,
-			Reason:           fmt.Sprintf("max_nodes limit reached (%d)", maxNodes),
+	reason := fmt.Sprintf("max_nodes limit reached (%d)", maxNodes)
+	truncated := false
+	ensureTruncation := func() {
+		if ctx.Truncated == nil {
+			ctx.Truncated = &TaskContextTruncation{}
 		}
-		grid = grid[len(grid)-maxNodes:] // keep closest to selected
+		truncated = true
+	}
+
+	if len(grid) > maxNodes {
+		ensureTruncation()
+		ctx.Truncated.OmittedGoalChain = len(grid) - maxNodes
+		grid = grid[len(grid)-maxNodes:]
 	}
 	ctx.GoalChain = grid
 
 	if len(prereqs) > maxNodes {
+		ensureTruncation()
+		ctx.Truncated.OmittedPrerequisites = len(prereqs) - maxNodes
 		prereqs = prereqs[:maxNodes]
-		if ctx.Truncated == nil {
-			ctx.Truncated = &TaskContextTruncation{}
-		}
-		ctx.Truncated.OmittedPrerequisites = len(prereqs)
-		if ctx.Truncated.Reason == "" {
-			ctx.Truncated.Reason = fmt.Sprintf("max_nodes limit reached (%d)", maxNodes)
-		}
 	}
 	ctx.Prerequisites = prereqs
 
-	total := len(ctx.AlreadyDone) + len(ctx.PlannedNext)
-	if total > maxNodes {
-		cut := total - maxNodes
-		if cut >= len(ctx.PlannedNext) {
-			ctx.PlannedNext = nil
-			cut -= len(ctx.PlannedNext)
-			if cut > 0 && len(ctx.AlreadyDone) >= cut {
-				ctx.AlreadyDone = ctx.AlreadyDone[:cut]
-			}
-		} else {
-			ctx.PlannedNext = ctx.PlannedNext[:cut]
-		}
-		if ctx.Truncated == nil {
-			ctx.Truncated = &TaskContextTruncation{}
-		}
-		ctx.Truncated.OmittedAlreadyDone = cut
-		if ctx.Truncated.Reason == "" {
-			ctx.Truncated.Reason = fmt.Sprintf("max_nodes limit reached (%d)", maxNodes)
-		}
+	plannedCount, doneCount := len(ctx.PlannedNext), len(ctx.AlreadyDone)
+	retainedPlanned := plannedCount
+	if retainedPlanned > maxNodes {
+		retainedPlanned = maxNodes
+	}
+	remaining := maxNodes - retainedPlanned
+	retainedDone := doneCount
+	if retainedDone > remaining {
+		retainedDone = remaining
+	}
+	ctx.PlannedNext = ctx.PlannedNext[:retainedPlanned]
+	ctx.AlreadyDone = ctx.AlreadyDone[:retainedDone]
+	if plannedCount != retainedPlanned || doneCount != retainedDone {
+		ensureTruncation()
+		ctx.Truncated.OmittedPlannedNext = plannedCount - retainedPlanned
+		ctx.Truncated.OmittedAlreadyDone = doneCount - retainedDone
 	}
 
+	if truncated && !strings.Contains(ctx.Truncated.Reason, reason) {
+		if ctx.Truncated.Reason != "" {
+			ctx.Truncated.Reason += "; "
+		}
+		ctx.Truncated.Reason += reason
+	}
 	return ctx
 }
 
@@ -345,41 +355,49 @@ func enforceContextMaxBytes(ctx TaskContext, maxBytes int) TaskContext {
 	if maxBytes <= 0 {
 		return ctx
 	}
-	// Trim one item at a time from non-essential sections until under limit
-	sections := []struct {
-		slice *[]string
-	}{
-		{&ctx.NonGoals},
-		{&ctx.Boundaries},
-		{&ctx.VerificationPlan},
-		{&ctx.AcceptanceCriteria},
-		{&ctx.Warnings},
-	}
-	for {
-		data, err := json.Marshal(ctx)
-		if err != nil || len(data) <= maxBytes {
-			if ctx.Truncated == nil && len(ctx.Warnings) < cap(ctx.Warnings) {
-				// We trimmed something
-			}
-			return ctx
-		}
-		trimmed := false
-		for _, sec := range sections {
-			if len(*sec.slice) > 0 {
-				*sec.slice = (*sec.slice)[:len(*sec.slice)-1]
-				trimmed = true
-				break
-			}
-		}
-		if !trimmed {
-			break
-		}
+	data, err := json.Marshal(ctx)
+	if err != nil || len(data) <= maxBytes {
+		return ctx
 	}
 	if ctx.Truncated == nil {
 		ctx.Truncated = &TaskContextTruncation{}
 	}
-	ctx.Truncated.Reason = fmt.Sprintf("max_bytes limit reached (%d)", maxBytes)
-	return ctx
+	reason := fmt.Sprintf("max_bytes limit reached (%d)", maxBytes)
+	if !strings.Contains(ctx.Truncated.Reason, reason) {
+		if ctx.Truncated.Reason != "" {
+			ctx.Truncated.Reason += "; "
+		}
+		ctx.Truncated.Reason += reason
+	}
+	sections := []struct {
+		slice   *[]string
+		omitted *int
+	}{
+		{&ctx.NonGoals, &ctx.Truncated.OmittedNonGoals},
+		{&ctx.Boundaries, &ctx.Truncated.OmittedBoundaries},
+		{&ctx.VerificationPlan, &ctx.Truncated.OmittedVerificationPlan},
+		{&ctx.AcceptanceCriteria, &ctx.Truncated.OmittedAcceptanceCriteria},
+		{&ctx.Warnings, &ctx.Truncated.OmittedWarnings},
+	}
+	for {
+		data, err = json.Marshal(ctx)
+		if err != nil || len(data) <= maxBytes {
+			return ctx
+		}
+		trimmed := false
+		for _, section := range sections {
+			if len(*section.slice) == 0 {
+				continue
+			}
+			*section.slice = (*section.slice)[:len(*section.slice)-1]
+			*section.omitted++
+			trimmed = true
+			break
+		}
+		if !trimmed {
+			return ctx
+		}
+	}
 }
 
 // validateTaskContextRequest checks request arguments before context construction.

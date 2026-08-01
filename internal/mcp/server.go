@@ -89,12 +89,6 @@ func (s *Server) loadDeps() (*config.Config, provider.ChatClient, *command.Runne
 	return s.cfg, s.chat, s.commands, s.pipelines, s.taskStore
 }
 
-func (s *Server) loadTaskBackend() taskBackend {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.taskBackend
-}
-
 func (s *Server) loadTaskBackendForRepo(repoPath string) (taskBackend, error) {
 	cfg, _, cmds, _, store := s.loadDeps()
 	repoCfg, err := config.LoadRepoConfig(repoPath)

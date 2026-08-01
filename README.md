@@ -219,6 +219,7 @@ Successful edit-check-task-done flow:
     {
       "id": "check",
       "tool": "command",
+      "depends_on": ["edit"],
       "args": {
         "command": "go test ./internal/example",
         "cwd": "."
@@ -227,6 +228,7 @@ Successful edit-check-task-done flow:
     {
       "id": "done",
       "tool": "task_transition",
+      "depends_on": ["check"],
       "if": "steps.check.status == ok",
       "args": {
         "task_ids": ["task-123"],
@@ -237,6 +239,7 @@ Successful edit-check-task-done flow:
     {
       "id": "commit",
       "tool": "git_commit_owned",
+      "depends_on": ["done"],
       "if": "steps.done.status == ok",
       "args": {
         "files": ["internal/example.go"],
@@ -255,10 +258,11 @@ Failed-check path:
   "owned_files": ["internal/example.go"],
   "steps": [
     { "id": "edit", "tool": "guarded_replace", "args": { "path": "internal/example.go", "expected_hash": "<hash>", "old": "old", "new": "new" } },
-    { "id": "check", "tool": "command", "args": { "command": "go test ./internal/example", "cwd": "." } },
+    { "id": "check", "tool": "command", "depends_on": ["edit"], "args": { "command": "go test ./internal/example", "cwd": "." } },
     {
       "id": "block",
       "tool": "task_transition",
+      "depends_on": ["check"],
       "if": "steps.check.status != ok",
       "args": {
         "task_ids": ["task-123"],

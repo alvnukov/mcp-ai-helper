@@ -15,6 +15,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/zol/mcp-ai-helper/internal/safefs"
 	"github.com/zol/mcp-ai-helper/internal/tasks"
 )
 
@@ -33,6 +34,7 @@ func newObsidianTaskBackend(dir string) taskBackend {
 	return &obsidianTaskBackend{dir: dir}
 }
 
+// NewObsidianTaskBackend creates a task backend rooted at an Obsidian notes directory.
 func NewObsidianTaskBackend(dir string) taskBackend {
 	return newObsidianTaskBackend(dir)
 }
@@ -102,23 +104,39 @@ func yamlListItemString(node *yaml.Node) (string, error) {
 var errInvalidFrontmatter = errors.New("invalid frontmatter")
 var errMissingRequired = errors.New("missing required field")
 
-func (b *obsidianTaskBackend) notePath(id string) string {
-	return filepath.Join(b.dir, id+".md")
+func obsidianNoteName(id string) string {
+	return id + ".md"
+}
+
+func (b *obsidianTaskBackend) openRoot() (*safefs.Root, error) {
+	if strings.TrimSpace(b.dir) == "" {
+		return nil, errors.New("obsidian task registry path is required")
+	}
+	root, err := safefs.Open(b.dir)
+	if err != nil {
+		return nil, fmt.Errorf("open obsidian task registry: %w", err)
+	}
+	return root, nil
+}
+
+func (b *obsidianTaskBackend) ensureRoot() (*safefs.Root, error) {
+	if strings.TrimSpace(b.dir) == "" {
+		return nil, errors.New("obsidian task registry path is required")
+	}
+	root, err := safefs.Ensure(b.dir, 0o700)
+	if err != nil {
+		return nil, fmt.Errorf("initialize obsidian task registry: %w", err)
+	}
+	return root, nil
 }
 
 func (b *obsidianTaskBackend) ensureDir() error {
-	if strings.TrimSpace(b.dir) == "" {
-		return errors.New("obsidian task registry path is required")
-	}
-	if err := os.MkdirAll(b.dir, 0o700); err != nil {
-		return fmt.Errorf("initialize obsidian task registry dir: %w", err)
-	}
-	info, err := os.Stat(b.dir)
+	root, err := b.ensureRoot()
 	if err != nil {
-		return fmt.Errorf("stat obsidian task registry dir: %w", err)
+		return err
 	}
-	if !info.IsDir() {
-		return fmt.Errorf("obsidian task registry path is not a directory: %s", b.dir)
+	if err := root.Close(); err != nil {
+		return fmt.Errorf("close obsidian task registry: %w", err)
 	}
 	return nil
 }
@@ -297,12 +315,16 @@ func (b *obsidianTaskBackend) Delete(_ context.Context, req tasks.DeleteRequest)
 	if strings.TrimSpace(req.ID) == "" {
 		return taskMutationResult{}, errors.New("id is required")
 	}
-	note, err := b.readNote(req.ID)
+	root, err := b.openRoot()
 	if err != nil {
 		return taskMutationResult{}, err
 	}
-	path := b.notePath(req.ID)
-	if err := os.Remove(path); err != nil {
+	defer func() { _ = root.Close() }()
+	note, err := readObsidianNote(root, req.ID, true)
+	if err != nil {
+		return taskMutationResult{}, err
+	}
+	if err := root.Remove(obsidianNoteName(req.ID)); err != nil {
 		return taskMutationResult{}, fmt.Errorf("delete task %s: %w", req.ID, err)
 	}
 	task := tasks.WithWorktreeContext(req.RepoPath, noteToTask(note))
@@ -348,10 +370,12 @@ func (b *obsidianTaskBackend) readAll() ([]tasks.Task, error) {
 }
 
 func (b *obsidianTaskBackend) scanNotes(autoHeal bool) (obsidianTaskScan, error) {
-	if err := b.ensureDir(); err != nil {
+	root, err := b.ensureRoot()
+	if err != nil {
 		return obsidianTaskScan{}, err
 	}
-	entries, err := os.ReadDir(b.dir)
+	defer func() { _ = root.Close() }()
+	entries, err := root.ReadDir(".")
 	if err != nil {
 		return obsidianTaskScan{}, fmt.Errorf("read obsidian task dir: %w", err)
 	}
@@ -361,13 +385,13 @@ func (b *obsidianTaskBackend) scanNotes(autoHeal bool) (obsidianTaskScan, error)
 			continue
 		}
 		filenameID := strings.TrimSuffix(entry.Name(), ".md")
-		note, err := b.readNoteForScan(filenameID)
+		note, err := readObsidianNote(root, filenameID, false)
 		if err != nil {
 			scan.addDiagnostic("invalid_projection", entry.Name(), fmt.Sprintf("skipped invalid Obsidian task note: %v", err), "warning")
 			continue
 		}
 		if note.ID != filenameID {
-			if !b.autoHealFilenameIDMismatch(&scan, filenameID, note, autoHeal) {
+			if !b.autoHealFilenameIDMismatch(root, &scan, filenameID, note, autoHeal) {
 				continue
 			}
 		}
@@ -378,19 +402,17 @@ func (b *obsidianTaskBackend) scanNotes(autoHeal bool) (obsidianTaskScan, error)
 	return scan, nil
 }
 
-func (b *obsidianTaskBackend) autoHealFilenameIDMismatch(scan *obsidianTaskScan, filenameID string, note taskNote, autoHeal bool) bool {
-	oldName := filenameID + ".md"
-	newName := note.ID + ".md"
+func (b *obsidianTaskBackend) autoHealFilenameIDMismatch(root *safefs.Root, scan *obsidianTaskScan, filenameID string, note taskNote, autoHeal bool) bool {
+	oldName := obsidianNoteName(filenameID)
+	newName := obsidianNoteName(note.ID)
 	if !safeObsidianTaskID(note.ID) {
 		scan.addDiagnostic("projection_id_unsafe", oldName, fmt.Sprintf("frontmatter id %q cannot be used as a safe task filename", note.ID), "error")
 		return false
 	}
-	oldPath := b.notePath(filenameID)
-	newPath := b.notePath(note.ID)
-	if _, err := os.Stat(newPath); err == nil {
+	if _, err := root.Stat(newName); err == nil {
 		scan.addDiagnostic("projection_id_conflict", oldName, fmt.Sprintf("frontmatter id %q conflicts with existing %s; skipped without overwrite", note.ID, newName), "error")
 		return false
-	} else if !os.IsNotExist(err) {
+	} else if !errors.Is(err, os.ErrNotExist) {
 		scan.addDiagnostic("projection_id_conflict_check_failed", oldName, fmt.Sprintf("cannot check target %s: %v", newName, err), "error")
 		return false
 	}
@@ -398,7 +420,7 @@ func (b *obsidianTaskBackend) autoHealFilenameIDMismatch(scan *obsidianTaskScan,
 		scan.addDiagnostic("projection_id_mismatch", oldName, fmt.Sprintf("frontmatter id %q differs from filename id %q", note.ID, filenameID), "warning")
 		return false
 	}
-	if err := os.Rename(oldPath, newPath); err != nil {
+	if err := root.Rename(oldName, newName); err != nil {
 		scan.addDiagnostic("projection_id_rename_failed", oldName, fmt.Sprintf("cannot rename to %s: %v", newName, err), "error")
 		return false
 	}
@@ -450,40 +472,30 @@ func (b *obsidianTaskBackend) tryRead(id string) (tasks.Task, bool) {
 }
 
 func (b *obsidianTaskBackend) readNote(id string) (taskNote, error) {
+	root, err := b.openRoot()
+	if err != nil {
+		return taskNote{}, err
+	}
+	defer func() { _ = root.Close() }()
+	return readObsidianNote(root, id, true)
+}
+
+func readObsidianNote(root *safefs.Root, id string, requireFilenameID bool) (taskNote, error) {
 	if !safeObsidianTaskID(id) {
 		return taskNote{}, fmt.Errorf("task id %q is not safe for an Obsidian task filename", id)
 	}
-	path := b.notePath(id)
-	// #nosec G304,G703 -- path from notePath, scoped under obsidian tasks directory
-	data, err := os.ReadFile(path)
+	data, err := root.ReadFile(obsidianNoteName(id))
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) {
 			return taskNote{}, fmt.Errorf("task %s not found", id)
 		}
 		return taskNote{}, fmt.Errorf("read task %s: %w", id, err)
 	}
-	return parseNote(data, id)
-}
-
-func (b *obsidianTaskBackend) readNoteForScan(id string) (taskNote, error) {
-	if !safeObsidianTaskID(id) {
-		return taskNote{}, fmt.Errorf("task id %q is not safe for an Obsidian task filename", id)
-	}
-	path := b.notePath(id)
-	// #nosec G304,G703 -- path from notePath, scoped under obsidian tasks directory
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return taskNote{}, fmt.Errorf("read task %s: %w", id, err)
-	}
-	return parseNoteForScan(data, id)
+	return parseNoteWithFilenamePolicy(data, id, requireFilenameID)
 }
 
 func parseNote(data []byte, expectedID string) (taskNote, error) {
 	return parseNoteWithFilenamePolicy(data, expectedID, true)
-}
-
-func parseNoteForScan(data []byte, expectedID string) (taskNote, error) {
-	return parseNoteWithFilenamePolicy(data, expectedID, false)
 }
 
 func parseNoteWithFilenamePolicy(data []byte, expectedID string, requireFilenameID bool) (taskNote, error) {
@@ -730,9 +742,11 @@ func parseBulletList(text string) []string {
 }
 
 func (b *obsidianTaskBackend) writeNote(note taskNote) error {
-	if err := b.ensureDir(); err != nil {
+	root, err := b.ensureRoot()
+	if err != nil {
 		return err
 	}
+	defer func() { _ = root.Close() }()
 	if !safeObsidianTaskID(note.ID) {
 		return fmt.Errorf("task id %q is not safe for an Obsidian task filename", note.ID)
 	}
@@ -771,24 +785,17 @@ func (b *obsidianTaskBackend) writeNote(note taskNote) error {
 		}
 		buf.WriteString("\n## Verification Plan\n")
 		for i, v := range plan {
-			buf.WriteString(fmt.Sprintf("\n%d. %s", i+1, v))
-		}
-		buf.WriteString("\n")
-	} else if len(note.VerificationPlan) > 0 {
-		buf.WriteString("\n## Verification Plan\n")
-		for i, v := range note.VerificationPlan {
-			buf.WriteString(fmt.Sprintf("\n%d. %s", i+1, v))
+			_, _ = fmt.Fprintf(&buf, "\n%d. %s", i+1, v)
 		}
 		buf.WriteString("\n")
 	}
-	tmpPath := b.notePath(note.ID) + ".tmp"
+	tmpName := obsidianNoteName(note.ID) + ".tmp"
 	// #nosec G306 -- obsidian markdown notes are intentionally world-readable
-	if err := os.WriteFile(tmpPath, buf.Bytes(), 0o644); err != nil {
+	if err := root.WriteFile(tmpName, buf.Bytes(), 0o644); err != nil {
 		return fmt.Errorf("write task %s: %w", note.ID, err)
 	}
-	if err := os.Rename(tmpPath, b.notePath(note.ID)); err != nil {
-		// #nosec G104 -- best-effort cleanup, Rename error is the primary failure
-		_ = os.Remove(tmpPath)
+	if err := root.Rename(tmpName, obsidianNoteName(note.ID)); err != nil {
+		_ = root.Remove(tmpName)
 		return fmt.Errorf("commit task %s: %w", note.ID, err)
 	}
 	return nil

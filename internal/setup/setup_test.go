@@ -2,6 +2,8 @@ package setup
 
 import (
 	"bytes"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -155,6 +157,28 @@ func TestLaunchArgsCarryAPinnedConfigForward(t *testing.T) {
 	args := launchArgs("/etc/helper.yaml")
 	if len(args) != 2 || args[0] != "--config" || args[1] != "/etc/helper.yaml" {
 		t.Errorf("pinned config: got %v", args)
+	}
+}
+
+type errorWriter struct{}
+
+func (errorWriter) Write([]byte) (int, error) {
+	return 0, io.ErrClosedPipe
+}
+
+func TestRunReturnsWriterError(t *testing.T) {
+	sandbox(t)
+	err := Run(Options{Clients: []string{"claude"}, DryRun: true}, errorWriter{})
+	if !errors.Is(err, io.ErrClosedPipe) {
+		t.Fatalf("Run error = %v, want wrapped io.ErrClosedPipe", err)
+	}
+}
+
+func TestRemoveReturnsWriterError(t *testing.T) {
+	sandbox(t)
+	err := Remove(Options{Clients: []string{"claude"}}, errorWriter{})
+	if !errors.Is(err, io.ErrClosedPipe) {
+		t.Fatalf("Remove error = %v, want wrapped io.ErrClosedPipe", err)
 	}
 }
 

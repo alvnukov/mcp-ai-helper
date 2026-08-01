@@ -24,13 +24,20 @@ import (
 // returns m.Run's exit code, so TestMain can be a single line:
 //
 //	func TestMain(m *testing.M) { os.Exit(testhome.Use(m)) }
-func Use(m *testing.M) int {
+func Use(m *testing.M) (exitCode int) {
 	home, err := os.MkdirTemp("", "mcp-ai-helper-testhome-")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "testhome: %v\n", err)
 		return 1
 	}
-	defer os.RemoveAll(home)
+	defer func() {
+		if err := os.RemoveAll(home); err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "testhome: remove %s: %v\n", home, err)
+			if exitCode == 0 {
+				exitCode = 1
+			}
+		}
+	}()
 
 	// os.UserHomeDir reads $HOME on unix and USERPROFILE on Windows; setting
 	// both keeps the redirect working wherever the suite runs.
@@ -49,5 +56,6 @@ func Use(m *testing.M) int {
 		}()
 	}
 
-	return m.Run()
+	exitCode = m.Run()
+	return exitCode
 }

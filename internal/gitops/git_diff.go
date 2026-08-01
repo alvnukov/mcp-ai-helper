@@ -7,17 +7,20 @@ import (
 	"strings"
 )
 
+// DiffRequest selects a working-tree or index diff, optionally limited to one path.
 type DiffRequest struct {
 	RepoPath string `json:"repo_path"`
 	Cached   bool   `json:"cached,omitempty"`
 	Path     string `json:"path,omitempty"`
 }
 
+// DiffHunk contains one unified-diff hunk header and its body lines.
 type DiffHunk struct {
 	Header string   `json:"header"`
 	Lines  []string `json:"lines"`
 }
 
+// DiffFile describes one changed file and its parsed hunks.
 type DiffFile struct {
 	Path     string     `json:"path"`
 	OldPath  string     `json:"old_path,omitempty"`
@@ -26,11 +29,13 @@ type DiffFile struct {
 	IsBinary bool       `json:"is_binary,omitempty"`
 }
 
+// DiffResult contains the structured files in a Git diff.
 type DiffResult struct {
 	Files []DiffFile `json:"files"`
 	Empty bool       `json:"empty"`
 }
 
+// Diff returns a structured working-tree or index diff.
 func Diff(ctx context.Context, req DiffRequest) (DiffResult, error) {
 	if strings.TrimSpace(req.RepoPath) == "" {
 		return DiffResult{}, errors.New("repo_path is required")

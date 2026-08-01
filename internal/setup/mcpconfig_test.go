@@ -160,6 +160,7 @@ func TestRemovingTakesOutTheHelperAndNothingElse(t *testing.T) {
 	}
 	if written == nil {
 		t.Fatal("the helper was registered")
+		return
 	}
 	root := parseJSON(t, *written)
 	if got := dig(t, root, "mcpServers", serverName); got != nil {
@@ -180,6 +181,7 @@ func TestASectionHoldingOnlyTheHelperGoesAwayWithIt(t *testing.T) {
 	}
 	if written == nil {
 		t.Fatal("the helper was registered")
+		return
 	}
 	root := parseJSON(t, *written)
 	if _, ok := root["mcpServers"]; ok {

@@ -180,10 +180,7 @@ type Options struct {
 
 // Run registers the helper with every client named in opts, reporting to out.
 func Run(opts Options, out io.Writer) error {
-	command, err := helperCommand()
-	if err != nil {
-		return err
-	}
+	command := helperCommand()
 	args := launchArgs(opts.ConfigPath)
 
 	report := make([]string, 0, len(opts.Clients))
@@ -251,9 +248,13 @@ func Run(opts Options, out io.Writer) error {
 		report = append(report, strings.Join(lines, "\n"))
 	}
 
-	fmt.Fprintln(out, strings.Join(report, "\n\n"))
+	if _, err := fmt.Fprintln(out, strings.Join(report, "\n\n")); err != nil {
+		return fmt.Errorf("write setup report: %w", err)
+	}
 	if !opts.DryRun {
-		fmt.Fprintln(out, "\nRestart the client to pick up the new server.")
+		if _, err := fmt.Fprintln(out, "\nRestart the client to pick up the new server."); err != nil {
+			return fmt.Errorf("write setup restart notice: %w", err)
+		}
 	}
 	return nil
 }
@@ -330,9 +331,13 @@ func Remove(opts Options, out io.Writer) error {
 		report = append(report, strings.Join(lines, "\n"))
 	}
 
-	fmt.Fprintln(out, strings.Join(report, "\n\n"))
+	if _, err := fmt.Fprintln(out, strings.Join(report, "\n\n")); err != nil {
+		return fmt.Errorf("write removal report: %w", err)
+	}
 	if changed {
-		fmt.Fprintln(out, "\nRestart the client to drop the server.")
+		if _, err := fmt.Fprintln(out, "\nRestart the client to drop the server."); err != nil {
+			return fmt.Errorf("write removal restart notice: %w", err)
+		}
 	}
 	return nil
 }
@@ -521,12 +526,12 @@ func client(id string) (clientSpec, error) {
 // helperCommand is the command a client should run. An absolute path to this
 // very binary beats the bare name: a client started from a GUI often has a PATH
 // that does not include wherever the helper was installed.
-func helperCommand() (string, error) {
+func helperCommand() string {
 	path, err := os.Executable()
 	if err != nil {
-		return serverName, nil //nolint:nilerr // the bare name is a usable fallback
+		return serverName
 	}
-	return path, nil
+	return path
 }
 
 func launchArgs(configPath string) []string {

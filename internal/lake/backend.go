@@ -1,3 +1,4 @@
+// Package lake manages Lean Lake workspaces and task-registry operations.
 package lake
 
 import (
@@ -70,6 +71,7 @@ type CommandRunner struct {
 	MCPWaitSeconds int
 }
 
+// ResolveWorkspace validates and resolves a repository root as a Lean Lake workspace.
 func ResolveWorkspace(repoPath string) (Workspace, error) {
 	if strings.TrimSpace(repoPath) == "" {
 		return Workspace{}, errors.New("repo_path is required")
@@ -80,13 +82,13 @@ func ResolveWorkspace(repoPath string) (Workspace, error) {
 	}
 	info, err := os.Stat(abs)
 	if err != nil {
-		return Workspace{}, fmt.Errorf("Lake workspace blocker: repo_path is not accessible: %w", err)
+		return Workspace{}, fmt.Errorf("lake workspace blocker: repo_path is not accessible: %w", err)
 	}
 	if !info.IsDir() {
-		return Workspace{}, fmt.Errorf("Lake workspace blocker: repo_path is not a directory: %s", abs)
+		return Workspace{}, fmt.Errorf("lake workspace blocker: repo_path is not a directory: %s", abs)
 	}
 	if _, err := os.Stat(filepath.Join(abs, "lean-toolchain")); err != nil {
-		return Workspace{}, errors.New("Lake workspace blocker: missing lean-toolchain")
+		return Workspace{}, errors.New("lake workspace blocker: missing lean-toolchain")
 	}
 	if _, err := os.Stat(filepath.Join(abs, "lakefile.lean")); err == nil {
 		return Workspace{Dir: abs}, nil
@@ -94,9 +96,10 @@ func ResolveWorkspace(repoPath string) (Workspace, error) {
 	if _, err := os.Stat(filepath.Join(abs, "lakefile.toml")); err == nil {
 		return Workspace{Dir: abs}, nil
 	}
-	return Workspace{}, errors.New("Lake workspace blocker: missing lakefile.lean or lakefile.toml")
+	return Workspace{}, errors.New("lake workspace blocker: missing lakefile.lean or lakefile.toml")
 }
 
+// Build validates the workspace and runs its default Lake build target.
 func Build(ctx context.Context, repoPath string, runner Runner) (CommandResult, error) {
 	ws, err := ResolveWorkspace(repoPath)
 	if err != nil {
@@ -108,6 +111,7 @@ func Build(ctx context.Context, repoPath string, runner Runner) (CommandResult, 
 	return runner.Run(ctx, ws.Dir, []string{"lake", "build"})
 }
 
+// CheckFile validates a repository-relative Lean source path and checks it with the workspace toolchain.
 func CheckFile(ctx context.Context, repoPath string, relLeanFile string, runner Runner) (CommandResult, error) {
 	ws, err := ResolveWorkspace(repoPath)
 	if err != nil {
@@ -129,6 +133,7 @@ func CheckFile(ctx context.Context, repoPath string, relLeanFile string, runner 
 	return runner.Run(ctx, ws.Dir, []string{"lake", "env", "lean", relClean})
 }
 
+// RunExe validates an executable name and invokes it through Lake inside the workspace.
 func RunExe(ctx context.Context, repoPath string, exeName string, exeArgs []string, runner Runner) (CommandResult, error) {
 	ws, err := ResolveWorkspace(repoPath)
 	if err != nil {
@@ -392,7 +397,7 @@ func (p *serverProcess) call(ctx context.Context, ws Workspace, sourceAbs string
 		return RPCResult{}, fmt.Errorf("decode rpc call response: %w", err)
 	}
 	if len(call.Result) == 0 {
-		return RPCResult{}, errors.New("Lean RPC call returned no result")
+		return RPCResult{}, errors.New("lean RPC call returned no result")
 	}
 	_ = writeServerLSPNotification(p.stdin, "$/lean/rpc/release", map[string]any{"uri": sourceURI, "sessionId": connect.Result.SessionID, "refs": []any{}})
 	return RPCResult{WorkspaceDetected: true, WorkspaceDir: ws.Dir, Method: method, Result: append(json.RawMessage(nil), call.Result...), Diagnostics: serverDiagnostics(p.stderr)}, nil
@@ -432,6 +437,7 @@ func (p *serverProcess) terminate() {
 	}
 }
 
+// Run executes a Lake command through the bounded repository command runner.
 func (r CommandRunner) Run(ctx context.Context, workspaceDir string, args []string) (CommandResult, error) {
 	if r.Commands == nil {
 		return CommandResult{WorkspaceDetected: true, WorkspaceDir: workspaceDir, ExitCode: -1, Blocker: "command runner is not configured"}, nil
@@ -453,6 +459,7 @@ func (r CommandRunner) Run(ctx context.Context, workspaceDir string, args []stri
 	return CommandResult{Status: result.Status, CommandID: result.CommandID, WorkspaceDetected: true, WorkspaceDir: workspaceDir, Command: append([]string(nil), args...), ExitCode: result.ExitCode, Output: append([]string(nil), result.StdoutTail...), Diagnostics: diagnostics}, nil
 }
 
+// FilterDiagnostics extracts a bounded set of diagnostic-looking lines from command output.
 func FilterDiagnostics(output string) []string {
 	if strings.TrimSpace(output) == "" {
 		return nil
@@ -497,15 +504,27 @@ func shellQuote(args []string) string {
 			parts = append(parts, "''")
 			continue
 		}
-		if strings.IndexFunc(arg, func(r rune) bool {
-			return !(r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '_' || r == '-' || r == '.' || r == '/' || r == ':')
-		}) == -1 {
+		if !strings.ContainsFunc(arg, func(r rune) bool {
+			return !isShellSafeArgRune(r)
+		}) {
 			parts = append(parts, arg)
 			continue
 		}
 		parts = append(parts, "'"+strings.ReplaceAll(arg, "'", "'\\''")+"'")
 	}
 	return strings.Join(parts, " ")
+}
+
+func isShellSafeArgRune(r rune) bool {
+	if r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
+		return true
+	}
+	switch r {
+	case '_', '-', '.', '/', ':':
+		return true
+	default:
+		return false
+	}
 }
 
 func resolveRPCSource(workspaceDir string, sourceFile string) (string, string, string) {

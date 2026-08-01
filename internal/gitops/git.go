@@ -1,3 +1,4 @@
+// Package gitops provides guarded Git repository operations.
 package gitops
 
 import (
@@ -11,6 +12,7 @@ import (
 	"github.com/zol/mcp-ai-helper/internal/tasks"
 )
 
+// CommitRequest defines the repository, owned file set, and message for a guarded commit.
 type CommitRequest struct {
 	RepoPath string   `json:"repo_path"`
 	Repo     string   `json:"repo"`
@@ -18,6 +20,7 @@ type CommitRequest struct {
 	Message  string   `json:"message"`
 }
 
+// CommitResult reports the guarded commit outcome and the files staged for it.
 type CommitResult struct {
 	Status      string   `json:"status"`
 	Commit      string   `json:"commit,omitempty"`
@@ -25,12 +28,14 @@ type CommitResult struct {
 	Reason      string   `json:"reason,omitempty"`
 }
 
+// PrepareTaskWorktreeRequest identifies the task and repository for an isolated worktree.
 type PrepareTaskWorktreeRequest struct {
 	RepoPath string `json:"repo_path"`
 	TaskID   string `json:"task_id"`
 	TaskType string `json:"task_type"`
 }
 
+// PrepareTaskWorktreeResult reports the resolved task branch and worktree location.
 type PrepareTaskWorktreeResult struct {
 	Status       string `json:"status"`
 	Branch       string `json:"branch"`
@@ -40,6 +45,7 @@ type PrepareTaskWorktreeResult struct {
 	Reason       string `json:"reason,omitempty"`
 }
 
+// PrepareTaskWorktree creates or reuses the canonical isolated worktree for a task.
 func PrepareTaskWorktree(ctx context.Context, req PrepareTaskWorktreeRequest) (PrepareTaskWorktreeResult, error) {
 	if strings.TrimSpace(req.RepoPath) == "" {
 		return PrepareTaskWorktreeResult{}, errors.New("repo_path is required")
@@ -96,6 +102,7 @@ func PrepareTaskWorktree(ctx context.Context, req PrepareTaskWorktreeRequest) (P
 	return PrepareTaskWorktreeResult{Status: "ok", Branch: branch, WorktreePath: worktreePath, CodePath: codePath, Created: true}, nil
 }
 
+// CommitOwned stages and commits exactly the declared owned files, rejecting index contamination.
 func CommitOwned(ctx context.Context, req CommitRequest) (CommitResult, error) {
 	repoInput := req.RepoPath
 	if repoInput == "" {
@@ -162,7 +169,7 @@ func CommitOwned(ctx context.Context, req CommitRequest) (CommitResult, error) {
 		}
 	}
 	if len(existingFiles) > 0 {
-		ignored, _ := ignoredOwnedFiles(ctx, repo, existingFiles)
+		ignored := ignoredOwnedFiles(ctx, repo, existingFiles)
 		normal := make([]string, 0, len(existingFiles))
 		force := make([]string, 0, len(ignored))
 		for _, f := range existingFiles {

@@ -8,16 +8,19 @@ import (
 	"strings"
 )
 
+// StatusRequest selects the repository whose working state should be inspected.
 type StatusRequest struct {
 	RepoPath string `json:"repo_path"`
 }
 
+// FileStatus describes one repository path in a normalized status category.
 type FileStatus struct {
 	Path   string `json:"path"`
 	Status string `json:"status"`
 	XY     string `json:"xy"`
 }
 
+// StatusResult summarizes branch divergence and categorized working-tree changes.
 type StatusResult struct {
 	Branch    string       `json:"branch"`
 	Upstream  string       `json:"upstream,omitempty"`
@@ -31,6 +34,7 @@ type StatusResult struct {
 	RepoPath  string       `json:"repo_path"`
 }
 
+// Status returns structured branch and working-tree state for a repository.
 func Status(ctx context.Context, req StatusRequest) (StatusResult, error) {
 	if strings.TrimSpace(req.RepoPath) == "" {
 		return StatusResult{}, errors.New("repo_path is required")
@@ -93,10 +97,11 @@ func Status(ctx context.Context, req StatusRequest) (StatusResult, error) {
 				result.Staged = append(result.Staged, fs)
 				result.IsClean = false
 			}
-			if y == 'M' {
+			switch y {
+			case 'M':
 				result.Modified = append(result.Modified, FileStatus{Path: path, XY: xy, Status: "modified"})
 				result.IsClean = false
-			} else if y == 'D' {
+			case 'D':
 				result.Deleted = append(result.Deleted, FileStatus{Path: path, XY: xy, Status: "deleted"})
 				result.IsClean = false
 			}

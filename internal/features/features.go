@@ -16,12 +16,17 @@ import (
 )
 
 const (
+	// ScopeGlobal identifies user-wide feature overrides.
 	ScopeGlobal = "global"
-	ScopeRepo   = "repo"
+	// ScopeRepo identifies repository-local feature overrides.
+	ScopeRepo = "repo"
 
+	// SourceCodeDefault identifies a feature value supplied by the binary's built-in defaults.
 	SourceCodeDefault = "code_default"
-	SourceGlobal      = "global"
-	SourceRepo        = "repo"
+	// SourceGlobal identifies a feature value supplied by global user configuration.
+	SourceGlobal = "global"
+	// SourceRepo identifies a feature value supplied by repository-local configuration.
+	SourceRepo = "repo"
 
 	repoGitignoreEntry = ".mcp-ai-helper.yaml"
 )

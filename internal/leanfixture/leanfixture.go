@@ -18,6 +18,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -26,6 +27,7 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -78,7 +80,7 @@ const buildTimeout = 5 * time.Minute
 // sources supplies SourceFiles under prefix — an embed.FS in one caller and the
 // template directory on disk in the other, which is why it is an fs.FS rather
 // than a path.
-func Prepare(sources fs.FS, prefix string) (string, error) {
+func Prepare(sources fs.FS, prefix string) (fixture string, returnErr error) {
 	files, err := readSources(sources, prefix)
 	if err != nil {
 		return "", err
@@ -93,7 +95,11 @@ func Prepare(sources fs.FS, prefix string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("create staging directory: %w", err)
 	}
-	defer os.RemoveAll(staging)
+	defer func() {
+		if cleanupErr := os.RemoveAll(staging); cleanupErr != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("remove staging directory: %w", cleanupErr))
+		}
+	}()
 
 	if err := writeProject(staging, files); err != nil {
 		return "", err
@@ -170,7 +176,10 @@ func fingerprint(files map[string][]byte) string {
 
 	digest := sha256.New()
 	for _, name := range names {
-		fmt.Fprintf(digest, "%s\n%d\n", name, len(files[name]))
+		digest.Write([]byte(name))
+		digest.Write([]byte("\n"))
+		digest.Write(strconv.AppendInt(nil, int64(len(files[name])), 10))
+		digest.Write([]byte("\n"))
 		digest.Write(files[name])
 	}
 	return hex.EncodeToString(digest.Sum(nil))[:16]
@@ -209,12 +218,16 @@ func isReady(dir string) bool {
 	return err == nil
 }
 
-func copyFile(source string, target string) error {
+func copyFile(source string, target string) (returnErr error) {
 	in, err := os.Open(source) // #nosec G304 -- both paths come from the fixture the package just built.
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer func() {
+		if closeErr := in.Close(); closeErr != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close fixture source: %w", closeErr))
+		}
+	}()
 
 	info, err := in.Stat()
 	if err != nil {
@@ -231,8 +244,14 @@ func copyFile(source string, target string) error {
 		return err
 	}
 	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
-		return err
+		copyErr := fmt.Errorf("copy fixture file: %w", err)
+		if closeErr := out.Close(); closeErr != nil {
+			return errors.Join(copyErr, fmt.Errorf("close fixture destination: %w", closeErr))
+		}
+		return copyErr
 	}
-	return out.Close()
+	if err := out.Close(); err != nil {
+		return fmt.Errorf("close fixture destination: %w", err)
+	}
+	return nil
 }

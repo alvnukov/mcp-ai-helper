@@ -2,6 +2,7 @@
 package confluence
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -31,6 +32,31 @@ func (c Config) ResolvedAPIKey() string {
 // Client wraps the goconfluence API.
 type Client struct {
 	api *goconfluence.API
+}
+
+type contextRoundTripper struct {
+	ctx  context.Context
+	base http.RoundTripper
+}
+
+func (rt contextRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	return rt.base.RoundTrip(req.Clone(rt.ctx))
+}
+
+func (c *Client) apiWithContext(ctx context.Context) *goconfluence.API {
+	api := *c.api
+	httpClient := c.api.Client
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
+	clientCopy := *httpClient
+	baseTransport := clientCopy.Transport
+	if baseTransport == nil {
+		baseTransport = http.DefaultTransport
+	}
+	clientCopy.Transport = contextRoundTripper{ctx: ctx, base: baseTransport}
+	api.Client = &clientCopy
+	return &api
 }
 
 // NewClient creates a Confluence client using PAT (Bearer-equivalent via library's Basic Auth with empty username).
@@ -71,35 +97,43 @@ type SearchResult struct {
 
 // Search performs a CQL search.
 func (c *Client) Search(cql string, limit int) ([]SearchResult, error) {
+	return c.SearchContext(context.Background(), cql, limit)
+}
+
+// SearchContext performs a CQL search and propagates cancellation to Confluence.
+func (c *Client) SearchContext(ctx context.Context, cql string, limit int) ([]SearchResult, error) {
 	if limit <= 0 {
 		limit = 20
 	}
-	items, _, err := c.searchPage(cql, limit, "")
+	items, _, err := c.searchPageContext(ctx, cql, limit, "")
 	return items, err
 }
 
-func (c *Client) searchPage(cql string, limit int, next string) ([]SearchResult, string, error) {
+func (c *Client) searchPageContext(ctx context.Context, cql string, limit int, next string) ([]SearchResult, string, error) {
 	query := goconfluence.SearchQuery{CQL: cql, Limit: limit}
+	api := c.apiWithContext(ctx)
 	var result *goconfluence.Search
 	var err error
 	if next == "" {
-		result, err = c.api.Search(query)
+		result, err = api.Search(query)
 	} else {
-		result, err = c.api.SearchWithNext(query, next)
+		result, err = api.SearchWithNext(query, next)
 	}
 	if err != nil {
 		return nil, "", fmt.Errorf("confluence search: %w", err)
 	}
 	items := make([]SearchResult, 0, len(result.Results))
-	for _, r := range result.Results {
-		id, typ := r.ID, r.Type
-		if id == "" && r.Content.ID != "" {
-			id = r.Content.ID
-			if typ == "" {
-				typ = r.Content.Type
+	for _, resultItem := range result.Results {
+		id, contentType := resultItem.ID, resultItem.Type
+		if id == "" && resultItem.Content.ID != "" {
+			id = resultItem.Content.ID
+			if contentType == "" {
+				contentType = resultItem.Content.Type
 			}
 		}
-		items = append(items, SearchResult{ID: id, Type: typ, Title: r.Title, Status: r.Status})
+		items = append(items, SearchResult{
+			ID: id, Type: contentType, Title: resultItem.Title, Status: resultItem.Status,
+		})
 	}
 	return items, result.Links.Next, nil
 }
@@ -117,7 +151,12 @@ type PageInfo struct {
 
 // GetContentByID returns a single content item by ID.
 func (c *Client) GetContentByID(id string) (*PageInfo, error) {
-	content, err := c.api.GetContentByID(id, goconfluence.ContentQuery{
+	return c.GetContentByIDContext(context.Background(), id)
+}
+
+// GetContentByIDContext returns content by ID and propagates cancellation to Confluence.
+func (c *Client) GetContentByIDContext(ctx context.Context, id string) (*PageInfo, error) {
+	content, err := c.apiWithContext(ctx).GetContentByID(id, goconfluence.ContentQuery{
 		Expand: []string{"body.storage", "version", "space"},
 	})
 	if err != nil {
@@ -153,23 +192,29 @@ type SpaceInfo struct {
 
 // GetSpaces returns all spaces.
 func (c *Client) GetSpaces() ([]SpaceInfo, error) {
+	return c.GetSpacesContext(context.Background())
+}
+
+// GetSpacesContext returns all spaces and propagates cancellation to every page request.
+func (c *Client) GetSpacesContext(ctx context.Context) ([]SpaceInfo, error) {
 	var spaces []SpaceInfo
 	start := 0
 	const pageSize = 50
+	api := c.apiWithContext(ctx)
 	for {
-		result, err := c.api.GetAllSpaces(goconfluence.AllSpacesQuery{
+		result, err := api.GetAllSpaces(goconfluence.AllSpacesQuery{
 			Start: start,
 			Limit: pageSize,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("confluence spaces: %w", err)
 		}
-		for _, s := range result.Results {
+		for _, space := range result.Results {
 			spaces = append(spaces, SpaceInfo{
-				ID:   s.ID,
-				Key:  s.Key,
-				Name: s.Name,
-				Type: s.Type,
+				ID:   space.ID,
+				Key:  space.Key,
+				Name: space.Name,
+				Type: space.Type,
 			})
 		}
 		if len(result.Results) < pageSize {

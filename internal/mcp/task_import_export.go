@@ -9,10 +9,16 @@ import (
 	"github.com/zol/mcp-ai-helper/internal/tasks"
 )
 
+// ErrLossyField indicates that a task field cannot be represented by the target registry.
 var ErrLossyField = errors.New("lossy field detected")
+
+// ErrDuplicateID indicates that the target registry contains a duplicate task identifier.
 var ErrDuplicateID = errors.New("duplicate task ID in target")
+
+// ErrStaleTarget indicates that an import target changed after it was inspected.
 var ErrStaleTarget = errors.New("stale target registry")
 
+// ExportRequest defines the repository and destination options for task export.
 type ExportRequest struct {
 	RepoPath  string `json:"repo_path"`
 	TargetDir string `json:"target_dir"`
@@ -20,12 +26,14 @@ type ExportRequest struct {
 	Overwrite bool   `json:"overwrite"`
 }
 
+// ImportExportRequest defines shared safety options for a registry transfer.
 type ImportExportRequest struct {
 	RepoPath  string
 	DryRun    bool
 	Overwrite bool
 }
 
+// ImportExportResult reports transferred tasks, conflicts, and detected losses.
 type ImportExportResult struct {
 	Added     []tasks.Task `json:"added"`
 	Updated   []tasks.Task `json:"updated"`
@@ -34,6 +42,7 @@ type ImportExportResult struct {
 	DryRun    bool         `json:"dry_run"`
 }
 
+// LossReport describes one field that could not be transferred losslessly.
 type LossReport struct {
 	TaskID string `json:"task_id"`
 	Field  string `json:"field"`

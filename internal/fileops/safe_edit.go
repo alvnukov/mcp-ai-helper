@@ -7,10 +7,14 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/zol/mcp-ai-helper/internal/safefs"
 )
 
 // Snapshot records file identity before a guarded edit.
@@ -21,6 +25,65 @@ type Snapshot struct {
 	Hash         string `json:"hash"`
 	Size         int    `json:"size"`
 	Exists       bool   `json:"exists"`
+}
+
+type scopedFile struct {
+	root     *safefs.Root
+	name     string
+	display  string
+	relative string
+}
+
+func openScopedFile(repoPath string, filePath string, createParents bool) (*scopedFile, error) {
+	if strings.TrimSpace(repoPath) != "" {
+		display, relative, err := repoRelativePath(repoPath, filePath)
+		if err != nil {
+			return nil, err
+		}
+		root, err := safefs.Open(repoPath)
+		if err != nil {
+			return nil, err
+		}
+		if createParents {
+			parent := filepath.Dir(filepath.FromSlash(relative))
+			if parent != "." {
+				if err := root.MkdirAll(parent, 0o700); err != nil {
+					_ = root.Close()
+					return nil, fmt.Errorf("create parent directories for %q: %w", relative, err)
+				}
+			}
+		}
+		return &scopedFile{
+			root:     root,
+			name:     filepath.FromSlash(relative),
+			display:  display,
+			relative: relative,
+		}, nil
+	}
+
+	clean, err := cleanPath(filePath)
+	if err != nil {
+		return nil, err
+	}
+	parent := filepath.Dir(clean)
+	var root *safefs.Root
+	if createParents {
+		root, err = safefs.Ensure(parent, 0o700)
+	} else {
+		root, err = safefs.Open(parent)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &scopedFile{
+		root:    root,
+		name:    filepath.Base(clean),
+		display: clean,
+	}, nil
+}
+
+func (f *scopedFile) close() {
+	_ = f.root.Close()
 }
 
 // ReplaceRequest describes one unique text replacement guarded by file hash.
@@ -65,40 +128,55 @@ func ReadSnapshot(path string) (Snapshot, error) {
 }
 
 // ReadSnapshotInRepo returns a snapshot for a repo-relative path.
-func ReadSnapshotInRepo(repoPath string, path string) (Snapshot, error) {
-	resolved, rel, err := repoRelativePath(repoPath, path)
+func ReadSnapshotInRepo(repoPath string, filePath string) (Snapshot, error) {
+	scoped, err := openScopedFile(repoPath, filePath, false)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	snapshot, err := ReadSnapshot(resolved)
+	defer scoped.close()
+
+	data, err := scoped.root.ReadFile(scoped.name)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return Snapshot{
+				Path:         scoped.display,
+				RepoPath:     repoPath,
+				RelativePath: scoped.relative,
+				Exists:       false,
+			}, nil
+		}
 		return Snapshot{}, err
 	}
-	snapshot.RepoPath = repoPath
-	snapshot.RelativePath = rel
-	return snapshot, nil
+	return Snapshot{
+		Path:         scoped.display,
+		RepoPath:     repoPath,
+		RelativePath: scoped.relative,
+		Hash:         Hash(data),
+		Size:         len(data),
+		Exists:       true,
+	}, nil
 }
 
-func resolveText(req ReplaceRequest) (old string, new string, err error) {
+func resolveText(req ReplaceRequest) (oldText string, newText string, err error) {
 	if req.OldB64 != "" {
 		decoded, decodeErr := base64.StdEncoding.DecodeString(req.OldB64)
 		if decodeErr != nil {
 			return "", "", fmt.Errorf("old_b64: invalid base64: %w", decodeErr)
 		}
-		old = string(decoded)
+		oldText = string(decoded)
 	} else {
-		old = req.Old
+		oldText = req.Old
 	}
 	if req.NewB64 != "" {
 		decoded, decodeErr := base64.StdEncoding.DecodeString(req.NewB64)
 		if decodeErr != nil {
 			return "", "", fmt.Errorf("new_b64: invalid base64: %w", decodeErr)
 		}
-		new = string(decoded)
+		newText = string(decoded)
 	} else {
-		new = req.New
+		newText = req.New
 	}
-	return old, new, nil
+	return oldText, newText, nil
 }
 
 func findBestPartialMatch(text string, old string) string {
@@ -135,32 +213,23 @@ func ApplyGuardedReplace(req ReplaceRequest) (ReplaceResult, error) {
 	if strings.TrimSpace(req.Path) == "" {
 		return ReplaceResult{}, errors.New("path is required")
 	}
-	var clean string
-	if strings.TrimSpace(req.RepoPath) != "" {
-		var err error
-		clean, _, err = repoRelativePath(req.RepoPath, req.Path)
-		if err != nil {
-			return ReplaceResult{}, err
-		}
-	} else {
-		var err error
-		clean, err = cleanPath(req.Path)
-		if err != nil {
-			return ReplaceResult{}, err
-		}
-	}
-	if req.ExpectedHash == "" {
-		return ReplaceResult{}, errors.New("expected_hash is required")
-	}
-	old, new, err := resolveText(req)
+	scoped, err := openScopedFile(req.RepoPath, req.Path, false)
 	if err != nil {
 		return ReplaceResult{}, err
 	}
-	if old == "" {
+	defer scoped.close()
+	clean := scoped.display
+	if req.ExpectedHash == "" {
+		return ReplaceResult{}, errors.New("expected_hash is required")
+	}
+	oldText, newText, err := resolveText(req)
+	if err != nil {
+		return ReplaceResult{}, err
+	}
+	if oldText == "" {
 		return ReplaceResult{}, errors.New("old text is required (set old or old_b64)")
 	}
-	// #nosec G304 -- clean is resolved from a validated local path or repo-relative path.
-	data, err := os.ReadFile(clean)
+	data, err := scoped.root.ReadFile(scoped.name)
 	if err != nil {
 		return ReplaceResult{}, err
 	}
@@ -169,12 +238,12 @@ func ApplyGuardedReplace(req ReplaceRequest) (ReplaceResult, error) {
 		return ReplaceResult{Status: "conflict", Path: clean, OldHash: oldHash, Reason: "file hash changed after snapshot"}, nil
 	}
 	text := string(data)
-	if strings.Contains(text, new) && !strings.Contains(text, old) {
+	if strings.Contains(text, newText) && !strings.Contains(text, oldText) {
 		return ReplaceResult{Status: "ok", Path: clean, Changed: false, OldHash: oldHash, NewHash: oldHash, Reason: "desired text already present"}, nil
 	}
-	count := strings.Count(text, old)
+	count := strings.Count(text, oldText)
 	if count == 0 {
-		detail := findBestPartialMatch(text, old)
+		detail := findBestPartialMatch(text, oldText)
 		msg := "old text not found"
 		if detail != "" {
 			msg += fmt.Sprintf("; best partial match near: %q", detail)
@@ -184,10 +253,9 @@ func ApplyGuardedReplace(req ReplaceRequest) (ReplaceResult, error) {
 	if count > 1 {
 		return ReplaceResult{Status: "conflict", Path: clean, OldHash: oldHash, Reason: "old text is not unique"}, nil
 	}
-	next := strings.Replace(text, old, new, 1)
+	next := strings.Replace(text, oldText, newText, 1)
 	newHash := Hash([]byte(next))
-	// #nosec G703 -- clean is resolved from a validated local path or repo-relative path.
-	if err := os.WriteFile(clean, []byte(next), 0o600); err != nil {
+	if err := scoped.root.WriteFile(scoped.name, []byte(next), 0o600); err != nil {
 		return ReplaceResult{}, err
 	}
 	return ReplaceResult{Status: "ok", Path: clean, Changed: newHash != oldHash, OldHash: oldHash, NewHash: newHash}, nil
@@ -252,18 +320,43 @@ func ReadFileContent(path string) (FileContent, error) {
 }
 
 // ReadFileContentInRepo reads a repo-relative file and returns structured content.
-func ReadFileContentInRepo(repoPath string, path string) (FileContent, error) {
-	resolved, rel, err := repoRelativePath(repoPath, path)
+func ReadFileContentInRepo(repoPath string, filePath string) (FileContent, error) {
+	scoped, err := openScopedFile(repoPath, filePath, false)
 	if err != nil {
 		return FileContent{}, err
 	}
-	fc, err := ReadFileContent(resolved)
+	defer scoped.close()
+
+	data, err := scoped.root.ReadFile(scoped.name)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return FileContent{
+				Path:         scoped.display,
+				RepoPath:     repoPath,
+				RelativePath: scoped.relative,
+				Exists:       false,
+			}, nil
+		}
 		return FileContent{}, err
 	}
-	fc.RepoPath = repoPath
-	fc.RelativePath = rel
-	return fc, nil
+	text := string(data)
+	raw := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	if len(raw) > 0 && raw[len(raw)-1] == "" {
+		raw = raw[:len(raw)-1]
+	}
+	lines := make([]FileLine, 0, len(raw))
+	for i, line := range raw {
+		lines = append(lines, FileLine{Number: i + 1, Text: line})
+	}
+	return FileContent{
+		Path:         scoped.display,
+		RepoPath:     repoPath,
+		RelativePath: scoped.relative,
+		Hash:         Hash(data),
+		Size:         len(data),
+		Exists:       true,
+		Lines:        lines,
+	}, nil
 }
 
 // SearchMatch is one search result.
@@ -283,74 +376,66 @@ type SearchResult struct {
 
 // SearchFiles runs a simple text search in a directory and returns structured results.
 // It reads each non-binary file under root, splits into lines, and matches pattern.
-func SearchFiles(root string, pattern string, maxMatches int) (SearchResult, error) {
+func SearchFiles(rootPath string, pattern string, maxMatches int) (SearchResult, error) {
+	root, err := safefs.Open(rootPath)
+	if err != nil {
+		return SearchResult{Pattern: pattern, Path: rootPath}, err
+	}
+	defer func() { _ = root.Close() }()
+	return searchFilesAtRoot(rootPath, root, ".", pattern, maxMatches)
+}
+
+func searchFilesAtRoot(displayPath string, root *safefs.Root, walkRoot string, pattern string, maxMatches int) (SearchResult, error) {
 	if maxMatches <= 0 {
 		maxMatches = 100
 	}
-	result := SearchResult{Pattern: pattern, Path: root}
-	rootHandle, err := os.OpenRoot(root)
-	if err != nil {
-		return result, err
-	}
-	defer func() { _ = rootHandle.Close() }()
-	seenFiles := 0
-	err = filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
+	walkRoot = filepath.ToSlash(filepath.Clean(walkRoot))
+	result := SearchResult{Pattern: pattern, Path: displayPath}
+	err := fs.WalkDir(root.FS(), walkRoot, func(entryPath string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
-			return nil // skip inaccessible entries
+			return nil
+		}
+		relative := strings.TrimPrefix(entryPath, walkRoot+"/")
+		if entryPath == walkRoot {
+			relative = "."
 		}
 		if d.IsDir() {
-			base := filepath.Base(path)
-			if strings.HasPrefix(base, ".") && path != root {
-				return filepath.SkipDir
+			base := path.Base(entryPath)
+			if strings.HasPrefix(base, ".") && entryPath != walkRoot {
+				return fs.SkipDir
 			}
-			if base == "node_modules" || base == "__pycache__" || base == "vendor" || isTaskRegistryDir(root, path) {
-				return filepath.SkipDir
+			if base == "node_modules" || base == "__pycache__" || base == "vendor" || isTaskRegistryRelative(relative) {
+				return fs.SkipDir
 			}
 			return nil
 		}
-		// Skip binary and large files.
-		ext := strings.ToLower(filepath.Ext(path))
+		ext := strings.ToLower(path.Ext(entryPath))
 		switch ext {
 		case ".exe", ".dll", ".so", ".dylib", ".bin", ".jpg", ".png", ".gif", ".ico",
 			".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".pdf", ".class", ".pyc", ".pyo":
 			return nil
 		}
-		rel, relErr := filepath.Rel(root, path)
-		if relErr != nil || rel == "." {
+		if relative == "." || isProtectedLeanPath(entryPath) {
 			return nil
 		}
-		if isProtectedLeanPath(rel) {
+		data, readErr := root.ReadFile(filepath.FromSlash(entryPath))
+		if readErr != nil || len(data) > 1<<20 {
 			return nil
 		}
-		data, readErr := rootHandle.ReadFile(rel)
-		if readErr != nil {
-			return nil
-		}
-		if len(data) > 1<<20 { // skip files > 1MB
-			return nil
-		}
-		text := string(data)
-		lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
-		fileMatchCount := 0
+		lines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
 		for i, line := range lines {
-			if strings.Contains(line, pattern) {
-				if rel == "" {
-					rel = path
-				}
-				result.Matches = append(result.Matches, SearchMatch{
-					File:       filepath.ToSlash(rel),
-					LineNumber: i + 1,
-					Text:       line,
-				})
-				fileMatchCount++
-				result.Total++
-				if result.Total >= maxMatches {
-					return filepath.SkipAll
-				}
+			if !strings.Contains(line, pattern) {
+				continue
 			}
-		}
-		if fileMatchCount > 0 {
-			seenFiles++
+			result.Matches = append(result.Matches, SearchMatch{
+				File:       relative,
+				LineNumber: i + 1,
+				Text:       line,
+			})
+			result.Total++
+			if result.Total >= maxMatches {
+				return fs.SkipAll
+			}
 		}
 		return nil
 	})
@@ -424,6 +509,7 @@ func ReadFilesInRepo(repoPath string, paths []string) (ReadFilesResult, error) {
 		}
 
 		if !fc.Exists {
+			fr.Error = "file does not exist"
 			result.Files = append(result.Files, fr)
 			continue
 		}
@@ -460,15 +546,21 @@ func ReadFilesInRepo(repoPath string, paths []string) (ReadFilesResult, error) {
 }
 
 // SearchFilesInRepo runs a text search under a repo-relative directory.
-func SearchFilesInRepo(repoPath string, path string, pattern string, maxMatches int) (SearchResult, error) {
-	if strings.TrimSpace(path) == "" {
-		return SearchFiles(repoPath, pattern, maxMatches)
-	}
-	resolved, _, err := repoRelativePath(repoPath, path)
+func SearchFilesInRepo(repoPath string, filePath string, pattern string, maxMatches int) (SearchResult, error) {
+	root, err := safefs.Open(repoPath)
 	if err != nil {
 		return SearchResult{}, err
 	}
-	return SearchFiles(resolved, pattern, maxMatches)
+	defer func() { _ = root.Close() }()
+
+	if strings.TrimSpace(filePath) == "" {
+		return searchFilesAtRoot(root.Path(), root, ".", pattern, maxMatches)
+	}
+	display, relative, err := repoRelativePath(repoPath, filePath)
+	if err != nil {
+		return SearchResult{}, err
+	}
+	return searchFilesAtRoot(display, root, relative, pattern, maxMatches)
 }
 
 // Hash returns a SHA-256 hex digest for data.
@@ -494,20 +586,6 @@ func CreateIfAbsent(req CreateIfAbsentRequest) (ReplaceResult, error) {
 	if strings.TrimSpace(req.Path) == "" {
 		return ReplaceResult{}, errors.New("path is required")
 	}
-	var clean string
-	if strings.TrimSpace(req.RepoPath) != "" {
-		var err error
-		clean, _, err = repoRelativePath(req.RepoPath, req.Path)
-		if err != nil {
-			return ReplaceResult{}, err
-		}
-	} else {
-		var err error
-		clean, err = cleanPath(req.Path)
-		if err != nil {
-			return ReplaceResult{}, err
-		}
-	}
 	content, err := resolveContent(req.Content, req.ContentB64)
 	if err != nil {
 		return ReplaceResult{}, err
@@ -515,21 +593,25 @@ func CreateIfAbsent(req CreateIfAbsentRequest) (ReplaceResult, error) {
 	if content == "" {
 		return ReplaceResult{}, errors.New("content is required (set content or content_b64)")
 	}
-	// #nosec G304 -- clean is resolved from a validated local path or repo-relative path.
-	if _, statErr := os.Stat(clean); statErr == nil {
-		return ReplaceResult{Status: "already_present", Path: clean, Changed: false, Reason: "file already exists"}, nil
+	mode, err := validatedFileMode(req.Mode, 0o644)
+	if err != nil {
+		return ReplaceResult{}, err
+	}
+	scoped, err := openScopedFile(req.RepoPath, req.Path, false)
+	if err != nil {
+		return ReplaceResult{}, err
+	}
+	defer scoped.close()
+	if _, statErr := scoped.root.Stat(scoped.name); statErr == nil {
+		return ReplaceResult{Status: "already_present", Path: scoped.display, Changed: false, Reason: "file already exists"}, nil
 	} else if !errors.Is(statErr, os.ErrNotExist) {
 		return ReplaceResult{}, statErr
 	}
-	mode := os.FileMode(0o644)
-	if req.Mode != 0 {
-		mode = os.FileMode(req.Mode)
-	}
-	if err := os.WriteFile(clean, []byte(content), mode); err != nil {
+	if err := scoped.root.WriteFile(scoped.name, []byte(content), mode); err != nil {
 		return ReplaceResult{}, err
 	}
 	newHash := Hash([]byte(content))
-	return ReplaceResult{Status: "ok", Path: clean, Changed: true, NewHash: newHash}, nil
+	return ReplaceResult{Status: "ok", Path: scoped.display, Changed: true, NewHash: newHash}, nil
 }
 
 // --- AppendUnique ---
@@ -553,20 +635,12 @@ func AppendUnique(req AppendUniqueRequest) (ReplaceResult, error) {
 	if req.ExpectedHash == "" {
 		return ReplaceResult{}, errors.New("expected_hash is required")
 	}
-	var clean string
-	if strings.TrimSpace(req.RepoPath) != "" {
-		var err error
-		clean, _, err = repoRelativePath(req.RepoPath, req.Path)
-		if err != nil {
-			return ReplaceResult{}, err
-		}
-	} else {
-		var err error
-		clean, err = cleanPath(req.Path)
-		if err != nil {
-			return ReplaceResult{}, err
-		}
+	scoped, err := openScopedFile(req.RepoPath, req.Path, false)
+	if err != nil {
+		return ReplaceResult{}, err
 	}
+	defer scoped.close()
+	clean := scoped.display
 	content, err := resolveContent(req.Content, req.ContentB64)
 	if err != nil {
 		return ReplaceResult{}, err
@@ -574,8 +648,7 @@ func AppendUnique(req AppendUniqueRequest) (ReplaceResult, error) {
 	if content == "" {
 		return ReplaceResult{}, errors.New("content is required (set content or content_b64)")
 	}
-	// #nosec G304 -- clean is resolved from a validated local path or repo-relative path.
-	data, readErr := os.ReadFile(clean)
+	data, readErr := scoped.root.ReadFile(scoped.name)
 	if readErr != nil {
 		if errors.Is(readErr, os.ErrNotExist) {
 			return ReplaceResult{Status: "conflict", Path: clean, Reason: "file does not exist"}, nil
@@ -595,15 +668,16 @@ func AppendUnique(req AppendUniqueRequest) (ReplaceResult, error) {
 		separator = "\n"
 	}
 	var next string
-	if len(data) == 0 {
+	switch {
+	case len(data) == 0:
 		next = content
-	} else if strings.HasSuffix(text, separator) {
+	case strings.HasSuffix(text, separator):
 		next = text + content
-	} else {
+	default:
 		next = text + separator + content
 	}
 	newHash := Hash([]byte(next))
-	if err := os.WriteFile(clean, []byte(next), 0o600); err != nil {
+	if err := scoped.root.WriteFile(scoped.name, []byte(next), 0o600); err != nil {
 		return ReplaceResult{}, err
 	}
 	return ReplaceResult{Status: "ok", Path: clean, Changed: true, OldHash: oldHash, NewHash: newHash}, nil
@@ -630,20 +704,12 @@ func DeleteExactBlock(req DeleteExactBlockRequest) (ReplaceResult, error) {
 	if req.ExpectedHash == "" {
 		return ReplaceResult{}, errors.New("expected_hash is required")
 	}
-	var clean string
-	if strings.TrimSpace(req.RepoPath) != "" {
-		var err error
-		clean, _, err = repoRelativePath(req.RepoPath, req.Path)
-		if err != nil {
-			return ReplaceResult{}, err
-		}
-	} else {
-		var err error
-		clean, err = cleanPath(req.Path)
-		if err != nil {
-			return ReplaceResult{}, err
-		}
+	scoped, err := openScopedFile(req.RepoPath, req.Path, false)
+	if err != nil {
+		return ReplaceResult{}, err
 	}
+	defer scoped.close()
+	clean := scoped.display
 	block, err := resolveContent(req.Block, req.BlockB64)
 	if err != nil {
 		return ReplaceResult{}, err
@@ -651,8 +717,7 @@ func DeleteExactBlock(req DeleteExactBlockRequest) (ReplaceResult, error) {
 	if block == "" {
 		return ReplaceResult{}, errors.New("block is required (set block or block_b64)")
 	}
-	// #nosec G304 -- clean is resolved from a validated local path or repo-relative path.
-	data, readErr := os.ReadFile(clean)
+	data, readErr := scoped.root.ReadFile(scoped.name)
 	if readErr != nil {
 		if errors.Is(readErr, os.ErrNotExist) {
 			return ReplaceResult{Status: "conflict", Path: clean, Reason: "file does not exist"}, nil
@@ -675,10 +740,20 @@ func DeleteExactBlock(req DeleteExactBlockRequest) (ReplaceResult, error) {
 	// Collapse triple blank lines that may result from deletion.
 	next = strings.ReplaceAll(next, "\n\n\n", "\n\n")
 	newHash := Hash([]byte(next))
-	if err := os.WriteFile(clean, []byte(next), 0o600); err != nil {
+	if err := scoped.root.WriteFile(scoped.name, []byte(next), 0o600); err != nil {
 		return ReplaceResult{}, err
 	}
 	return ReplaceResult{Status: "ok", Path: clean, Changed: true, OldHash: oldHash, NewHash: newHash}, nil
+}
+
+func validatedFileMode(requested int, fallback os.FileMode) (os.FileMode, error) {
+	if requested == 0 {
+		return fallback, nil
+	}
+	if requested < 0 || requested > 0o777 {
+		return 0, fmt.Errorf("mode must be between 0000 and 0777: %d", requested)
+	}
+	return os.FileMode(requested), nil
 }
 
 // resolveContent returns the content from plain text or base64-encoded text.
@@ -712,20 +787,6 @@ func WriteFile(req WriteFileRequest) (ReplaceResult, error) {
 	if strings.TrimSpace(req.Path) == "" {
 		return ReplaceResult{}, errors.New("path is required")
 	}
-	var clean string
-	if strings.TrimSpace(req.RepoPath) != "" {
-		var err error
-		clean, _, err = repoRelativePath(req.RepoPath, req.Path)
-		if err != nil {
-			return ReplaceResult{}, err
-		}
-	} else {
-		var err error
-		clean, err = cleanPath(req.Path)
-		if err != nil {
-			return ReplaceResult{}, err
-		}
-	}
 	content, err := resolveContent(req.Content, req.ContentB64)
 	if err != nil {
 		return ReplaceResult{}, err
@@ -733,41 +794,38 @@ func WriteFile(req WriteFileRequest) (ReplaceResult, error) {
 	if content == "" {
 		return ReplaceResult{}, errors.New("content is required (set content or content_b64)")
 	}
-	// Check if file exists.
-	// #nosec G304 -- clean is resolved from a validated local path or repo-relative path.
-	existing, readErr := os.ReadFile(clean)
+	mode, err := validatedFileMode(req.Mode, 0o644)
+	if err != nil {
+		return ReplaceResult{}, err
+	}
+	scoped, err := openScopedFile(req.RepoPath, req.Path, true)
+	if err != nil {
+		return ReplaceResult{}, err
+	}
+	defer scoped.close()
+	existing, readErr := scoped.root.ReadFile(scoped.name)
 	if readErr == nil {
-		// File exists.
 		oldHash := Hash(existing)
 		if req.ExpectedHash != "" && oldHash != req.ExpectedHash {
-			return ReplaceResult{Status: "conflict", Path: clean, OldHash: oldHash, Reason: "file hash changed after snapshot"}, nil
+			return ReplaceResult{Status: "conflict", Path: scoped.display, OldHash: oldHash, Reason: "file hash changed after snapshot"}, nil
 		}
 		newHash := Hash([]byte(content))
 		if oldHash == newHash {
-			return ReplaceResult{Status: "ok", Path: clean, Changed: false, OldHash: oldHash, NewHash: oldHash, Reason: "content already matches"}, nil
+			return ReplaceResult{Status: "ok", Path: scoped.display, Changed: false, OldHash: oldHash, NewHash: oldHash, Reason: "content already matches"}, nil
 		}
-		if err := os.WriteFile(clean, []byte(content), 0o600); err != nil {
+		if err := scoped.root.WriteFile(scoped.name, []byte(content), 0o600); err != nil {
 			return ReplaceResult{}, err
 		}
-		return ReplaceResult{Status: "ok", Path: clean, Changed: true, OldHash: oldHash, NewHash: newHash}, nil
+		return ReplaceResult{Status: "ok", Path: scoped.display, Changed: true, OldHash: oldHash, NewHash: newHash}, nil
 	}
 	if !errors.Is(readErr, os.ErrNotExist) {
 		return ReplaceResult{}, readErr
 	}
-	// File doesn't exist. Create parent dirs.
-	dir := filepath.Dir(clean)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return ReplaceResult{}, fmt.Errorf("create parent dirs: %w", err)
-	}
-	mode := os.FileMode(0o644)
-	if req.Mode != 0 {
-		mode = os.FileMode(req.Mode)
-	}
-	if err := os.WriteFile(clean, []byte(content), mode); err != nil {
+	if err := scoped.root.WriteFile(scoped.name, []byte(content), mode); err != nil {
 		return ReplaceResult{}, err
 	}
 	newHash := Hash([]byte(content))
-	return ReplaceResult{Status: "ok", Path: clean, Changed: true, NewHash: newHash}, nil
+	return ReplaceResult{Status: "ok", Path: scoped.display, Changed: true, NewHash: newHash}, nil
 }
 
 // --- ListDir ---
@@ -797,46 +855,62 @@ type ListDirResult struct {
 
 // ListDir returns a structured directory listing.
 func ListDir(req ListDirRequest) (ListDirResult, error) {
-	var dir string
+	var (
+		root     *safefs.Root
+		relative = "."
+		display  string
+		err      error
+	)
 	if strings.TrimSpace(req.RepoPath) != "" {
-		resolved, _, err := repoRelativePath(req.RepoPath, req.Path)
+		root, err = safefs.Open(req.RepoPath)
 		if err != nil {
 			return ListDirResult{}, err
 		}
-		dir = resolved
-	} else {
-		if req.Path == "" {
-			dir = "."
+		if strings.TrimSpace(req.Path) == "" {
+			display = root.Path()
 		} else {
-			var err error
-			dir, err = cleanPath(req.Path)
+			display, relative, err = repoRelativePath(req.RepoPath, req.Path)
 			if err != nil {
+				_ = root.Close()
 				return ListDirResult{}, err
 			}
+			relative = filepath.FromSlash(relative)
+		}
+	} else {
+		filePath := req.Path
+		if strings.TrimSpace(filePath) == "" {
+			filePath = "."
+		}
+		display, err = cleanPath(filePath)
+		if err != nil {
+			return ListDirResult{}, err
+		}
+		root, err = safefs.Open(display)
+		if err != nil {
+			return ListDirResult{}, err
 		}
 	}
+	defer func() { _ = root.Close() }()
 
-	entries, err := os.ReadDir(dir)
+	entries, err := root.ReadDir(relative)
 	if err != nil {
 		return ListDirResult{}, err
 	}
-
 	result := ListDirResult{
-		Path:    dir,
+		Path:    display,
 		Entries: make([]DirEntry, 0, len(entries)),
 	}
-
 	for _, e := range entries {
 		entry := DirEntry{
 			Name:  e.Name(),
-			Path:  filepath.ToSlash(filepath.Join(dir, e.Name())),
+			Path:  filepath.ToSlash(filepath.Join(display, e.Name())),
 			IsDir: e.IsDir(),
 		}
 		if e.Type()&os.ModeSymlink != 0 {
 			entry.IsSymlink = true
 		}
-		info, err := e.Info()
-		if err == nil {
+		info, infoErr := e.Info()
+		if infoErr == nil {
 			entry.Size = info.Size()
 			entry.ModifiedAt = info.ModTime().UTC().Format(time.RFC3339)
 		}
@@ -866,12 +940,8 @@ func isProtectedLeanPath(path string) bool {
 	return strings.HasPrefix(clean, "tasks/") && strings.HasSuffix(clean, ".lean")
 }
 
-func isTaskRegistryDir(root string, path string) bool {
-	rel, err := filepath.Rel(root, path)
-	if err != nil || rel == "." {
-		return false
-	}
-	clean := strings.ToLower(filepath.ToSlash(filepath.Clean(rel)))
+func isTaskRegistryRelative(relative string) bool {
+	clean := strings.ToLower(path.Clean(filepath.ToSlash(relative)))
 	return clean == "obsidian-tasks" || clean == "tasks" || clean == "mcpaihelperproject"
 }
 
@@ -892,45 +962,26 @@ func cleanPath(path string) (string, error) {
 	return clean, nil
 }
 
-func repoRelativePath(repoPath string, path string) (string, string, error) {
+func repoRelativePath(repoPath string, filePath string) (string, string, error) {
 	if strings.TrimSpace(repoPath) == "" {
 		return "", "", errors.New("repo_path is required")
 	}
-	if strings.TrimSpace(path) == "" {
+	if strings.TrimSpace(filePath) == "" {
 		return "", "", errors.New("path is required")
 	}
-	if filepath.IsAbs(path) {
-		return "", "", fmt.Errorf("path must be repo-relative when repo_path is set: %q", path)
+	if filepath.IsAbs(filePath) || filepath.VolumeName(filePath) != "" {
+		return "", "", fmt.Errorf("path must be repo-relative when repo_path is set: %q", filePath)
 	}
 	repoAbs, err := filepath.Abs(repoPath)
 	if err != nil {
 		return "", "", err
 	}
-	info, err := os.Stat(repoAbs)
-	if err != nil {
-		return "", "", err
-	}
-	if !info.IsDir() {
-		return "", "", fmt.Errorf("repo_path %q is not a directory", repoAbs)
-	}
-	rel := filepath.Clean(path)
+	rel := filepath.Clean(filePath)
 	if rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
-		return "", "", fmt.Errorf("path escapes repo_path: %q", path)
+		return "", "", fmt.Errorf("path escapes repo_path: %q", filePath)
 	}
 	if err := rejectProtectedLeanPath(rel); err != nil {
 		return "", "", err
 	}
-	repoReal, err := filepath.EvalSymlinks(repoAbs)
-	if err != nil {
-		return "", "", err
-	}
-	resolved := filepath.Join(repoAbs, rel)
-	realPath, err := filepath.EvalSymlinks(resolved)
-	if err != nil {
-		return "", "", err
-	}
-	if realPath != repoReal && !strings.HasPrefix(realPath, repoReal+string(os.PathSeparator)) {
-		return "", "", fmt.Errorf("path escapes repo_path via symlink: %q", path)
-	}
-	return realPath, filepath.ToSlash(rel), nil
+	return filepath.Join(repoAbs, rel), filepath.ToSlash(rel), nil
 }

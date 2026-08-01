@@ -1,11 +1,7 @@
 package mcp
 
 import (
-	"context"
 	"strings"
-
-	basemcp "github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/zol/mcp-ai-helper/internal/tasks"
 )
@@ -26,12 +22,6 @@ type taskPlanSummary struct {
 	ModelLevel         string   `json:"model_level"`
 	AcceptanceCriteria []string `json:"acceptance_criteria,omitempty"`
 	VerificationPlan   []string `json:"verification_plan,omitempty"`
-}
-
-type taskPacketRequest struct {
-	RepoPath          string `json:"repo_path"`
-	ID                string `json:"id"`
-	CurrentModelLevel string `json:"current_model_level"`
 }
 
 type taskPacketResult struct {
@@ -88,60 +78,6 @@ type planTaskExecutionResult struct {
 	SwitchReason              string            `json:"switch_reason,omitempty"`
 	PlanningOnly              bool              `json:"planning_only"`
 	MinimalNextDataCollection []string          `json:"minimal_next_data_collection,omitempty"`
-}
-
-func registerPlanningTools(srv *server.MCPServer, deps *Server) {
-	cfg, _, _, _, _ := deps.loadDeps()
-	reasoningPatternsEnabled := cfg == nil || cfg.LayerEnabled("reasoning_patterns")
-	if reasoningPatternsEnabled {
-		srv.AddTool(basemcp.NewTool("reasoning_patterns",
-			basemcp.WithDescription("List reusable reasoning patterns with required worksheet artifacts and validation gates."),
-		), func(_ context.Context, _ basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
-			return structured(map[string]any{"patterns": defaultReasoningPatterns()})
-		})
-	}
-
-	srv.AddTool(basemcp.NewTool("task_packet",
-		basemcp.WithDescription("Return a compact task packet for junior-model execution."),
-		basemcp.WithString("repo_path", basemcp.Required()),
-		basemcp.WithString("id", basemcp.Required()),
-		basemcp.WithString("current_model_level"),
-	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
-		var args taskPacketRequest
-		if err := bind(req, &args); err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
-		}
-		backend, err := deps.loadTaskBackendForRepo(args.RepoPath)
-		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
-		}
-		task, _, err := backend.Get(ctx, args.RepoPath, args.ID)
-		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
-		}
-		return structured(buildTaskPacket(task, args.CurrentModelLevel, reasoningPatternsEnabled))
-	})
-
-	srv.AddTool(basemcp.NewTool("plan_task_execution",
-		basemcp.WithDescription("Return compact planning gate for the next repository task."),
-		basemcp.WithString("repo_path", basemcp.Required()),
-		basemcp.WithString("task"),
-		basemcp.WithString("current_model_level"),
-	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
-		var args planTaskExecutionRequest
-		if err := bind(req, &args); err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
-		}
-		backend, err := deps.loadTaskBackendForRepo(args.RepoPath)
-		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
-		}
-		list, _, err := backend.ListAll(ctx, args.RepoPath)
-		if err != nil {
-			return basemcp.NewToolResultError(err.Error()), nil
-		}
-		return structured(planTaskExecution(list, args))
-	})
 }
 
 func buildTaskPacket(task tasks.Task, currentModelLevel string, reasoningPatternsEnabled ...bool) taskPacketResult {

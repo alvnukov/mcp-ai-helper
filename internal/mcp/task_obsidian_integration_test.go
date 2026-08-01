@@ -79,8 +79,12 @@ Child body with parent link.
 
 1. Check parent_id
 `
-	os.WriteFile(filepath.Join(dir, "integ-epic.md"), []byte(epic), 0o644)
-	os.WriteFile(filepath.Join(dir, "integ-child.md"), []byte(child), 0o644)
+	if err := os.WriteFile(filepath.Join(dir, "integ-epic.md"), []byte(epic), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "integ-child.md"), []byte(child), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	return dir
 }
 
@@ -178,7 +182,7 @@ func TestObsidianIntegrationServer(t *testing.T) {
 	repoPath := "/test-repo"
 
 	t.Run("ListAll", func(t *testing.T) {
-		all, source, err := backend.ListAll(nil, repoPath)
+		all, source, err := backend.ListAll(t.Context(), repoPath)
 		if err != nil {
 			t.Fatalf("ListAll: %v", err)
 		}
@@ -191,7 +195,7 @@ func TestObsidianIntegrationServer(t *testing.T) {
 	})
 
 	t.Run("ListCurrent", func(t *testing.T) {
-		active, _, err := backend.ListCurrent(nil, repoPath)
+		active, _, err := backend.ListCurrent(t.Context(), repoPath)
 		if err != nil {
 			t.Fatalf("ListCurrent: %v", err)
 		}
@@ -208,7 +212,7 @@ func TestObsidianIntegrationServer(t *testing.T) {
 	})
 
 	t.Run("GetEpic", func(t *testing.T) {
-		task, source, err := backend.Get(nil, repoPath, "integ-epic")
+		task, source, err := backend.Get(t.Context(), repoPath, "integ-epic")
 		if err != nil {
 			t.Fatalf("Get integ-epic: %v", err)
 		}
@@ -251,7 +255,7 @@ func TestObsidianIntegrationServer(t *testing.T) {
 	})
 
 	t.Run("GetChild", func(t *testing.T) {
-		task, _, err := backend.Get(nil, repoPath, "integ-child")
+		task, _, err := backend.Get(t.Context(), repoPath, "integ-child")
 		if err != nil {
 			t.Fatalf("Get integ-child: %v", err)
 		}
@@ -264,7 +268,7 @@ func TestObsidianIntegrationServer(t *testing.T) {
 	})
 
 	t.Run("Search", func(t *testing.T) {
-		all, _, err := backend.ListAll(nil, repoPath)
+		all, _, err := backend.ListAll(t.Context(), repoPath)
 		if err != nil {
 			t.Fatalf("ListAll for search: %v", err)
 		}
@@ -280,7 +284,7 @@ func TestObsidianIntegrationServer(t *testing.T) {
 	})
 
 	t.Run("SetStatus", func(t *testing.T) {
-		result, err := backend.SetStatus(nil, tasks.StatusRequest{
+		result, err := backend.SetStatus(t.Context(), tasks.StatusRequest{
 			RepoPath: repoPath, ID: "integ-child", Status: "in_progress",
 		})
 		if err != nil {
@@ -295,7 +299,7 @@ func TestObsidianIntegrationServer(t *testing.T) {
 		if !strings.Contains(result.Validation, "file written") {
 			t.Fatalf("validation = %q", result.Validation)
 		}
-		got, _, err := backend.Get(nil, repoPath, "integ-child")
+		got, _, err := backend.Get(t.Context(), repoPath, "integ-child")
 		if err != nil {
 			t.Fatalf("Get after SetStatus: %v", err)
 		}
@@ -305,7 +309,7 @@ func TestObsidianIntegrationServer(t *testing.T) {
 	})
 
 	t.Run("Upsert", func(t *testing.T) {
-		result, err := backend.Upsert(nil, tasks.AddRequest{
+		result, err := backend.Upsert(t.Context(), tasks.AddRequest{
 			RepoPath: repoPath, ID: "integ-new", Status: "todo",
 			Title: "New Task", Priority: "low", ModelLevel: "low",
 			Body: "New task body.",
@@ -319,7 +323,7 @@ func TestObsidianIntegrationServer(t *testing.T) {
 		if result.Source != "obsidian_registry" {
 			t.Fatalf("source = %q", result.Source)
 		}
-		all, _, err := backend.ListAll(nil, repoPath)
+		all, _, err := backend.ListAll(t.Context(), repoPath)
 		if err != nil {
 			t.Fatalf("ListAll after upsert: %v", err)
 		}
@@ -329,7 +333,7 @@ func TestObsidianIntegrationServer(t *testing.T) {
 	})
 
 	t.Run("Delete", func(t *testing.T) {
-		_, err := backend.Delete(nil, tasks.DeleteRequest{RepoPath: repoPath, ID: "integ-new"})
+		_, err := backend.Delete(t.Context(), tasks.DeleteRequest{RepoPath: repoPath, ID: "integ-new"})
 		if err != nil {
 			t.Fatalf("Delete: %v", err)
 		}
@@ -339,7 +343,7 @@ func TestObsidianIntegrationServer(t *testing.T) {
 	})
 
 	t.Run("BatchUpsert", func(t *testing.T) {
-		result, err := backend.BatchUpsert(nil, tasks.BatchUpsertRequest{
+		result, err := backend.BatchUpsert(t.Context(), tasks.BatchUpsertRequest{
 			RepoPath: repoPath,
 			Tasks: []tasks.AddRequest{
 				{ID: "batch-1", Status: "todo", Title: "Batch One"},
@@ -367,7 +371,7 @@ func TestObsidianIntegrationServer(t *testing.T) {
 		if len(res.Added) < 1 {
 			t.Fatalf("expected at least 1 exported, got %d added", len(res.Added))
 		}
-		exported, _, err := targetBackend.ListAll(nil, repoPath)
+		exported, _, err := targetBackend.ListAll(t.Context(), repoPath)
 		if err != nil {
 			t.Fatalf("ListAll on target: %v", err)
 		}
@@ -389,7 +393,7 @@ func TestObsidianIntegrationServer(t *testing.T) {
 		if len(res.Added) < 1 {
 			t.Fatal("dry-run should report adds")
 		}
-		exported, _, _ := targetBackend.ListAll(nil, repoPath)
+		exported, _, _ := targetBackend.ListAll(t.Context(), repoPath)
 		if len(exported) != 0 {
 			t.Fatalf("dry-run should not write files, got %d", len(exported))
 		}

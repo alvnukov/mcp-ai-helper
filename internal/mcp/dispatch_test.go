@@ -54,6 +54,7 @@ func resultText(t *testing.T, result *basemcp.CallToolResult) string {
 	t.Helper()
 	if result == nil {
 		t.Fatal("handler returned no result")
+		return ""
 	}
 	var text strings.Builder
 	for _, content := range result.Content {

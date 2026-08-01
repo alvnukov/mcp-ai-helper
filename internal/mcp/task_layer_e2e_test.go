@@ -76,7 +76,7 @@ func TestLeanBackedTaskLayerEndToEnd(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected invalid registry diagnostics")
 	}
-	if source != "lean_registry" || !strings.Contains(err.Error(), "Lean task read failed") {
+	if source != "lean_registry" || !strings.Contains(err.Error(), "lean task read failed") {
 		t.Fatalf("invalid registry did not fail closed: source=%q err=%v", source, err)
 	}
 }

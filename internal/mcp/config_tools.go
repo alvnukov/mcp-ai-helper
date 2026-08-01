@@ -23,13 +23,6 @@ type configPathRequest struct {
 	RepoPath string `json:"repo_path"`
 }
 
-type configReplaceRequest struct {
-	Path       string `json:"path"`
-	ConfigYAML string `json:"config_yaml"`
-	Reload     *bool  `json:"reload"`
-	RepoPath   string `json:"repo_path"`
-}
-
 type configOptionSetRequest struct {
 	Path       string `json:"path"`
 	Value      string `json:"value"`
@@ -350,33 +343,33 @@ func applyConfigOption(cfg *config.Config, optionPath string, value string) erro
 	case "layers.reasoning_patterns.enabled":
 		cfg.Layers.ReasoningPatterns.Enabled = boolValue(value)
 	case "command_policy.default_timeout_seconds":
-		cfg.CommandPolicy.DefaultTimeoutSeconds = positiveIntValue(optionPath, value)
+		cfg.CommandPolicy.DefaultTimeoutSeconds = positiveIntValue(value)
 	case "command_policy.max_output_bytes":
-		cfg.CommandPolicy.MaxOutputBytes = positiveIntValue(optionPath, value)
+		cfg.CommandPolicy.MaxOutputBytes = positiveIntValue(value)
 	case "command_policy.max_lines":
-		cfg.CommandPolicy.MaxLines = positiveIntValue(optionPath, value)
+		cfg.CommandPolicy.MaxLines = positiveIntValue(value)
 	case "command_policy.log_dir":
-		cfg.CommandPolicy.LogDir = nonEmptyStringValue(optionPath, value)
+		cfg.CommandPolicy.LogDir = nonEmptyStringValue(value)
 	case "command_policy.log_enabled":
 		cfg.CommandPolicy.LogEnabled = boolValue(value)
 	case "command_policy.log_retention_days":
-		cfg.CommandPolicy.LogRetentionDays = positiveIntValue(optionPath, value)
+		cfg.CommandPolicy.LogRetentionDays = positiveIntValue(value)
 	case "command_policy.log_max_records":
-		cfg.CommandPolicy.LogMaxRecords = positiveIntValue(optionPath, value)
+		cfg.CommandPolicy.LogMaxRecords = positiveIntValue(value)
 	case "command_policy.log_compress":
 		cfg.CommandPolicy.LogCompress = derefBool(boolValue(value))
 	case "pipeline_policy.max_return_chars":
-		cfg.PipelinePolicy.MaxReturnChars = positiveIntValue(optionPath, value)
+		cfg.PipelinePolicy.MaxReturnChars = positiveIntValue(value)
 	case "pipeline_policy.require_evidence_for_analysis":
 		cfg.PipelinePolicy.RequireEvidenceForAnalysis = derefBool(boolValue(value))
 	case "web_policy.timeout_seconds":
-		cfg.WebPolicy.TimeoutSeconds = positiveIntValue(optionPath, value)
+		cfg.WebPolicy.TimeoutSeconds = positiveIntValue(value)
 	case "task_registry.backend":
 		cfg.TaskRegistry.Backend = registryBackendValue(value)
 	case "task_registry.obsidian.path":
-		cfg.TaskRegistry.Obsidian.Path = nonEmptyStringValue(optionPath, value)
+		cfg.TaskRegistry.Obsidian.Path = nonEmptyStringValue(value)
 	case "task_registry.obsidian.vault":
-		cfg.TaskRegistry.Obsidian.Vault = nonEmptyStringValue(optionPath, value)
+		cfg.TaskRegistry.Obsidian.Vault = nonEmptyStringValue(value)
 	default:
 		return fmt.Errorf("unsupported config option path %q; use config_schema for allowlisted options", optionPath)
 	}
@@ -421,7 +414,7 @@ func derefBool(value *bool) bool {
 	return value != nil && *value
 }
 
-func positiveIntValue(optionPath string, value string) int {
+func positiveIntValue(value string) int {
 	parsed, err := strconv.Atoi(value)
 	if err != nil || parsed <= 0 {
 		return 0
@@ -429,7 +422,7 @@ func positiveIntValue(optionPath string, value string) int {
 	return parsed
 }
 
-func nonEmptyStringValue(optionPath string, value string) string {
+func nonEmptyStringValue(value string) string {
 	if strings.TrimSpace(value) == "" {
 		return ""
 	}

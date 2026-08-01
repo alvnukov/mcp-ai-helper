@@ -414,7 +414,7 @@ func (j JiraConfig) ResolvedAPIKey() string {
 	return ""
 }
 
-// Load reads a YAML config file and applies safe defaults.
+// ensureDefaultConfigFile creates the default configuration with owner-only permissions when absent.
 // #nosec G703 -- path from validated config, local fs operations only
 func ensureDefaultConfigFile(path string) error {
 	if strings.TrimSpace(path) == "" {
@@ -431,6 +431,7 @@ func ensureDefaultConfigFile(path string) error {
 	return os.WriteFile(path, []byte(defaultConfigYAML()), 0o600)
 }
 
+// Load reads, validates, and defaults the selected YAML configuration file.
 func Load(path string) (*Config, error) {
 	if path == "" {
 		path = os.Getenv("MCP_AI_HELPER_CONFIG")

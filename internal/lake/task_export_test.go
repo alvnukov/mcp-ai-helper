@@ -360,7 +360,6 @@ func prepareLakeTestRepoWithTask(t *testing.T) string {
 }
 
 func decodeJSONOutput(t *testing.T, result CommandResult, target any) {
-
 	t.Helper()
 	output := strings.Join(result.Output, "\n")
 	if output == "" {

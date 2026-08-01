@@ -45,7 +45,7 @@ func TestCheckConfSpace_NotConfigured(t *testing.T) {
 	}
 }
 
-func TestRegisterConfluenceTools(t *testing.T) {
+func TestRegisterConfluenceTools(_ *testing.T) {
 	// verify tools register without panic
 	srv := server.NewMCPServer("test", "1.0")
 	deps := &Server{
@@ -67,9 +67,11 @@ func TestRegisterConfluenceTools(t *testing.T) {
 
 func TestCheckConfSpace_Integration(t *testing.T) {
 	// simulate conf_read flow: get page, check space
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"id":"123","type":"page","title":"Test","space":{"key":"VEGA"}}`))
+		if _, err := w.Write([]byte(`{"id":"123","type":"page","title":"Test","space":{"key":"VEGA"}}`)); err != nil {
+			t.Errorf("write test response: %v", err)
+		}
 	}))
 	defer srv.Close()
 

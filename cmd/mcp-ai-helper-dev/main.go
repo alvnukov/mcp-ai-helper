@@ -156,10 +156,7 @@ func (m *childManager) handleLocal(line []byte) bool {
 }
 
 func (m *childManager) build() error {
-	goBinary, err := resolveGoBinary(m.repoRoot)
-	if err != nil {
-		return err
-	}
+	goBinary := resolveGoBinary(m.repoRoot)
 	// #nosec G204 -- internal go build with fixed args
 	cmd := exec.Command(goBinary, "build", "-o", m.binaryPath, "./cmd/mcp-ai-helper")
 	cmd.Dir = m.repoRoot
@@ -172,12 +169,12 @@ func (m *childManager) build() error {
 	return nil
 }
 
-func resolveGoBinary(repoRoot string) (string, error) {
+func resolveGoBinary(repoRoot string) string {
 	modPath := filepath.Join(repoRoot, "go.mod")
 	// #nosec G304 -- modPath is repo-relative, reading go.mod is the intended behavior
 	data, err := os.ReadFile(modPath)
 	if err != nil {
-		return "go", nil
+		return "go"
 	}
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
@@ -188,13 +185,13 @@ func resolveGoBinary(repoRoot string) (string, error) {
 				sdkPath := filepath.Join(home, "sdk", "go"+version, "bin", "go")
 				// #nosec G703 -- sdkPath is built from go version parsed from go.mod, not unsanitized user input
 				if _, err := os.Stat(sdkPath); err == nil {
-					return sdkPath, nil
+					return sdkPath
 				}
 			}
 			break
 		}
 	}
-	return "go", nil
+	return "go"
 }
 
 func (m *childManager) rebuildAndRestart() error {
@@ -306,7 +303,7 @@ func (m *childManager) forward(line []byte) error {
 	m.mu.Unlock()
 	if _, err := stdin.Write(append(line, '\n')); err != nil {
 		if restartErr := m.restart(false); restartErr != nil {
-			return fmt.Errorf("write to child failed: %w; restart failed: %v", err, restartErr)
+			return fmt.Errorf("write to child failed: %w; restart failed: %w", err, restartErr)
 		}
 		m.mu.Lock()
 		stdin = m.stdin
@@ -372,7 +369,7 @@ func (m *childManager) writeLine(line []byte) {
 func (m *childManager) respondText(id json.RawMessage, text string) {
 	response := map[string]any{
 		"jsonrpc": "2.0",
-		"id":      json.RawMessage(id),
+		"id":      id,
 		"result": map[string]any{
 			"content": []map[string]string{{"type": "text", "text": text}},
 		},
@@ -446,7 +443,7 @@ func writeRPCError(w io.Writer, id json.RawMessage, code int, message string) {
 		},
 	}
 	if len(id) > 0 {
-		response["id"] = json.RawMessage(id)
+		response["id"] = id
 	}
 	data, _ := json.Marshal(response)
 	_, _ = w.Write(append(data, '\n'))

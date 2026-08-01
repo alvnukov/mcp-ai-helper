@@ -228,7 +228,11 @@ func getSearchBody(ctx context.Context, policy config.WebPolicy, rawURL string, 
 		result.Diagnostics = append(result.Diagnostics, diag("search_failed", err.Error()))
 		return nil, false, false
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			result.Diagnostics = append(result.Diagnostics, diag("search_close_failed", closeErr.Error()))
+		}
+	}()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		result.Diagnostics = append(result.Diagnostics, diag("search_http_status", fmt.Sprintf("unexpected HTTP status %d", resp.StatusCode)))
 		return nil, false, false

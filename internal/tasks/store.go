@@ -1,3 +1,4 @@
+// Package tasks defines task data types and registry access.
 package tasks
 
 import (
@@ -13,12 +14,14 @@ import (
 var taskIDPattern = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 var branchTypePattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 
+// ErrLegacyTaskStoreDisabled is returned by compatibility methods that no longer persist task state.
 var ErrLegacyTaskStoreDisabled = errors.New("legacy task file store is disabled; use the canonical Lean/Lake task registry")
 
 // Store is retained only as a dependency placeholder for older internal wiring.
 // It intentionally performs no task persistence; task state is Lean/Lake-owned.
 type Store struct{}
 
+// Task is the canonical task projection shared by registry backends and MCP responses.
 type Task struct {
 	ID                 string    `json:"id"`
 	TaskType           string    `json:"task_type,omitempty"`
@@ -40,6 +43,7 @@ type Task struct {
 	UpdatedAt          time.Time `json:"updated_at"`
 }
 
+// AddRequest defines the complete data required to create or import a task.
 type AddRequest struct {
 	RepoPath           string    `json:"repo_path"`
 	ID                 string    `json:"id"`
@@ -60,22 +64,26 @@ type AddRequest struct {
 	PreserveTimestamps bool      `json:"preserve_timestamps,omitempty"`
 }
 
+// ListRequest defines optional status and text filters for task discovery.
 type ListRequest struct {
 	RepoPath string `json:"repo_path"`
 	Status   string `json:"status"`
 	Query    string `json:"query"`
 }
 
+// GetRequest identifies one task in a repository registry.
 type GetRequest struct {
 	RepoPath string `json:"repo_path"`
 	ID       string `json:"id"`
 }
 
+// DeleteRequest identifies one task to remove from a repository registry.
 type DeleteRequest struct {
 	RepoPath string `json:"repo_path"`
 	ID       string `json:"id"`
 }
 
+// UpdateRequest defines the mutable fields of an existing task.
 type UpdateRequest struct {
 	RepoPath           string   `json:"repo_path"`
 	ID                 string   `json:"id"`
@@ -93,12 +101,14 @@ type UpdateRequest struct {
 	VerificationPlan   []string `json:"verification_plan"`
 }
 
+// StatusRequest identifies one task and its target lifecycle status.
 type StatusRequest struct {
 	RepoPath string `json:"repo_path"`
 	ID       string `json:"id"`
 	Status   string `json:"status"`
 }
 
+// BatchUpsertRequest defines an authoritative task batch and missing-task policy.
 type BatchUpsertRequest struct {
 	RepoPath       string       `json:"repo_path"`
 	Tasks          []AddRequest `json:"tasks"`
@@ -107,6 +117,7 @@ type BatchUpsertRequest struct {
 	ActiveStatuses []string     `json:"active_statuses"`
 }
 
+// BatchUpsertResult reports tasks changed by an authoritative batch mutation.
 type BatchUpsertResult struct {
 	Upserted     []Task   `json:"upserted"`
 	Closed       []Task   `json:"closed"`
@@ -115,18 +126,35 @@ type BatchUpsertResult struct {
 	ChangedFiles []string `json:"changed_files,omitempty"`
 }
 
+// NewStore returns the disabled legacy store compatibility placeholder.
 func NewStore(_ any) *Store { return &Store{} }
 
-func (s *Store) Add(AddRequest) (Task, error)          { return Task{}, ErrLegacyTaskStoreDisabled }
-func (s *Store) Update(UpdateRequest) (Task, error)    { return Task{}, ErrLegacyTaskStoreDisabled }
-func (s *Store) SetStatus(StatusRequest) (Task, error) { return Task{}, ErrLegacyTaskStoreDisabled }
+// Add reports that persistence through the legacy store is disabled.
+func (s *Store) Add(AddRequest) (Task, error) { return Task{}, ErrLegacyTaskStoreDisabled }
+
+// Update reports that persistence through the legacy store is disabled.
+func (s *Store) Update(UpdateRequest) (Task, error) { return Task{}, ErrLegacyTaskStoreDisabled }
+
+// SetStatus reports that persistence through the legacy store is disabled.
+func (s *Store) SetStatus(StatusRequest) (Task, error) {
+	return Task{}, ErrLegacyTaskStoreDisabled
+}
+
+// BatchUpsert reports that persistence through the legacy store is disabled.
 func (s *Store) BatchUpsert(BatchUpsertRequest) (BatchUpsertResult, error) {
 	return BatchUpsertResult{}, ErrLegacyTaskStoreDisabled
 }
-func (s *Store) List(ListRequest) ([]Task, error) { return nil, ErrLegacyTaskStoreDisabled }
-func (s *Store) Get(GetRequest) (Task, error)     { return Task{}, ErrLegacyTaskStoreDisabled }
-func (s *Store) Delete(DeleteRequest) error       { return ErrLegacyTaskStoreDisabled }
 
+// List reports that reads through the legacy store are disabled.
+func (s *Store) List(ListRequest) ([]Task, error) { return nil, ErrLegacyTaskStoreDisabled }
+
+// Get reports that reads through the legacy store are disabled.
+func (s *Store) Get(GetRequest) (Task, error) { return Task{}, ErrLegacyTaskStoreDisabled }
+
+// Delete reports that persistence through the legacy store is disabled.
+func (s *Store) Delete(DeleteRequest) error { return ErrLegacyTaskStoreDisabled }
+
+// WorktreePathForID returns the canonical repository-relative worktree path for a task ID.
 func WorktreePathForID(id string) string {
 	id = cleanTaskID(id)
 	if id == "" {
@@ -135,6 +163,7 @@ func WorktreePathForID(id string) string {
 	return filepath.ToSlash(filepath.Join(".worktrees", id))
 }
 
+// BranchForTask returns the canonical branch name for a validated task type and ID.
 func BranchForTask(taskType string, taskID string) (string, error) {
 	taskType = cleanTaskType(taskType)
 	taskID = cleanTaskID(taskID)
@@ -150,6 +179,7 @@ func BranchForTask(taskType string, taskID string) (string, error) {
 	return taskType + "/" + taskID, nil
 }
 
+// NormalizeWorktreeFields validates and canonicalizes a task's worktree path and branch.
 func NormalizeWorktreeFields(task *Task) error {
 	if task == nil {
 		return errors.New("task is nil")
@@ -197,6 +227,7 @@ func NormalizeWorktreeFields(task *Task) error {
 	return nil
 }
 
+// WithWorktreeContext returns a task enriched with canonical worktree paths and existence state.
 func WithWorktreeContext(repoPath string, task Task) Task {
 	if task.ID == "" {
 		return task
@@ -222,6 +253,7 @@ func WithWorktreeContext(repoPath string, task Task) Task {
 	return task
 }
 
+// NormalizeModelLevel validates and canonicalizes a task's minimum model level.
 func NormalizeModelLevel(value string) (string, error) {
 	value = strings.ToLower(strings.TrimSpace(value))
 	value = strings.ReplaceAll(value, "-", "_")

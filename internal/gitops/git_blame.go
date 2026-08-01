@@ -8,11 +8,13 @@ import (
 	"strings"
 )
 
+// BlameRequest selects one repository-relative file for blame inspection.
 type BlameRequest struct {
 	RepoPath string `json:"repo_path"`
 	File     string `json:"file"`
 }
 
+// BlameLine describes the commit attribution for one source line.
 type BlameLine struct {
 	Hash    string `json:"hash"`
 	Author  string `json:"author"`
@@ -21,11 +23,13 @@ type BlameLine struct {
 	Content string `json:"content"`
 }
 
+// BlameResult contains bounded line-level attribution records.
 type BlameResult struct {
 	Lines []BlameLine `json:"lines"`
 	Total int         `json:"total"`
 }
 
+// Blame returns porcelain blame attribution for a repository-relative file.
 func Blame(ctx context.Context, req BlameRequest) (BlameResult, error) {
 	if strings.TrimSpace(req.RepoPath) == "" {
 		return BlameResult{}, errors.New("repo_path is required")

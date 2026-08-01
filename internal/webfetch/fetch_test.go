@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -20,9 +22,25 @@ func testPolicy(t *testing.T) config.WebPolicy {
 	return config.WebPolicy{CacheDir: t.TempDir(), MaxSourceBytes: 1024, TimeoutSeconds: 2, MaxRedirects: 3, AllowedSchemes: []string{"http"}, AllowedHosts: []string{"127.0.0.1"}, AcceptedContentTypes: []string{"text/html", "text/plain"}}
 }
 
+var errResponseBodyClose = errors.New("response body close failed")
+
+type closingErrorBody struct {
+	io.Reader
+}
+
+func (closingErrorBody) Close() error {
+	return errResponseBodyClose
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
+}
+
 func TestFetchStoresSourceLosslesslyAndReturnsMetadataOnly(t *testing.T) {
 	raw := []byte("<html><head><title>ok</title></head><body>secret page body</body></html>")
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write(raw)
 	}))
@@ -57,7 +75,7 @@ func TestFetchStoresSourceLosslesslyAndReturnsMetadataOnly(t *testing.T) {
 }
 
 func TestFetchReportsCacheHitOnRepeat(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		_, _ = w.Write([]byte("same"))
 	}))
@@ -106,7 +124,7 @@ func TestFetchDeniedProtocolFailsClosed(t *testing.T) {
 }
 
 func TestFetchSizeLimitIsIncomplete(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		_, _ = w.Write([]byte("0123456789"))
 	}))
@@ -123,7 +141,7 @@ func TestFetchSizeLimitIsIncomplete(t *testing.T) {
 }
 
 func TestFetchContentTypeDenied(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
 		_, _ = w.Write([]byte("png"))
 	}))
@@ -138,7 +156,7 @@ func TestFetchContentTypeDenied(t *testing.T) {
 }
 
 func TestReadReturnsBoundedFragment(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		_, _ = w.Write([]byte(strings.Repeat("abc ", 2000)))
 	}))
@@ -156,7 +174,7 @@ func TestReadReturnsBoundedFragment(t *testing.T) {
 }
 
 func TestFindReturnsBoundedSnippets(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		_, _ = w.Write([]byte("alpha needle beta needle gamma needle delta"))
 	}))
@@ -172,5 +190,25 @@ func TestFindReturnsBoundedSnippets(t *testing.T) {
 	}
 	if strings.Contains(found.Matches[0].Snippet, "gamma") {
 		t.Fatalf("snippet is not bounded: %#v", found.Matches[0])
+	}
+}
+
+func TestFetchReturnsResponseBodyCloseError(t *testing.T) {
+	client := NewClient(testPolicy(t))
+	client.http = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/plain"}},
+			Body:       closingErrorBody{Reader: strings.NewReader("ok")},
+			Request:    req,
+		}, nil
+	})}
+
+	result, err := client.Fetch(context.Background(), FetchRequest{URL: "http://127.0.0.1/test"})
+	if !errors.Is(err, errResponseBodyClose) {
+		t.Fatalf("expected response close error, got %v", err)
+	}
+	if result.Status != "complete" {
+		t.Fatalf("expected completed fetch result, got %#v", result)
 	}
 }

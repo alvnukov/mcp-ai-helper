@@ -1,9 +1,10 @@
 package jira
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
 
@@ -11,6 +12,13 @@ import (
 
 	"github.com/zol/mcp-ai-helper/internal/config"
 )
+
+func writeJiraTestResponse(t *testing.T, w http.ResponseWriter, body []byte) {
+	t.Helper()
+	if _, err := w.Write(body); err != nil {
+		t.Errorf("write test response: %v", err)
+	}
+}
 
 func newTestClient(url string) (*gojira.Client, error) {
 	return gojira.NewClient(http.DefaultClient, url)
@@ -46,8 +54,7 @@ func TestNewClient_BearerAuth(t *testing.T) {
 }
 
 func TestNewClient_EnvAPIKey(t *testing.T) {
-	os.Setenv("TEST_JIRA_KEY", "env-key-value")
-	defer os.Unsetenv("TEST_JIRA_KEY")
+	t.Setenv("TEST_JIRA_KEY", "env-key-value")
 
 	c, err := NewClient(config.JiraConfig{
 		URL:       "https://example.atlassian.net",
@@ -79,9 +86,9 @@ func TestNewClient_MissingAPIKey(t *testing.T) {
 // --- Issue tests ---
 
 func TestSearchIssues(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"issues":[{"key":"TEST-1","fields":{"summary":"test","status":{"name":"Open"},"priority":{"name":"High"},"assignee":{"displayName":"User"}}}]}`))
+		writeJiraTestResponse(t, w, []byte(`{"issues":[{"key":"TEST-1","fields":{"summary":"test","status":{"name":"Open"},"priority":{"name":"High"},"assignee":{"displayName":"User"}}}]}`))
 	}))
 	defer srv.Close()
 
@@ -101,9 +108,9 @@ func TestSearchIssues(t *testing.T) {
 }
 
 func TestGetIssue(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"key":"TEST-1","fields":{"summary":"test issue"}}`))
+		writeJiraTestResponse(t, w, []byte(`{"key":"TEST-1","fields":{"summary":"test issue"}}`))
 	}))
 	defer srv.Close()
 
@@ -123,9 +130,9 @@ func TestGetIssue(t *testing.T) {
 }
 
 func TestUpdateIssue(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"key":"TEST-1","fields":{"summary":"new"}}`))
+		writeJiraTestResponse(t, w, []byte(`{"key":"TEST-1","fields":{"summary":"new"}}`))
 	}))
 	defer srv.Close()
 
@@ -144,9 +151,9 @@ func TestUpdateIssue(t *testing.T) {
 // --- Transition tests ---
 
 func TestGetTransitions(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"transitions":[{"id":"1","name":"Done"}]}`))
+		writeJiraTestResponse(t, w, []byte(`{"transitions":[{"id":"1","name":"Done"}]}`))
 	}))
 	defer srv.Close()
 
@@ -166,9 +173,9 @@ func TestGetTransitions(t *testing.T) {
 }
 
 func TestDoTransition_NotFound(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"transitions":[{"id":"1","name":"In Progress"}]}`))
+		writeJiraTestResponse(t, w, []byte(`{"transitions":[{"id":"1","name":"In Progress"}]}`))
 	}))
 	defer srv.Close()
 
@@ -187,9 +194,9 @@ func TestDoTransition_NotFound(t *testing.T) {
 // --- Assign tests ---
 
 func TestAssignIssue(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{}`))
+		writeJiraTestResponse(t, w, []byte(`{}`))
 	}))
 	defer srv.Close()
 
@@ -206,9 +213,9 @@ func TestAssignIssue(t *testing.T) {
 }
 
 func TestUnassignIssue(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{}`))
+		writeJiraTestResponse(t, w, []byte(`{}`))
 	}))
 	defer srv.Close()
 
@@ -227,9 +234,9 @@ func TestUnassignIssue(t *testing.T) {
 // --- Worklog tests ---
 
 func TestGetWorklogs_DateFilter(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"startAt":0,"maxResults":50,"total":1,"worklogs":[{"id":"1","timeSpent":"1h","timeSpentSeconds":3600,"author":{"name":"user"},"started":"2026-05-05T10:00:00.000+0000"}]}`))
+		writeJiraTestResponse(t, w, []byte(`{"startAt":0,"maxResults":50,"total":1,"worklogs":[{"id":"1","timeSpent":"1h","timeSpentSeconds":3600,"author":{"name":"user"},"started":"2026-05-05T10:00:00.000+0000"}]}`))
 	}))
 	defer srv.Close()
 
@@ -262,10 +269,10 @@ func TestGetWorklogs_DateFilter(t *testing.T) {
 }
 
 func TestGetWorklogs_NilStarted(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		// worklog with nil started — should be skipped in filtered results
-		w.Write([]byte(`{"startAt":0,"maxResults":50,"total":1,"worklogs":[{"id":"1","timeSpent":"1h","timeSpentSeconds":3600,"author":{"name":"user"}}]}`))
+		writeJiraTestResponse(t, w, []byte(`{"startAt":0,"maxResults":50,"total":1,"worklogs":[{"id":"1","timeSpent":"1h","timeSpentSeconds":3600,"author":{"name":"user"}}]}`))
 	}))
 	defer srv.Close()
 
@@ -288,14 +295,14 @@ func TestGetWorklogs_NilStarted(t *testing.T) {
 
 func TestGetWorklogs_Pagination(t *testing.T) {
 	callCount := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		callCount++
 		// return full page (50 items) on first call, then less (20) on second
 		if callCount == 1 {
-			w.Write([]byte(`{"startAt":0,"maxResults":50,"total":70,"worklogs":[` + repeatWorklog(50, `"id":"1"`) + `]}`))
+			writeJiraTestResponse(t, w, []byte(`{"startAt":0,"maxResults":50,"total":70,"worklogs":[`+repeatWorklog(50, `"id":"1"`)+`]}`))
 		} else {
-			w.Write([]byte(`{"startAt":50,"maxResults":50,"total":70,"worklogs":[` + repeatWorklog(20, `"id":"2"`) + `]}`))
+			writeJiraTestResponse(t, w, []byte(`{"startAt":50,"maxResults":50,"total":70,"worklogs":[`+repeatWorklog(20, `"id":"2"`)+`]}`))
 		}
 	}))
 	defer srv.Close()
@@ -334,9 +341,9 @@ func TestWorklogCRUD(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.Method {
 		case http.MethodGet:
-			w.Write([]byte(`{"startAt":0,"maxResults":50,"total":1,"worklogs":[{"id":"1","timeSpent":"1h","timeSpentSeconds":3600,"author":{"name":"testuser"},"started":"2026-05-10T10:00:00.000+0000"}]}`))
+			writeJiraTestResponse(t, w, []byte(`{"startAt":0,"maxResults":50,"total":1,"worklogs":[{"id":"1","timeSpent":"1h","timeSpentSeconds":3600,"author":{"name":"testuser"},"started":"2026-05-10T10:00:00.000+0000"}]}`))
 		case http.MethodPost:
-			w.Write([]byte(`{"id":"2","timeSpent":"2h","timeSpentSeconds":7200}`))
+			writeJiraTestResponse(t, w, []byte(`{"id":"2","timeSpent":"2h","timeSpentSeconds":7200}`))
 		default:
 			w.WriteHeader(200)
 		}
@@ -375,11 +382,11 @@ func TestGetWorklogsByUser(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		path := r.URL.Path
 		if path == "/rest/api/2/search" {
-			w.Write([]byte(`{"issues":[{"key":"TEST-1","fields":{"summary":"task"}}]}`))
+			writeJiraTestResponse(t, w, []byte(`{"issues":[{"key":"TEST-1","fields":{"summary":"task"}}]}`))
 			return
 		}
 		if path == "/rest/api/2/issue/TEST-1/worklog" {
-			w.Write([]byte(`{"startAt":0,"maxResults":50,"total":1,"worklogs":[{"id":"1","timeSpent":"2h","timeSpentSeconds":7200,"author":{"name":"testuser"},"started":"2026-05-05T10:00:00.000+0000"}]}`))
+			writeJiraTestResponse(t, w, []byte(`{"startAt":0,"maxResults":50,"total":1,"worklogs":[{"id":"1","timeSpent":"2h","timeSpentSeconds":7200,"author":{"name":"testuser"},"started":"2026-05-05T10:00:00.000+0000"}]}`))
 			return
 		}
 		w.WriteHeader(404)
@@ -428,7 +435,7 @@ func TestGetWorklogsByUser_EscapesQuotes(t *testing.T) {
 				return
 			}
 		}
-		w.Write([]byte(`{"issues":[{"key":"TEST-1","fields":{"summary":"task"}}]}`))
+		writeJiraTestResponse(t, w, []byte(`{"issues":[{"key":"TEST-1","fields":{"summary":"task"}}]}`))
 	}))
 	defer srv.Close()
 
@@ -441,5 +448,74 @@ func TestGetWorklogsByUser_EscapesQuotes(t *testing.T) {
 	_, err = c.GetWorklogsByUser(`test"user`, time.Time{}, time.Time{})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSearchIssuesContextCancellation(t *testing.T) {
+	requestStarted := make(chan struct{})
+	handlerStopped := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		close(requestStarted)
+		<-r.Context().Done()
+		close(handlerStopped)
+	}))
+	defer srv.Close()
+
+	jc, err := newTestClient(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &Client{jc: jc}
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() {
+		_, searchErr := client.SearchIssuesContext(ctx, "project=TEST", 10)
+		result <- searchErr
+	}()
+
+	select {
+	case <-requestStarted:
+	case <-time.After(time.Second):
+		t.Fatal("Jira request did not start")
+	}
+	cancel()
+
+	select {
+	case searchErr := <-result:
+		if !errors.Is(searchErr, context.Canceled) {
+			t.Fatalf("expected context cancellation, got %v", searchErr)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("SearchIssuesContext did not return after cancellation")
+	}
+	select {
+	case <-handlerStopped:
+	case <-time.After(time.Second):
+		t.Fatal("HTTP handler did not observe request cancellation")
+	}
+}
+
+func TestGetWorklogsByUserContextReturnsIssueError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/rest/api/2/search":
+			_, _ = w.Write([]byte(`{"issues":[{"key":"TEST-1","fields":{"summary":"task"}}]}`))
+		case "/rest/api/2/issue/TEST-1/worklog":
+			http.Error(w, "worklogs unavailable", http.StatusInternalServerError)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	jc, err := newTestClient(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &Client{jc: jc}
+	_, err = client.GetWorklogsByUserContext(context.Background(), "testuser", time.Time{}, time.Time{})
+	if err == nil {
+		t.Fatal("expected issue worklog error instead of a partial successful report")
 	}
 }
