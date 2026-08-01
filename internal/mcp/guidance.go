@@ -5,9 +5,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/alvnukov/mcp-ai-helper/internal/config"
 	basemcp "github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-	"github.com/alvnukov/mcp-ai-helper/internal/config"
 )
 
 const guidanceURI = "mcp-ai-helper://guidance"
