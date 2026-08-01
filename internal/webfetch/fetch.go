@@ -19,7 +19,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zol/mcp-ai-helper/internal/config"
+	"github.com/alvnukov/mcp-ai-helper/internal/config"
 )
 
 // FetchRequest is one bounded fetch operation.

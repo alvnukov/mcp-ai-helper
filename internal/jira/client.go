@@ -13,7 +13,7 @@ import (
 
 	gojira "github.com/andygrunwald/go-jira"
 
-	"github.com/zol/mcp-ai-helper/internal/config"
+	"github.com/alvnukov/mcp-ai-helper/internal/config"
 )
 
 // Client wraps the go-jira client with our domain methods.

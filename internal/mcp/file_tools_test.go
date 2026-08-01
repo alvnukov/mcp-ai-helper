@@ -11,7 +11,7 @@ import (
 	basemcp "github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
-	"github.com/zol/mcp-ai-helper/internal/config"
+	"github.com/alvnukov/mcp-ai-helper/internal/config"
 )
 
 func newTestSrv(t *testing.T) *server.MCPServer {

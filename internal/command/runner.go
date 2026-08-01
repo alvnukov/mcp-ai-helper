@@ -18,12 +18,11 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
-	"github.com/zol/mcp-ai-helper/internal/config"
-	"github.com/zol/mcp-ai-helper/internal/evidence"
-	"github.com/zol/mcp-ai-helper/internal/security"
+	"github.com/alvnukov/mcp-ai-helper/internal/config"
+	"github.com/alvnukov/mcp-ai-helper/internal/evidence"
+	"github.com/alvnukov/mcp-ai-helper/internal/security"
 )
 
 // Context keys for per-request secret injection.
@@ -320,25 +319,6 @@ func (r *Runner) executePrepared(ctx context.Context, commandID string, cmd stri
 		EvidenceLines: evidence.Select(evidenceLines, 30),
 		OutputHash:    outputHash,
 	}, nil
-}
-
-func configureCommandTermination(command *exec.Cmd) {
-	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	command.Cancel = func() error {
-		return killCommandProcessGroup(command)
-	}
-	command.WaitDelay = processWaitDelay
-}
-
-func killCommandProcessGroup(command *exec.Cmd) error {
-	if command.Process == nil {
-		return os.ErrProcessDone
-	}
-	err := syscall.Kill(-command.Process.Pid, syscall.SIGKILL)
-	if errors.Is(err, syscall.ESRCH) {
-		return os.ErrProcessDone
-	}
-	return err
 }
 
 func (r *Runner) maskText(ctx context.Context, text string) string {

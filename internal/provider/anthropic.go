@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/zol/mcp-ai-helper/internal/config"
+	"github.com/alvnukov/mcp-ai-helper/internal/config"
 )
 
 const defaultAnthropicBaseURL = "https://api.anthropic.com"

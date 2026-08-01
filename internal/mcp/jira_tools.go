@@ -10,7 +10,7 @@ import (
 	basemcp "github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
-	"github.com/zol/mcp-ai-helper/internal/jira"
+	"github.com/alvnukov/mcp-ai-helper/internal/jira"
 )
 
 // --- Request types ---

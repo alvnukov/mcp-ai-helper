@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/zol/mcp-ai-helper/internal/tasks"
+	"github.com/alvnukov/mcp-ai-helper/internal/tasks"
 )
 
 // CommitRequest defines the repository, owned file set, and message for a guarded commit.

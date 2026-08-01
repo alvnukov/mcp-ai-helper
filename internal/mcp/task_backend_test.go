@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/zol/mcp-ai-helper/internal/tasks"
+	"github.com/alvnukov/mcp-ai-helper/internal/tasks"
 )
 
 type recordingTaskBackend struct {

@@ -8,15 +8,15 @@ import (
 
 	"github.com/mark3labs/mcp-go/server"
 
-	"github.com/zol/mcp-ai-helper/internal/command"
-	"github.com/zol/mcp-ai-helper/internal/config"
-	"github.com/zol/mcp-ai-helper/internal/confluence"
-	"github.com/zol/mcp-ai-helper/internal/jira"
-	"github.com/zol/mcp-ai-helper/internal/pipeline"
-	"github.com/zol/mcp-ai-helper/internal/project"
-	"github.com/zol/mcp-ai-helper/internal/provider"
-	"github.com/zol/mcp-ai-helper/internal/security"
-	"github.com/zol/mcp-ai-helper/internal/tasks"
+	"github.com/alvnukov/mcp-ai-helper/internal/command"
+	"github.com/alvnukov/mcp-ai-helper/internal/config"
+	"github.com/alvnukov/mcp-ai-helper/internal/confluence"
+	"github.com/alvnukov/mcp-ai-helper/internal/jira"
+	"github.com/alvnukov/mcp-ai-helper/internal/pipeline"
+	"github.com/alvnukov/mcp-ai-helper/internal/project"
+	"github.com/alvnukov/mcp-ai-helper/internal/provider"
+	"github.com/alvnukov/mcp-ai-helper/internal/security"
+	"github.com/alvnukov/mcp-ai-helper/internal/tasks"
 )
 
 // Server holds mutable server state protected by a read-write mutex.

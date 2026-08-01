@@ -12,7 +12,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/zol/mcp-ai-helper/internal/config"
+	"github.com/alvnukov/mcp-ai-helper/internal/config"
 )
 
 const (

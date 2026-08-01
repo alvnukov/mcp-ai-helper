@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/zol/mcp-ai-helper/internal/config"
+	"github.com/alvnukov/mcp-ai-helper/internal/config"
 )
 
 var sharedTransport = &http.Transport{

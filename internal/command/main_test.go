@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/zol/mcp-ai-helper/internal/testhome"
+	"github.com/alvnukov/mcp-ai-helper/internal/testhome"
 )
 
 // The helper falls back to $HOME for command history and its project store, so

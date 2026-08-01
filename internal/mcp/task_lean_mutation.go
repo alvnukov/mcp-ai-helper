@@ -10,9 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/zol/mcp-ai-helper/internal/command"
-	"github.com/zol/mcp-ai-helper/internal/lake"
-	"github.com/zol/mcp-ai-helper/internal/tasks"
+	"github.com/alvnukov/mcp-ai-helper/internal/command"
+	"github.com/alvnukov/mcp-ai-helper/internal/lake"
+	"github.com/alvnukov/mcp-ai-helper/internal/tasks"
 )
 
 const activeTasksLeanPath = "MCPAIHelperProject/ActiveTasks.lean"

@@ -1,4 +1,4 @@
-module github.com/zol/mcp-ai-helper
+module github.com/alvnukov/mcp-ai-helper
 
 go 1.26.3
 

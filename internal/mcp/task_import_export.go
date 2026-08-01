@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/zol/mcp-ai-helper/internal/tasks"
+	"github.com/alvnukov/mcp-ai-helper/internal/tasks"
 )
 
 // ErrLossyField indicates that a task field cannot be represented by the target registry.

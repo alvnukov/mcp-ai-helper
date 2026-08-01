@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/zol/mcp-ai-helper/internal/tasks"
+	"github.com/alvnukov/mcp-ai-helper/internal/tasks"
 )
 
 // TaskContextRequest is the input for building task execution context.

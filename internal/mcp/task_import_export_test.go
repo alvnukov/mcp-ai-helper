@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zol/mcp-ai-helper/internal/tasks"
+	"github.com/alvnukov/mcp-ai-helper/internal/tasks"
 )
 
 func TestExportLeanToObsidian(t *testing.T) {

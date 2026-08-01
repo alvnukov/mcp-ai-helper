@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zol/mcp-ai-helper/internal/tasks"
+	"github.com/alvnukov/mcp-ai-helper/internal/tasks"
 )
 
 func makeTask(id, status, title, parentID string, tags ...string) tasks.Task {

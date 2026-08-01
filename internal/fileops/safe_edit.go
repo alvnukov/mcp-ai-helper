@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zol/mcp-ai-helper/internal/safefs"
+	"github.com/alvnukov/mcp-ai-helper/internal/safefs"
 )
 
 // Snapshot records file identity before a guarded edit.

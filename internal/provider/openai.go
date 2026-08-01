@@ -11,7 +11,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/zol/mcp-ai-helper/internal/config"
+	"github.com/alvnukov/mcp-ai-helper/internal/config"
 )
 
 // ChatClient is the minimal interface required by pipeline model steps.

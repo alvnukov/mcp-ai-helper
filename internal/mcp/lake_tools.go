@@ -11,8 +11,8 @@ import (
 	basemcp "github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
-	"github.com/zol/mcp-ai-helper/internal/command"
-	"github.com/zol/mcp-ai-helper/internal/lake"
+	"github.com/alvnukov/mcp-ai-helper/internal/command"
+	"github.com/alvnukov/mcp-ai-helper/internal/lake"
 )
 
 type lakeSmokeRequest struct {

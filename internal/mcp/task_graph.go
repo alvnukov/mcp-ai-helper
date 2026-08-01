@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/zol/mcp-ai-helper/internal/tasks"
+	"github.com/alvnukov/mcp-ai-helper/internal/tasks"
 )
 
 // TaskGraphRequest is the input for building a task graph.

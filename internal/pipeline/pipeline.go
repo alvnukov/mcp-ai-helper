@@ -13,14 +13,14 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/zol/mcp-ai-helper/internal/command"
-	"github.com/zol/mcp-ai-helper/internal/config"
-	"github.com/zol/mcp-ai-helper/internal/evidence"
-	"github.com/zol/mcp-ai-helper/internal/fileops"
-	"github.com/zol/mcp-ai-helper/internal/gitops"
-	"github.com/zol/mcp-ai-helper/internal/provider"
-	"github.com/zol/mcp-ai-helper/internal/tasks"
-	"github.com/zol/mcp-ai-helper/internal/webfetch"
+	"github.com/alvnukov/mcp-ai-helper/internal/command"
+	"github.com/alvnukov/mcp-ai-helper/internal/config"
+	"github.com/alvnukov/mcp-ai-helper/internal/evidence"
+	"github.com/alvnukov/mcp-ai-helper/internal/fileops"
+	"github.com/alvnukov/mcp-ai-helper/internal/gitops"
+	"github.com/alvnukov/mcp-ai-helper/internal/provider"
+	"github.com/alvnukov/mcp-ai-helper/internal/tasks"
+	"github.com/alvnukov/mcp-ai-helper/internal/webfetch"
 )
 
 // Runner executes analysis and edit workflows against a repository.

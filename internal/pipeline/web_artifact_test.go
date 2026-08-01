@@ -6,8 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/zol/mcp-ai-helper/internal/config"
-	"github.com/zol/mcp-ai-helper/internal/webfetch"
+	"github.com/alvnukov/mcp-ai-helper/internal/config"
+	"github.com/alvnukov/mcp-ai-helper/internal/webfetch"
 )
 
 func TestWorkflowCommandConsumesWebDocArtifact(t *testing.T) {

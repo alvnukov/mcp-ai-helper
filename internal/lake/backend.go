@@ -18,7 +18,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zol/mcp-ai-helper/internal/command"
+	"github.com/alvnukov/mcp-ai-helper/internal/command"
 )
 
 // Workspace is a repo-local Lean/Lake project root.

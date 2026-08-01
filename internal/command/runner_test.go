@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zol/mcp-ai-helper/internal/config"
-	"github.com/zol/mcp-ai-helper/internal/project"
+	"github.com/alvnukov/mcp-ai-helper/internal/config"
+	"github.com/alvnukov/mcp-ai-helper/internal/project"
 )
 
 func TestRunnerRejectsCWDOutsidePolicy(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	basemcp "github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
-	"github.com/zol/mcp-ai-helper/internal/gitops"
+	"github.com/alvnukov/mcp-ai-helper/internal/gitops"
 )
 
 // gitAdvancedActions are the ones behind the git_advanced layer. They all reach

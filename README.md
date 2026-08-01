@@ -11,6 +11,19 @@ The design goal is token economy without losing grounding:
 - edit files only through guarded, idempotent operations;
 - commit only explicitly owned files after checks pass.
 
+## Install
+
+The supported package install uses the project Homebrew tap:
+
+```sh
+brew install alvnukov/tap/mcp-ai-helper
+mcp-ai-helper --version
+```
+
+Release archives and checksums for Linux, macOS, and Windows are attached to
+each [GitHub Release](https://github.com/alvnukov/mcp-ai-helper/releases).
+See [RELEASE.md](RELEASE.md) for the tag and Homebrew publication contract.
+
 ## Run
 
 ```sh

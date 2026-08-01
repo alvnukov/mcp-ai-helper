@@ -10,7 +10,7 @@ import (
 
 	gojira "github.com/andygrunwald/go-jira"
 
-	"github.com/zol/mcp-ai-helper/internal/config"
+	"github.com/alvnukov/mcp-ai-helper/internal/config"
 )
 
 func writeJiraTestResponse(t *testing.T, w http.ResponseWriter, body []byte) {

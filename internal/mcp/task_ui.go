@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zol/mcp-ai-helper/internal/tasks"
+	"github.com/alvnukov/mcp-ai-helper/internal/tasks"
 )
 
 type taskUIBackend interface {

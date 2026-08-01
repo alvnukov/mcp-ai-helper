@@ -17,9 +17,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zol/mcp-ai-helper/internal/command"
-	"github.com/zol/mcp-ai-helper/internal/config"
-	"github.com/zol/mcp-ai-helper/internal/leanfixture"
+	"github.com/alvnukov/mcp-ai-helper/internal/command"
+	"github.com/alvnukov/mcp-ai-helper/internal/config"
+	"github.com/alvnukov/mcp-ai-helper/internal/leanfixture"
 )
 
 func TestTaskRegistryExporterGetTaskThroughLakeExe(t *testing.T) {

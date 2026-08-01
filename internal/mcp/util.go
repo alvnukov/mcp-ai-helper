@@ -7,7 +7,7 @@ import (
 
 	basemcp "github.com/mark3labs/mcp-go/mcp"
 
-	"github.com/zol/mcp-ai-helper/internal/tasks"
+	"github.com/alvnukov/mcp-ai-helper/internal/tasks"
 )
 
 func bind(req basemcp.CallToolRequest, target any) error {

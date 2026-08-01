@@ -3,7 +3,7 @@ package mcp
 import (
 	"testing"
 
-	"github.com/zol/mcp-ai-helper/internal/tasks"
+	"github.com/alvnukov/mcp-ai-helper/internal/tasks"
 )
 
 func TestUniqueStrings(t *testing.T) {

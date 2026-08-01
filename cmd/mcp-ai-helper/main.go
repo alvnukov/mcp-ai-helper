@@ -14,16 +14,26 @@ import (
 
 	"github.com/mark3labs/mcp-go/server"
 
-	"github.com/zol/mcp-ai-helper/internal/config"
-	mcpserver "github.com/zol/mcp-ai-helper/internal/mcp"
-	"github.com/zol/mcp-ai-helper/internal/setup"
+	"github.com/alvnukov/mcp-ai-helper/internal/config"
+	mcpserver "github.com/alvnukov/mcp-ai-helper/internal/mcp"
+	"github.com/alvnukov/mcp-ai-helper/internal/setup"
 )
+
+// version is set from an immutable release tag through -ldflags.
+var version = "dev"
+
+func versionLine() string {
+	return "mcp-ai-helper " + version
+}
 
 func main() {
 	// With no subcommand the binary is the server, which is what an MCP client
 	// launches and therefore what must stay the default.
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
+		case "--version", "version":
+			fmt.Println(versionLine())
+			return
 		case "setup":
 			runSetup(os.Args[1], os.Args[2:], setup.Run)
 			return

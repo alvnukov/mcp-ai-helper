@@ -10,8 +10,8 @@ import (
 
 	basemcp "github.com/mark3labs/mcp-go/mcp"
 
-	"github.com/zol/mcp-ai-helper/internal/config"
-	"github.com/zol/mcp-ai-helper/internal/websearch"
+	"github.com/alvnukov/mcp-ai-helper/internal/config"
+	"github.com/alvnukov/mcp-ai-helper/internal/websearch"
 )
 
 // The web tools sit behind an opt-in layer, so a config that does not ask for

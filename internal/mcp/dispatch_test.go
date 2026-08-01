@@ -8,7 +8,7 @@ import (
 
 	basemcp "github.com/mark3labs/mcp-go/mcp"
 
-	"github.com/zol/mcp-ai-helper/internal/config"
+	"github.com/alvnukov/mcp-ai-helper/internal/config"
 )
 
 // registeredTools reports the action enum each registered tool advertises, which

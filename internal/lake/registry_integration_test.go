@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zol/mcp-ai-helper/internal/command"
-	"github.com/zol/mcp-ai-helper/internal/config"
+	"github.com/alvnukov/mcp-ai-helper/internal/command"
+	"github.com/alvnukov/mcp-ai-helper/internal/config"
 )
 
 // A registry that duplicates an id, points at an artifact that is not there, or

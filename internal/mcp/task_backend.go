@@ -3,8 +3,8 @@ package mcp
 import (
 	"context"
 
-	"github.com/zol/mcp-ai-helper/internal/command"
-	"github.com/zol/mcp-ai-helper/internal/tasks"
+	"github.com/alvnukov/mcp-ai-helper/internal/command"
+	"github.com/alvnukov/mcp-ai-helper/internal/tasks"
 )
 
 // taskBackend is the MCP task persistence contract. Handlers depend on this

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zol/mcp-ai-helper/internal/config"
-	"github.com/zol/mcp-ai-helper/internal/tasks"
+	"github.com/alvnukov/mcp-ai-helper/internal/config"
+	"github.com/alvnukov/mcp-ai-helper/internal/tasks"
 )
 
 func setupObsidianTestDir(t *testing.T) string {

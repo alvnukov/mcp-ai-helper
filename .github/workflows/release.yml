@@ -1,0 +1,212 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Release quality gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify tag and versioned binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "release tag must be vMAJOR.MINOR.PATCH" >&2
+            exit 1
+          fi
+          CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o "${RUNNER_TEMP}/mcp-ai-helper" ./cmd/mcp-ai-helper
+          test "$("${RUNNER_TEMP}/mcp-ai-helper" --version)" = "mcp-ai-helper ${VERSION}"
+      - name: Run quality gate
+        run: make quality
+
+  build:
+    name: Build ${{ matrix.asset }}
+    needs: quality
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64, extension: "", asset: mcp-ai-helper_linux_amd64.tar.gz }
+          - { goos: linux, goarch: arm64, extension: "", asset: mcp-ai-helper_linux_arm64.tar.gz }
+          - { goos: darwin, goarch: amd64, extension: "", asset: mcp-ai-helper_darwin_amd64.tar.gz }
+          - { goos: darwin, goarch: arm64, extension: "", asset: mcp-ai-helper_darwin_arm64.tar.gz }
+          - { goos: windows, goarch: amd64, extension: ".exe", asset: mcp-ai-helper_windows_amd64.zip }
+          - { goos: windows, goarch: arm64, extension: ".exe", asset: mcp-ai-helper_windows_arm64.zip }
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build and archive
+        shell: bash
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          STAGE="${RUNNER_TEMP}/mcp-ai-helper-${GOOS}-${GOARCH}"
+          mkdir -p "${STAGE}" dist
+          BINARY="${STAGE}/mcp-ai-helper${{ matrix.extension }}"
+          go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o "${BINARY}" ./cmd/mcp-ai-helper
+          go version -m "${BINARY}"
+          if [[ "${GOOS}" == "windows" ]]; then
+            (cd "${STAGE}" && zip -q "${GITHUB_WORKSPACE}/dist/${{ matrix.asset }}" "mcp-ai-helper${{ matrix.extension }}")
+          else
+            tar -C "${STAGE}" -czf "dist/${{ matrix.asset }}" mcp-ai-helper
+          fi
+          sha256sum "dist/${{ matrix.asset }}" | sed 's#  dist/#  #' > "dist/${{ matrix.asset }}.sha256"
+      - name: Attest release archive
+        if: ${{ !github.event.repository.private }}
+        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661
+        with:
+          subject-path: dist/${{ matrix.asset }}
+      - name: Upload release archive
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ${{ matrix.asset }}
+          path: |
+            dist/${{ matrix.asset }}
+            dist/${{ matrix.asset }}.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Publish GitHub Release
+    needs: [quality, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download release archives
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Verify release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          for asset in             mcp-ai-helper_linux_amd64.tar.gz             mcp-ai-helper_linux_arm64.tar.gz             mcp-ai-helper_darwin_amd64.tar.gz             mcp-ai-helper_darwin_arm64.tar.gz             mcp-ai-helper_windows_amd64.zip             mcp-ai-helper_windows_arm64.zip
+          do
+            test -s "dist/${asset}"
+            test -s "dist/${asset}.sha256"
+            (cd dist && sha256sum -c "${asset}.sha256")
+          done
+          cat dist/*.sha256 | sort -k2 > dist/checksums.txt
+          test "$(wc -l < dist/checksums.txt | tr -d ' ')" = "6"
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b
+        with:
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/checksums.txt
+
+  homebrew:
+    name: Update Homebrew tap
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Download release archives
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish formula
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${GH_TOKEN:-}" ]]; then
+            echo "HOMEBREW_TAP_TOKEN is required to complete the release" >&2
+            exit 1
+          fi
+          VERSION="${GITHUB_REF_NAME#v}"
+          DARWIN_AMD64_SHA="$(sha256sum dist/mcp-ai-helper_darwin_amd64.tar.gz | awk '{print $1}')"
+          DARWIN_ARM64_SHA="$(sha256sum dist/mcp-ai-helper_darwin_arm64.tar.gz | awk '{print $1}')"
+          LINUX_AMD64_SHA="$(sha256sum dist/mcp-ai-helper_linux_amd64.tar.gz | awk '{print $1}')"
+          LINUX_ARM64_SHA="$(sha256sum dist/mcp-ai-helper_linux_arm64.tar.gz | awk '{print $1}')"
+          gh auth setup-git
+          TAP_DIR="${RUNNER_TEMP}/homebrew-tap"
+          git clone https://github.com/alvnukov/homebrew-tap.git "${TAP_DIR}"
+          mkdir -p "${TAP_DIR}/Formula"
+          cat > "${TAP_DIR}/Formula/mcp-ai-helper.rb" <<EOF
+          class McpAiHelper < Formula
+            desc "Policy-first MCP server for bounded AI-assisted repository work"
+            homepage "https://github.com/alvnukov/mcp-ai-helper"
+            version "${VERSION}"
+
+            on_macos do
+              if Hardware::CPU.arm?
+                url "https://github.com/alvnukov/mcp-ai-helper/releases/download/v${VERSION}/mcp-ai-helper_darwin_arm64.tar.gz"
+                sha256 "${DARWIN_ARM64_SHA}"
+              else
+                url "https://github.com/alvnukov/mcp-ai-helper/releases/download/v${VERSION}/mcp-ai-helper_darwin_amd64.tar.gz"
+                sha256 "${DARWIN_AMD64_SHA}"
+              end
+            end
+
+            on_linux do
+              if Hardware::CPU.arm?
+                url "https://github.com/alvnukov/mcp-ai-helper/releases/download/v${VERSION}/mcp-ai-helper_linux_arm64.tar.gz"
+                sha256 "${LINUX_ARM64_SHA}"
+              else
+                url "https://github.com/alvnukov/mcp-ai-helper/releases/download/v${VERSION}/mcp-ai-helper_linux_amd64.tar.gz"
+                sha256 "${LINUX_AMD64_SHA}"
+              end
+            end
+
+            def install
+              bin.install "mcp-ai-helper"
+            end
+
+            test do
+              assert_match version.to_s, shell_output("#{bin}/mcp-ai-helper --version")
+            end
+          end
+          EOF
+          ruby -c "${TAP_DIR}/Formula/mcp-ai-helper.rb"
+          cd "${TAP_DIR}"
+          if git diff --quiet -- Formula/mcp-ai-helper.rb; then
+            echo "Homebrew formula is already current" >&2
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/mcp-ai-helper.rb
+          git commit -m "mcp-ai-helper v${VERSION}"
+          git push origin main

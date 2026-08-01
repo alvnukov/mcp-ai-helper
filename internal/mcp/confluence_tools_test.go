@@ -7,8 +7,8 @@ import (
 
 	"github.com/mark3labs/mcp-go/server"
 
-	"github.com/zol/mcp-ai-helper/internal/config"
-	"github.com/zol/mcp-ai-helper/internal/confluence"
+	"github.com/alvnukov/mcp-ai-helper/internal/config"
+	"github.com/alvnukov/mcp-ai-helper/internal/confluence"
 )
 
 func TestCheckConfSpace_Allowed(t *testing.T) {

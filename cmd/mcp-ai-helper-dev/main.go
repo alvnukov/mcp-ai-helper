@@ -18,7 +18,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/zol/mcp-ai-helper/internal/config"
+	"github.com/alvnukov/mcp-ai-helper/internal/config"
 )
 
 type rpcMessage struct {
