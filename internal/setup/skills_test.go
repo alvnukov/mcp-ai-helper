@@ -145,6 +145,54 @@ func TestTheInstructionsBlockStaysShortEnoughToLoadEverySession(t *testing.T) {
 	}
 }
 
+func TestEverySkillHasCodexMetadata(t *testing.T) {
+	for _, skill := range skills {
+		for _, field := range []string{"display_name: \"", "short_description: \"", "default_prompt: \""} {
+			if !strings.Contains(skill.agent, field) {
+				t.Errorf("%s metadata lacks %s", skill.name, field)
+			}
+		}
+		if !strings.Contains(skill.agent, "$"+skill.name) {
+			t.Errorf("%s default prompt must invoke the skill by name", skill.name)
+		}
+	}
+}
+
+func TestSkillsCoverTheFailureProneHelperWorkflows(t *testing.T) {
+	required := map[string][]string{
+		"mcp-ai-helper-tasks": {
+			"tool_manifest", "task action=current", "task action=get", "git action=status",
+			"run action=schema", "run action=workflow", "task_transition", "git_commit_owned",
+			"surface_mismatch", "command_id",
+		},
+		"mcp-ai-helper-edits": {
+			"file action=read", "file action=snapshot", "edit action=replace", "edit action=write",
+			"expected_hash", "run action=schema", "git action=commit", "owned_files", "surface_mismatch",
+		},
+		"mcp-ai-helper-commands": {
+			"command action=run", "command action=get", "command action=filter", "command action=abort",
+			"command_id", "running", "timeout", "truncation", "omission", "surface mismatch",
+		},
+	}
+	for name, fragments := range required {
+		body := ""
+		for _, skill := range skills {
+			if skill.name == name {
+				body = skill.body
+				break
+			}
+		}
+		if body == "" {
+			t.Fatalf("missing required skill %s", name)
+		}
+		for _, fragment := range fragments {
+			if !strings.Contains(body, fragment) {
+				t.Errorf("%s lacks required guidance %q", name, fragment)
+			}
+		}
+	}
+}
+
 func keysOf(m map[string][]string) []string {
 	out := make([]string, 0, len(m))
 	for key := range m {

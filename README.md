@@ -54,7 +54,7 @@ bin/mcp-ai-helper setup -c claude,codex,opencode
 bin/mcp-ai-helper remove -c claude,codex,opencode   # alias: uninstall
 ```
 
-Each client gets three things: the MCP server entry, an `mcp-ai-helper` block in the file it reads for instructions (`CLAUDE.md` for Claude Code, `AGENTS.md` for Codex and opencode), and the `mcp-ai-helper-tasks` and `mcp-ai-helper-edits` skills. `remove` takes back exactly those, leaving other servers, other skills and the rest of the file alone.
+Each client gets three things: the MCP server entry, an `mcp-ai-helper` block in the file it reads for instructions (`CLAUDE.md` for Claude Code, `AGENTS.md` for Codex and opencode), and three focused skills: `mcp-ai-helper-tasks`, `mcp-ai-helper-edits`, and `mcp-ai-helper-commands`. Every skill includes Codex UI metadata. Codex installs them user-wide under `~/.codex/skills`; Claude Code and OpenCode use their documented project/global skill roots. `remove` takes back exactly those helper-owned files, leaving other servers, skills, and instructions alone.
 
 | Flag | Effect |
 |---|---|

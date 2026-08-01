@@ -107,9 +107,10 @@ var clients = []clientSpec{
 		id:     "codex",
 		label:  "Codex CLI",
 		format: codexTOML,
-		// Codex documents AGENTS.md but no skill directory, and guessing at one
-		// would scatter files it never reads.
-		skills: nil,
+		// Codex config and personal skills are user-wide in both setup modes.
+		skills: &scoped{
+			global: filepath.Join(".codex", "skills"),
+		},
 		guidance: scoped{
 			project: "AGENTS.md",
 			global:  filepath.Join(".codex", "AGENTS.md"),
@@ -346,7 +347,7 @@ func installSkills(spec clientSpec, global bool, dryRun bool) (string, error) {
 	if spec.skills == nil {
 		return fmt.Sprintf("  %-13s skipped — %s documents no skill directory", "skills", spec.label), nil
 	}
-	dir, err := spec.skills.resolve(global)
+	dir, err := skillsPath(spec, global)
 	if err != nil {
 		return "", err
 	}
@@ -354,13 +355,17 @@ func installSkills(spec clientSpec, global bool, dryRun bool) (string, error) {
 	written := make([]string, 0, len(skills))
 	current := make([]string, 0, len(skills))
 	for _, skill := range skills {
-		body := skill.body
-		path := filepath.Join(dir, skill.name, "SKILL.md")
-		result, err := apply(path, &body, dryRun)
-		if err != nil {
-			return "", err
+		changed := false
+		for _, file := range skill.files() {
+			body := file.body
+			path := filepath.Join(dir, skill.name, file.path)
+			result, err := apply(path, &body, dryRun)
+			if err != nil {
+				return "", err
+			}
+			changed = changed || result == outcomeDone || result == outcomeWould
 		}
-		if result == outcomeDone || result == outcomeWould {
+		if changed {
 			written = append(written, skill.name)
 		} else {
 			current = append(current, skill.name)
@@ -381,14 +386,14 @@ func installSkills(spec clientSpec, global bool, dryRun bool) (string, error) {
 	return note("skills", dir, detail), nil
 }
 
-// uninstallSkills takes out the SKILL.md files the helper put there, then the
+// uninstallSkills removes only files installed by the helper, then the
 // directories they leave behind — but only while those are empty, so a skill
 // somebody else added under the same root survives the helper's uninstall.
 func uninstallSkills(spec clientSpec, global bool, dryRun bool) (string, bool, error) {
 	if spec.skills == nil {
 		return fmt.Sprintf("  %-13s skipped — none were installed", "skills"), false, nil
 	}
-	dir, err := spec.skills.resolve(global)
+	dir, err := skillsPath(spec, global)
 	if err != nil {
 		return "", false, err
 	}
@@ -396,20 +401,31 @@ func uninstallSkills(spec clientSpec, global bool, dryRun bool) (string, bool, e
 	removed := make([]string, 0, len(skills))
 	for _, skill := range skills {
 		home := filepath.Join(dir, skill.name)
-		file := filepath.Join(home, "SKILL.md")
-		if _, err := os.Stat(file); err != nil {
+		found := false
+		for _, installed := range skill.files() {
+			file := filepath.Join(home, installed.path)
+			if _, err := os.Stat(file); errors.Is(err, os.ErrNotExist) {
+				continue
+			} else if err != nil {
+				return "", false, fmt.Errorf("inspect %s: %w", file, err)
+			}
+			found = true
+			if dryRun {
+				continue
+			}
+			if err := os.Remove(file); err != nil {
+				return "", false, fmt.Errorf("remove %s: %w", file, err)
+			}
+		}
+		if !found {
 			continue
 		}
 		removed = append(removed, skill.name)
 		if dryRun {
 			continue
 		}
-		if err := os.Remove(file); err != nil {
-			return "", false, fmt.Errorf("remove %s: %w", file, err)
-		}
-		// os.Remove refuses a directory that still holds something, which is
-		// exactly the check wanted here — so its failure is the answer, not an
-		// error to report.
+		// Remove only empty directories; user-owned files keep the root intact.
+		_ = os.Remove(filepath.Join(home, "agents"))
 		_ = os.Remove(home)
 	}
 	if !dryRun && len(removed) > 0 {
@@ -550,6 +566,16 @@ func homeDir() (string, error) {
 		return "", errors.New("home directory is not set")
 	}
 	return home, nil
+}
+
+func skillsPath(spec clientSpec, global bool) (string, error) {
+	if spec.skills == nil {
+		return "", fmt.Errorf("client %q has no skill directory", spec.id)
+	}
+	if spec.id == "codex" {
+		return spec.skills.resolve(true)
+	}
+	return spec.skills.resolve(global)
 }
 
 func configPath(spec clientSpec, global bool) (string, error) {

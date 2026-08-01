@@ -20,7 +20,7 @@ func TestEveryKnownClientResolvesAllOfItsPaths(t *testing.T) {
 				t.Errorf("no instructions path for %s (global=%v): %v", spec.id, global, err)
 			}
 			if spec.skills != nil {
-				if _, err := spec.skills.resolve(global); err != nil {
+				if _, err := skillsPath(spec, global); err != nil {
 					t.Errorf("no skills path for %s (global=%v): %v", spec.id, global, err)
 				}
 			}
@@ -207,11 +207,13 @@ func TestSetupThenRemoveLeavesTheProjectAsItWas(t *testing.T) {
 	if err := Run(opts, &out); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
-	for _, path := range []string{
-		".mcp.json",
-		filepath.Join(".claude", "skills", "mcp-ai-helper-tasks", "SKILL.md"),
-		filepath.Join(".claude", "skills", "mcp-ai-helper-edits", "SKILL.md"),
-	} {
+	paths := []string{".mcp.json"}
+	for _, skill := range skills {
+		for _, installed := range skill.files() {
+			paths = append(paths, filepath.Join(".claude", "skills", skill.name, installed.path))
+		}
+	}
+	for _, path := range paths {
 		if _, err := os.Stat(filepath.Join(project, path)); err != nil {
 			t.Errorf("setup should have written %s: %v", path, err)
 		}
@@ -310,7 +312,7 @@ func TestADryRunOfSetupWritesNothing(t *testing.T) {
 	}
 }
 
-func TestCodexIsAlwaysTheUserConfigAndHasNoSkills(t *testing.T) {
+func TestCodexUsesUserConfigAndInstallsUserWideSkills(t *testing.T) {
 	sandbox(t)
 	codex, err := client("codex")
 	if err != nil {
@@ -325,14 +327,33 @@ func TestCodexIsAlwaysTheUserConfigAndHasNoSkills(t *testing.T) {
 		t.Fatalf("global path: %v", err)
 	}
 	if project != global {
-		t.Errorf("Codex has no project scope: %s != %s", project, global)
+		t.Errorf("Codex has no project config scope: %s != %s", project, global)
+	}
+	projectSkills, err := skillsPath(codex, false)
+	if err != nil {
+		t.Fatalf("project skills path: %v", err)
+	}
+	globalSkills, err := skillsPath(codex, true)
+	if err != nil {
+		t.Fatalf("global skills path: %v", err)
+	}
+	if projectSkills != globalSkills {
+		t.Errorf("Codex skills are user-wide: %s != %s", projectSkills, globalSkills)
 	}
 
 	var out bytes.Buffer
 	if err := Run(Options{Clients: []string{"codex"}}, &out); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
-	if !strings.Contains(out.String(), "no skill directory") {
-		t.Errorf("Codex documents no skill directory, and setup should say so:\n%s", out.String())
+	for _, skill := range skills {
+		for _, installed := range skill.files() {
+			path := filepath.Join(globalSkills, skill.name, installed.path)
+			if _, err := os.Stat(path); err != nil {
+				t.Errorf("setup should have installed %s: %v", path, err)
+			}
+		}
+	}
+	if strings.Contains(out.String(), "skipped") {
+		t.Errorf("Codex skills must not be skipped:\n%s", out.String())
 	}
 }
