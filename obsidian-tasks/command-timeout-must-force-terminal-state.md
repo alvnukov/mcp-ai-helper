@@ -1,7 +1,7 @@
 ---
 id: command-timeout-must-force-terminal-state
 title: Гарантировать terminal state после command timeout
-status: todo
+status: done
 priority: critical
 model_level: high
 task_type: bug
@@ -23,7 +23,7 @@ verification_plan:
     - Verify get/list/filter converge on the same terminal record without server restart.
     - Run make quality and make lint.
 created_at: "2026-08-01T14:38:14.547212Z"
-updated_at: "2026-08-01T14:38:14.547212Z"
+updated_at: "2026-08-01T14:49:24.653978Z"
 ---
 
 ## Body

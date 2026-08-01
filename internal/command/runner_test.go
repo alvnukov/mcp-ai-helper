@@ -192,6 +192,63 @@ func TestRunnerRunInRepoAllowsRestrictedSubdir(t *testing.T) {
 	}
 }
 
+func TestRunnerTimeoutKillsDescendantProcessGroup(t *testing.T) {
+	repoPath := t.TempDir()
+	logRoot := t.TempDir()
+	runner := NewRunner(config.CommandPolicy{
+		AllowedCWDs:           []string{repoPath},
+		DefaultTimeoutSeconds: 1,
+		MaxOutputBytes:        1000,
+		MaxLines:              20,
+		LogDir:                logRoot,
+	})
+
+	started := time.Now()
+	result, err := runner.RunInRepo(
+		t.Context(),
+		"(trap '' TERM; while :; do sleep 30; done) & wait",
+		repoPath,
+		"",
+		1,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(started); elapsed > 4*time.Second {
+		t.Fatalf("timeout took %s, want at most 4s", elapsed)
+	}
+	if result.Status != "timeout" || result.ExitCode != 124 {
+		t.Fatalf("result = %#v, want timeout exit 124", result)
+	}
+
+	persisted, err := runner.FilterHistory(result.CommandID, Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Status != "timeout" || persisted.ExitCode != 124 {
+		t.Fatalf("persisted result = %#v, want timeout exit 124", persisted)
+	}
+
+	listed, err := runner.ListCommands(ListRequest{RepoPath: repoPath, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, entry := range listed.Entries {
+		if entry.CommandID != result.CommandID {
+			continue
+		}
+		found = true
+		if entry.Status != "timeout" || entry.ExitCode != 124 {
+			t.Fatalf("listed result = %#v, want timeout exit 124", entry)
+		}
+		break
+	}
+	if !found {
+		t.Fatalf("timed-out command %s missing from list", result.CommandID)
+	}
+}
+
 func TestRunnerReturnsRunningAndPersistsResultAfterWaitBudget(t *testing.T) {
 	repoPath := t.TempDir()
 	logRoot := t.TempDir()

@@ -30,8 +30,9 @@ import (
 type contextKey string
 
 const (
-	secretEnvsKey contextKey = "secret_envs"
-	secretMaskKey contextKey = "secret_mask"
+	secretEnvsKey    contextKey = "secret_envs"
+	secretMaskKey    contextKey = "secret_mask"
+	processWaitDelay            = 2 * time.Second
 )
 
 // ContextWithSecrets stores resolved secret env vars and mask in the context.
@@ -234,7 +235,7 @@ func (r *Runner) executePrepared(ctx context.Context, commandID string, cmd stri
 	// #nosec G204 -- command execution is this package's explicit MCP capability and is constrained by cwd, timeout, and output policy.
 	command := exec.CommandContext(runCtx, shellBin(), shellArgs(cmd)...)
 	command.Dir = runCWD
-	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	configureCommandTermination(command)
 	if len(envs) > 0 {
 		command.Env = append(os.Environ(), envs...)
 	}
@@ -242,11 +243,8 @@ func (r *Runner) executePrepared(ctx context.Context, commandID string, cmd stri
 	command.Stderr = output.stderrWriter()
 
 	err := command.Run()
-	// Kill the entire process group after the command finishes,
-	// in case child processes are still alive.
-	if command.Process != nil {
-		_ = syscall.Kill(-command.Process.Pid, syscall.SIGKILL)
-	}
+	// Best-effort cleanup for descendants that outlive a normally completed shell.
+	_ = killCommandProcessGroup(command)
 	completed := time.Now().UTC()
 	duration := completed.Sub(started)
 
@@ -322,6 +320,25 @@ func (r *Runner) executePrepared(ctx context.Context, commandID string, cmd stri
 		EvidenceLines: evidence.Select(evidenceLines, 30),
 		OutputHash:    outputHash,
 	}, nil
+}
+
+func configureCommandTermination(command *exec.Cmd) {
+	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	command.Cancel = func() error {
+		return killCommandProcessGroup(command)
+	}
+	command.WaitDelay = processWaitDelay
+}
+
+func killCommandProcessGroup(command *exec.Cmd) error {
+	if command.Process == nil {
+		return os.ErrProcessDone
+	}
+	err := syscall.Kill(-command.Process.Pid, syscall.SIGKILL)
+	if errors.Is(err, syscall.ESRCH) {
+		return os.ErrProcessDone
+	}
+	return err
 }
 
 func (r *Runner) maskText(ctx context.Context, text string) string {
