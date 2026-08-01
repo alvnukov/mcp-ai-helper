@@ -97,7 +97,17 @@ func (b *memoryTaskBackend) BatchUpsert(_ context.Context, req tasks.BatchUpsert
 }
 
 func (b *memoryTaskBackend) SetStatus(ctx context.Context, req tasks.StatusRequest) (tasks.Task, error) {
-	return b.setStatus(ctx, req)
+	result, err := b.SetStatusWithResult(ctx, req)
+	return result.Task, err
+}
+
+func (b *memoryTaskBackend) SetStatusWithResult(ctx context.Context, req tasks.StatusRequest) (TaskStatusMutation, error) {
+	task, err := b.setStatus(ctx, req)
+	if err != nil {
+		return TaskStatusMutation{}, err
+	}
+	changedFile := filepath.ToSlash(filepath.Join("obsidian-tasks", req.ID+".md"))
+	return TaskStatusMutation{Task: task, ChangedFiles: []string{changedFile}}, nil
 }
 
 func newTaskTestRunner(cfg *config.Config) (*Runner, *memoryTaskBackend) {
@@ -383,6 +393,91 @@ func TestRunWorkflowStepsRejectsInvalidDependencyGraphBeforeExecution(t *testing
 				t.Fatalf("file changed for invalid graph: %q", string(data))
 			}
 		})
+	}
+}
+
+func TestRunWorkflowPreflightDoesNotMutateCurrentTask(t *testing.T) {
+	repoPath := t.TempDir()
+	runner, backend := newTaskTestRunner(testConfig(repoPath))
+	created, err := backend.Add(tasks.AddRequest{
+		RepoPath: repoPath,
+		ID:       "task-invalid-workflow",
+		Title:    "invalid workflow",
+		Status:   "todo",
+	})
+	if err != nil {
+		t.Fatalf("add task: %v", err)
+	}
+
+	duplicate := []WorkflowStep{
+		{ID: "duplicate", Tool: "command", Args: map[string]any{"command": "printf first"}},
+		{ID: "duplicate", Tool: "command", Args: map[string]any{"command": "printf second"}},
+	}
+	result, err := runner.RunWorkflow(t.Context(), WorkflowRequest{
+		RepoPath:      repoPath,
+		CurrentTaskID: created.ID,
+		Steps:         duplicate,
+	})
+	if err == nil || !strings.Contains(err.Error(), "duplicate workflow step id") {
+		t.Fatalf("error = %v, want duplicate id preflight failure", err)
+	}
+	if len(result.ChangedFiles) != 0 {
+		t.Fatalf("preflight reported mutations: %#v", result.ChangedFiles)
+	}
+	got, getErr := backend.Get(t.Context(), repoPath, created.ID)
+	if getErr != nil {
+		t.Fatalf("get task: %v", getErr)
+	}
+	if got.Status != "todo" {
+		t.Fatalf("task status = %q, want unchanged todo", got.Status)
+	}
+}
+
+func TestRunWorkflowLateFailureReportsLifecycleMutation(t *testing.T) {
+	repoPath := t.TempDir()
+	runner, backend := newTaskTestRunner(testConfig(repoPath))
+	created, err := backend.Add(tasks.AddRequest{
+		RepoPath: repoPath,
+		ID:       "task-late-failure",
+		Title:    "late failure",
+		Status:   "todo",
+	})
+	if err != nil {
+		t.Fatalf("add task: %v", err)
+	}
+
+	result, err := runner.RunWorkflow(t.Context(), WorkflowRequest{
+		RepoPath:      repoPath,
+		CurrentTaskID: created.ID,
+		TaskOnFailure: "blocked",
+		Steps: []WorkflowStep{
+			{ID: "first", Tool: "command", Args: map[string]any{"command": "printf ready"}},
+			{ID: "late", Tool: "command", DependsOn: []string{"first"}, Args: map[string]any{"command": "printf failed; exit 9"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("run workflow: %v", err)
+	}
+	if result.Status == "ok" || result.FailedStepID != "late" {
+		t.Fatalf("workflow result = %#v, want late failure", result)
+	}
+	got, getErr := backend.Get(t.Context(), repoPath, created.ID)
+	if getErr != nil {
+		t.Fatalf("get task: %v", getErr)
+	}
+	if got.Status != "blocked" {
+		t.Fatalf("task status = %q, want blocked", got.Status)
+	}
+	wantChanged := filepath.ToSlash(filepath.Join("obsidian-tasks", created.ID+".md"))
+	found := false
+	for _, path := range result.ChangedFiles {
+		if path == wantChanged {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("changed_files = %#v, want %q", result.ChangedFiles, wantChanged)
 	}
 }
 

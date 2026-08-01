@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/alvnukov/mcp-ai-helper/internal/command"
+	"github.com/alvnukov/mcp-ai-helper/internal/pipeline"
 	"github.com/alvnukov/mcp-ai-helper/internal/tasks"
 )
 
@@ -89,8 +90,13 @@ func (b workflowTaskBackend) List(ctx context.Context, repoPath string) ([]tasks
 }
 
 func (b workflowTaskBackend) SetStatus(ctx context.Context, req tasks.StatusRequest) (tasks.Task, error) {
-	result, err := b.backend.SetStatus(ctx, req)
+	result, err := b.SetStatusWithResult(ctx, req)
 	return result.Task, err
+}
+
+func (b workflowTaskBackend) SetStatusWithResult(ctx context.Context, req tasks.StatusRequest) (pipeline.TaskStatusMutation, error) {
+	result, err := b.backend.SetStatus(ctx, req)
+	return pipeline.TaskStatusMutation{Task: result.Task, ChangedFiles: result.ChangedFiles}, err
 }
 
 func (b workflowTaskBackend) BatchUpsert(ctx context.Context, req tasks.BatchUpsertRequest) (tasks.BatchUpsertResult, error) {

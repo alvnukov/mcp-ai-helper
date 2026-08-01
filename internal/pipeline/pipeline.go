@@ -39,6 +39,16 @@ type TaskBackend interface {
 	BatchUpsert(ctx context.Context, req tasks.BatchUpsertRequest) (tasks.BatchUpsertResult, error)
 }
 
+// TaskStatusMutation preserves the repository files changed by a task status update.
+type TaskStatusMutation struct {
+	Task         tasks.Task
+	ChangedFiles []string
+}
+
+type taskStatusMutationBackend interface {
+	SetStatusWithResult(ctx context.Context, req tasks.StatusRequest) (TaskStatusMutation, error)
+}
+
 // Request describes the legacy command-analysis pipeline input.
 type Request struct {
 	CurrentTaskID  string   `json:"current_task_id,omitempty"`
@@ -218,9 +228,33 @@ func (r *Runner) withWebArtifact(args WorkflowCommand) (WorkflowCommand, error) 
 	return args, nil
 }
 
+// prepareWorkflow validates all request-wide preconditions before lifecycle mutation.
+func (r *Runner) prepareWorkflow(ctx context.Context, req WorkflowRequest) (context.Context, [][]WorkflowStep, error) {
+	if strings.TrimSpace(req.RepoPath) == "" {
+		return ctx, nil, errors.New("repo_path is required")
+	}
+	if len(req.SecretHandles) > 0 {
+		envs, mask, err := r.cfg.ResolveSecretEnv(req.SecretHandles)
+		if err != nil {
+			return ctx, nil, err
+		}
+		ctx = command.ContextWithSecrets(ctx, envs, mask)
+	}
+	waves, err := buildStepWaves(req.Steps)
+	if err != nil {
+		return ctx, nil, err
+	}
+	return ctx, waves, nil
+}
+
 // RunWorkflow executes either the stable steps DSL or the legacy edit/check/commit workflow.
 func (r *Runner) RunWorkflow(ctx context.Context, req WorkflowRequest) (result WorkflowResult, err error) {
-	if err := r.updateTaskStatus(ctx, req.CurrentTaskID, taskStatusOrDefault(req.TaskOnStart, "in_progress"), req.RepoPath); err != nil {
+	ctx, waves, err := r.prepareWorkflow(ctx, req)
+	if err != nil {
+		return WorkflowResult{}, err
+	}
+	lifecycleChangedFiles, err := r.updateTaskStatusWithChanges(ctx, req.CurrentTaskID, taskStatusOrDefault(req.TaskOnStart, "in_progress"), req.RepoPath)
+	if err != nil {
 		return WorkflowResult{}, err
 	}
 	defer func() {
@@ -230,23 +264,16 @@ func (r *Runner) RunWorkflow(ctx context.Context, req WorkflowRequest) (result W
 		} else if !workflowTaskCloseoutSucceeded(req, result, err) {
 			finalStatus = taskStatusOrDefault(req.TaskOnFailure, "blocked")
 		}
-		if updateErr := r.updateTaskStatus(ctx, req.CurrentTaskID, finalStatus, req.RepoPath); updateErr != nil && err == nil {
+		changedFiles, updateErr := r.updateTaskStatusWithChanges(ctx, req.CurrentTaskID, finalStatus, req.RepoPath)
+		lifecycleChangedFiles = mergeChangedFiles(lifecycleChangedFiles, changedFiles)
+		result.ChangedFiles = mergeChangedFiles(result.ChangedFiles, lifecycleChangedFiles)
+		if updateErr != nil && err == nil {
 			err = updateErr
 		}
 	}()
 
-	if strings.TrimSpace(req.RepoPath) == "" {
-		return WorkflowResult{}, errors.New("repo_path is required")
-	}
-	if len(req.SecretHandles) > 0 {
-		envs, mask, err := r.cfg.ResolveSecretEnv(req.SecretHandles)
-		if err != nil {
-			return WorkflowResult{}, err
-		}
-		ctx = command.ContextWithSecrets(ctx, envs, mask)
-	}
 	if len(req.Steps) > 0 {
-		return r.runWorkflowSteps(ctx, req)
+		return r.runWorkflowSteps(ctx, req, waves), nil
 	}
 	result = WorkflowResult{Status: "ok"}
 	changedSet := map[string]struct{}{}
@@ -319,15 +346,10 @@ func (r *Runner) RunWorkflow(ctx context.Context, req WorkflowRequest) (result W
 	return result, nil
 }
 
-func (r *Runner) runWorkflowSteps(ctx context.Context, req WorkflowRequest) (WorkflowResult, error) {
+func (r *Runner) runWorkflowSteps(ctx context.Context, req WorkflowRequest, waves [][]WorkflowStep) WorkflowResult {
 	result := WorkflowResult{Status: "ok"}
 	stepResults := map[string]WorkflowStepResult{}
 	files := newWorkflowFiles()
-
-	waves, err := buildStepWaves(req.Steps)
-	if err != nil {
-		return WorkflowResult{}, err
-	}
 
 	var stateMu sync.Mutex
 	fileLocks := newFileLockSet()
@@ -393,7 +415,7 @@ func (r *Runner) runWorkflowSteps(ctx context.Context, req WorkflowRequest) (Wor
 	}
 
 	result.ChangedFiles = files.changedFiles()
-	return result, nil
+	return result
 }
 
 // buildStepWaves validates and topologically sorts steps into parallel-execution waves.
@@ -680,6 +702,16 @@ func (f *workflowFiles) recordEdit(path string, hash string) {
 	f.hashes[path] = hash
 }
 
+func (f *workflowFiles) recordChanged(paths ...string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, path := range paths {
+		if path != "" {
+			f.changed[path] = struct{}{}
+		}
+	}
+}
+
 // hash reports the hash an earlier step left on path, if any.
 func (f *workflowFiles) hash(path string) (string, bool) {
 	f.mu.Lock()
@@ -806,6 +838,7 @@ func (r *Runner) executeWorkflowStep(ctx context.Context, repoPath string, step 
 		if err != nil {
 			return WorkflowStepResult{}, err
 		}
+		files.recordChanged(taskResult.ChangedFiles...)
 		base.Output = taskResult
 		return base, nil
 	case "task_transition":
@@ -818,13 +851,14 @@ func (r *Runner) executeWorkflowStep(ctx context.Context, repoPath string, step 
 		if err := bindStepArgs(step.Args, &args); err != nil {
 			return WorkflowStepResult{}, err
 		}
-		updated, err := r.transitionTasks(ctx, repoPath, args)
+		mutation, err := r.transitionTasks(ctx, repoPath, args)
 		if err != nil {
 			base.Status = "failed"
 			base.Reason = err.Error()
 			return base, nil
 		}
-		base.Output = updated
+		files.recordChanged(mutation.ChangedFiles...)
+		base.Output = mutation.Tasks
 		return base, nil
 	default:
 		base.Status = "failed"
@@ -833,46 +867,52 @@ func (r *Runner) executeWorkflowStep(ctx context.Context, repoPath string, step 
 	}
 }
 
-func (r *Runner) transitionTasks(ctx context.Context, repoPath string, req WorkflowTaskTransition) ([]tasks.Task, error) {
+type taskTransitionMutation struct {
+	Tasks        []tasks.Task
+	ChangedFiles []string
+}
+
+func (r *Runner) transitionTasks(ctx context.Context, repoPath string, req WorkflowTaskTransition) (taskTransitionMutation, error) {
 	to := strings.TrimSpace(req.To)
 	if to == "" {
-		return nil, errors.New("to status is required")
+		return taskTransitionMutation{}, errors.New("to status is required")
 	}
 	if len(req.TaskIDs) == 0 {
-		return nil, errors.New("task_ids is required")
+		return taskTransitionMutation{}, errors.New("task_ids is required")
 	}
 	if err := r.validateTaskGraph(ctx, repoPath); err != nil {
-		return nil, err
+		return taskTransitionMutation{}, err
 	}
 
 	current := make([]tasks.Task, 0, len(req.TaskIDs))
 	for _, id := range req.TaskIDs {
 		taskID := strings.TrimSpace(id)
 		if taskID == "" {
-			return nil, errors.New("task id is empty")
+			return taskTransitionMutation{}, errors.New("task id is empty")
 		}
 		task, err := r.requireTaskBackend().Get(ctx, repoPath, taskID)
 		if err != nil {
-			return nil, err
+			return taskTransitionMutation{}, err
 		}
 		if req.From != "" && task.Status != req.From {
-			return nil, fmt.Errorf("task %s status is %q, want %q", task.ID, task.Status, req.From)
+			return taskTransitionMutation{}, fmt.Errorf("task %s status is %q, want %q", task.ID, task.Status, req.From)
 		}
 		if strings.HasPrefix(task.ID, "goal-") && isClosingTaskStatus(to) {
-			return nil, fmt.Errorf("goal task %s cannot transition to %s", task.ID, to)
+			return taskTransitionMutation{}, fmt.Errorf("goal task %s cannot transition to %s", task.ID, to)
 		}
 		current = append(current, task)
 	}
 
-	updated := make([]tasks.Task, 0, len(current))
+	result := taskTransitionMutation{Tasks: make([]tasks.Task, 0, len(current))}
 	for _, task := range current {
-		item, err := r.requireTaskBackend().SetStatus(ctx, tasks.StatusRequest{RepoPath: repoPath, ID: task.ID, Status: to})
+		mutation, err := r.setTaskStatus(ctx, tasks.StatusRequest{RepoPath: repoPath, ID: task.ID, Status: to})
 		if err != nil {
-			return nil, err
+			return taskTransitionMutation{}, err
 		}
-		updated = append(updated, item)
+		result.Tasks = append(result.Tasks, mutation.Task)
+		result.ChangedFiles = mergeChangedFiles(result.ChangedFiles, mutation.ChangedFiles)
 	}
-	return updated, nil
+	return result, nil
 }
 
 func (r *Runner) validateTaskGraph(ctx context.Context, repoPath string) error {
@@ -1182,19 +1222,41 @@ func sortedKeys(values map[string]struct{}) []string {
 
 // Run executes the command-analysis pipeline.
 
-func (r *Runner) updateTaskStatus(ctx context.Context, taskID string, status string, repoPath string) error {
-	if taskID == "" || status == "" {
-		return nil
+func (r *Runner) setTaskStatus(ctx context.Context, req tasks.StatusRequest) (TaskStatusMutation, error) {
+	if req.ID == "" || req.Status == "" {
+		return TaskStatusMutation{}, nil
 	}
 	if !r.cfg.LayerEnabled("tasks") {
-		return fmt.Errorf("task layer is disabled")
+		return TaskStatusMutation{}, errors.New("task layer is disabled")
 	}
-	_, err := r.requireTaskBackend().SetStatus(ctx, tasks.StatusRequest{
-		RepoPath: repoPath,
-		ID:       taskID,
-		Status:   status,
-	})
+	backend := r.requireTaskBackend()
+	if mutationBackend, ok := backend.(taskStatusMutationBackend); ok {
+		return mutationBackend.SetStatusWithResult(ctx, req)
+	}
+	task, err := backend.SetStatus(ctx, req)
+	return TaskStatusMutation{Task: task}, err
+}
+
+func (r *Runner) updateTaskStatus(ctx context.Context, taskID string, status string, repoPath string) error {
+	_, err := r.setTaskStatus(ctx, tasks.StatusRequest{RepoPath: repoPath, ID: taskID, Status: status})
 	return err
+}
+
+func (r *Runner) updateTaskStatusWithChanges(ctx context.Context, taskID string, status string, repoPath string) ([]string, error) {
+	mutation, err := r.setTaskStatus(ctx, tasks.StatusRequest{RepoPath: repoPath, ID: taskID, Status: status})
+	return mutation.ChangedFiles, err
+}
+
+func mergeChangedFiles(groups ...[]string) []string {
+	changed := map[string]struct{}{}
+	for _, group := range groups {
+		for _, path := range group {
+			if path != "" {
+				changed[path] = struct{}{}
+			}
+		}
+	}
+	return sortedKeys(changed)
 }
 
 func taskStatusOrDefault(configured string, fallback string) string {
