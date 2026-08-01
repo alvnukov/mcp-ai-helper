@@ -21,7 +21,7 @@ verification_plan:
     - Inspect the tag-triggered GitHub Actions run and release assets through helper commands.
     - Run brew update/upgrade and verify mcp-ai-helper --version.
 created_at: "2026-08-01T17:55:48.914088Z"
-updated_at: "2026-08-01T17:59:54.353931Z"
+updated_at: "2026-08-01T18:01:47.724302Z"
 ---
 
 ## Body
