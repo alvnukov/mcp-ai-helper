@@ -615,19 +615,36 @@ func TestAbortKillsRunningCommand(t *testing.T) {
 		t.Fatalf("abort status = %q, want ok", abortResult.Status)
 	}
 
-	// Wait for the background goroutine to finish after cancel.
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		completed, err := runner.FilterHistory(result.CommandID, Filter{})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if completed.Status != "running" {
-			return // success
-		}
-		time.Sleep(50 * time.Millisecond)
+	completed, err := runner.FilterHistory(result.CommandID, Filter{})
+	if err != nil {
+		t.Fatal(err)
 	}
-	t.Fatal("command should no longer be running after abort")
+	if completed.Status != "aborted" || completed.ExitCode != 130 {
+		t.Fatalf("completed = %#v, want aborted exit 130 immediately after abort", completed)
+	}
+}
+
+func TestAbortDoesNotReportRunningHistoryAsCompleted(t *testing.T) {
+	runner := NewRunner(config.CommandPolicy{AllowedCWDs: []string{t.TempDir()}, DefaultTimeoutSeconds: 1, MaxOutputBytes: 1000, MaxLines: 20})
+	const commandID = "orphaned-running-command"
+	if err := runner.history.Put(Record{CommandID: commandID, Status: "running", ExitCode: -1, StartedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+
+	abortResult, err := runner.Abort(commandID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if abortResult.Status != "running" {
+		t.Fatalf("abort status = %q, want running while history is running", abortResult.Status)
+	}
+	current, err := runner.FilterHistory(commandID, Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.Status != abortResult.Status {
+		t.Fatalf("abort status = %q, get status = %q", abortResult.Status, current.Status)
+	}
 }
 
 func TestAbortReturnsNotFoundForUnknownID(t *testing.T) {

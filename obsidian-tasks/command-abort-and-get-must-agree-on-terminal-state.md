@@ -1,7 +1,7 @@
 ---
 id: command-abort-and-get-must-agree-on-terminal-state
 title: Command abort and get must agree on terminal state
-status: todo
+status: done
 priority: critical
 model_level: high
 task_type: bug
@@ -21,7 +21,7 @@ verification_plan:
     - Run focused command coordinator lifecycle tests under the race detector.
     - Run make quality and make lint.
 created_at: "2026-08-01T17:48:23.008208Z"
-updated_at: "2026-08-01T17:48:23.008208Z"
+updated_at: "2026-08-01T17:54:53.034751Z"
 ---
 
 ## Body

@@ -32,6 +32,7 @@ const (
 	secretEnvsKey    contextKey = "secret_envs"
 	secretMaskKey    contextKey = "secret_mask"
 	processWaitDelay            = 2 * time.Second
+	abortStatusWait             = processWaitDelay + time.Second
 )
 
 // ContextWithSecrets stores resolved secret env vars and mask in the context.
@@ -47,14 +48,19 @@ func secretsFromContext(ctx context.Context) ([]string, *security.Mask) {
 	return envs, mask
 }
 
+type activeCommand struct {
+	cancel context.CancelFunc
+	done   <-chan struct{}
+}
+
 // Runner executes shell commands under repository and output policies.
 type Runner struct {
 	policy   config.CommandPolicy
 	history  *History
 	baseMask *security.Mask
-	// running tracks active command cancel functions keyed by commandID.
-	// Used by Abort to kill a running process.
-	running sync.Map // map[string]context.CancelFunc
+	// running is the authoritative process tracker until terminal history
+	// publication completes. Only the worker removes entries.
+	running sync.Map // map[string]activeCommand
 }
 
 // Result is the compact, redacted command execution record returned to callers.
@@ -153,6 +159,9 @@ func (r *Runner) runFilteredWithWait(
 }
 
 func (r *Runner) runPreparedWithWait(ctx context.Context, cmd string, runCWD string, timeoutSeconds int, mcpWaitSeconds int, filter Filter, repoPath string) (Result, error) {
+	if _, _, err := applyFilter(nil, filter); err != nil {
+		return Result{}, err
+	}
 	commandID := newCommandID()
 	started := time.Now().UTC()
 	if mcpWaitSeconds > 0 {
@@ -178,15 +187,17 @@ func (r *Runner) runPreparedWithWait(ctx context.Context, cmd string, runCWD str
 	}
 
 	cmdCtx, cmdCancel := context.WithCancel(context.WithoutCancel(ctx))
-	r.running.Store(commandID, cmdCancel)
-
 	done := make(chan struct{})
+	r.running.Store(commandID, activeCommand{cancel: cmdCancel, done: done})
+
 	var result Result
 	var err error
 	go func() {
+		defer func() {
+			r.running.Delete(commandID)
+			close(done)
+		}()
 		result, err = execute(cmdCtx)
-		r.running.Delete(commandID)
-		close(done)
 	}()
 
 	timer := time.NewTimer(time.Duration(mcpWaitSeconds) * time.Second)
@@ -249,17 +260,23 @@ func (r *Runner) executePrepared(ctx context.Context, commandID string, cmd stri
 
 	exitCode := 0
 	status := "ok"
+	executionError := ""
 	if err != nil {
 		var exitErr *exec.ExitError
 		switch {
 		case errors.Is(runCtx.Err(), context.DeadlineExceeded):
 			exitCode = 124
 			status = "timeout"
+		case errors.Is(runCtx.Err(), context.Canceled):
+			exitCode = 130
+			status = "aborted"
 		case errors.As(err, &exitErr):
 			exitCode = exitErr.ExitCode()
 			status = "failed"
 		default:
-			return Result{}, err
+			exitCode = 1
+			status = "failed"
+			executionError = redactOutput(err.Error())
 		}
 	}
 	if exitCode != 0 && status == "ok" {
@@ -271,6 +288,9 @@ func (r *Runner) executePrepared(ctx context.Context, commandID string, cmd stri
 	stderrText = redactOutput(stderrText)
 	stdoutLines := normalizeLines(stdoutText)
 	stderrLines := normalizeLines(stderrText)
+	if executionError != "" {
+		stderrLines = append(stderrLines, executionError)
+	}
 	combined := append([]string{}, stdoutLines...)
 	combined = append(combined, stderrLines...)
 	evidenceLines := combined
@@ -419,32 +439,48 @@ type AbortResult struct {
 	Reason    string `json:"reason,omitempty"`
 }
 
-// Abort kills a running command by its commandID.
-// Returns ok if the process was killed, not_found if no such running command exists,
-// or already_completed if the command already finished.
+// Abort requests cancellation and waits briefly for terminal history publication.
+// Status ok guarantees that subsequent get/filter calls no longer report running.
+// Status running means cancellation was requested but publication is still pending.
 func (r *Runner) Abort(commandID string) (AbortResult, error) {
 	if strings.TrimSpace(commandID) == "" {
 		return AbortResult{}, errors.New("command_id is required")
 	}
 	val, ok := r.running.Load(commandID)
 	if !ok {
-		_, found, err := r.history.getRecord(commandID)
+		record, found, err := r.history.getRecord(commandID)
 		if err != nil {
 			return AbortResult{}, err
 		}
-		if found {
-			return AbortResult{Status: "already_completed", CommandID: commandID, Reason: "command already finished"}, nil
+		if !found {
+			return AbortResult{Status: "not_found", CommandID: commandID, Reason: "no such command"}, nil
 		}
-		return AbortResult{Status: "not_found", CommandID: commandID, Reason: "no such command"}, nil
+		if record.Status == "running" {
+			return AbortResult{Status: "running", CommandID: commandID, Reason: "terminal state publication is pending"}, nil
+		}
+		return AbortResult{Status: "already_completed", CommandID: commandID, Reason: "command already finished"}, nil
 	}
-	cancel, ok := val.(context.CancelFunc)
+	active, ok := val.(activeCommand)
 	if !ok {
-		return AbortResult{}, errors.New("invalid cancel function in process tracker")
+		return AbortResult{}, errors.New("invalid active command in process tracker")
 	}
-	cancel()
-	r.running.Delete(commandID)
-	// The background goroutine will update history status when it detects the cancelled context.
-	return AbortResult{Status: "ok", CommandID: commandID}, nil
+	active.cancel()
+
+	timer := time.NewTimer(abortStatusWait)
+	defer timer.Stop()
+	select {
+	case <-active.done:
+		record, found, err := r.history.getRecord(commandID)
+		if err != nil {
+			return AbortResult{}, err
+		}
+		if found && record.Status == "running" {
+			return AbortResult{Status: "running", CommandID: commandID, Reason: "terminal state publication is pending"}, nil
+		}
+		return AbortResult{Status: "ok", CommandID: commandID}, nil
+	case <-timer.C:
+		return AbortResult{Status: "running", CommandID: commandID, Reason: "cancellation requested; terminal state publication is pending"}, nil
+	}
 }
 
 const protectedLeanCommandMessage = "policy_denied: command appears to access protected task registry source; this is a local command denial, not a global task blocker; use task tools or exclude protected registry files"
