@@ -1,0 +1,4 @@
+interface:
+  display_name: "mcp-ai-helper Commands"
+  short_description: "Run and inspect bounded durable commands"
+  default_prompt: "Use $mcp-ai-helper-commands to run and inspect a command without losing its durable result."

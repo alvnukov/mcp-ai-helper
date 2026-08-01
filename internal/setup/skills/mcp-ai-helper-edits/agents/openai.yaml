@@ -1,0 +1,4 @@
+interface:
+  display_name: "mcp-ai-helper Edits"
+  short_description: "Safely inspect, edit, verify, and commit files"
+  default_prompt: "Use $mcp-ai-helper-edits to make a guarded repository change through the helper."

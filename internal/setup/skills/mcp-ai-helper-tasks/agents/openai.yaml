@@ -1,0 +1,4 @@
+interface:
+  display_name: "mcp-ai-helper Tasks"
+  short_description: "Plan and close helper-managed repo tasks"
+  default_prompt: "Use $mcp-ai-helper-tasks to select and complete the next repository task safely."

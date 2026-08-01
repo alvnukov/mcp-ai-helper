@@ -1,0 +1,4 @@
+interface:
+  display_name: "mcp-ai-helper Surface"
+  short_description: "Diagnose a missing tool, stale guidance, or an off layer"
+  default_prompt: "Use $mcp-ai-helper-surface to find out why a helper tool is missing before reporting a blocker."
