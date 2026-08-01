@@ -4,6 +4,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/alvnukov/mcp-ai-helper/internal/config"
 )
 
 // TestEverySkillSatisfiesTheAgentSkillsFrontmatterContract checks the tighter of
@@ -45,6 +47,24 @@ func frontmatterField(front string, prefix string) string {
 	return ""
 }
 
+// TestEverySkillOnDiskIsInstalled catches the failure the embedded layout makes
+// possible: a skill added under skills/, reviewed, merged, and never installed
+// because nothing named it in skillNames.
+func TestEverySkillOnDiskIsInstalled(t *testing.T) {
+	dirs, err := embeddedSkillDirs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range dirs {
+		if !contains(skillNames, dir) {
+			t.Errorf("skills/%s is embedded but missing from skillNames, so it is never installed", dir)
+		}
+	}
+	if len(dirs) != len(skillNames) {
+		t.Errorf("skills/ holds %d directories, skillNames lists %d", len(dirs), len(skillNames))
+	}
+}
+
 func TestTheSkillsHaveDistinctNames(t *testing.T) {
 	seen := map[string]bool{}
 	for _, s := range skills {
@@ -78,7 +98,17 @@ var workflowSteps = []string{
 var actionMention = regexp.MustCompile(`([a-z_]+) action=([a-z_]+)`)
 
 func TestNoInstalledTextNamesAnActionTheToolsDoNotHave(t *testing.T) {
-	texts := map[string]string{"instructions block": blockBody}
+	texts := map[string]string{
+		"instructions block": blockBody,
+		// The guidance texts belong here for the same reason the skills do, and
+		// more urgently: they are written into a user's config file on first run
+		// and read back from there at run time, so a stale action name in them
+		// keeps reaching models long after this repository moved on.
+		"default assistant guidance": config.DefaultAssistantGuidance(),
+	}
+	for key, value := range config.SetupGuidance("") {
+		texts["server setup guidance: "+key] = value
+	}
 	for _, s := range skills {
 		texts[s.name] = s.body
 	}
@@ -172,6 +202,15 @@ func TestSkillsCoverTheFailureProneHelperWorkflows(t *testing.T) {
 		"mcp-ai-helper-commands": {
 			"command action=run", "command action=get", "command action=filter", "command action=abort",
 			"command_id", "running", "timeout", "truncation", "omission", "surface mismatch",
+		},
+		"mcp-ai-helper-web": {
+			"web_search", "web_fetch", "fetched_doc_find", "fetched_doc_read",
+			"doc_id", "offsets", "completeness", "insufficient_evidence", "tool_manifest",
+		},
+		"mcp-ai-helper-surface": {
+			"tool_manifest", "assistant_guidance", "task_advanced", "git_advanced",
+			"config_read", "config_schema", "config_option_set", "feature_enable",
+			"config_reload", "restart", "task_registry_init", "surface_mismatch",
 		},
 	}
 	for name, fragments := range required {
