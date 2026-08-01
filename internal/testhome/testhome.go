@@ -17,6 +17,7 @@ package testhome
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -38,6 +39,21 @@ func Use(m *testing.M) (exitCode int) {
 			}
 		}
 	}()
+
+	// elan keeps its Lean toolchains under $HOME/.elan unless ELAN_HOME says
+	// otherwise, so moving $HOME hides an already-installed toolchain and the
+	// Lean-backed tests sit there re-downloading it. Pin ELAN_HOME to the real
+	// one first. The helper's own state still goes to the temp home; only the
+	// toolchain store, which no test writes to, stays shared.
+	if _, pinned := os.LookupEnv("ELAN_HOME"); !pinned {
+		if realHome, err := os.UserHomeDir(); err == nil {
+			if err := os.Setenv("ELAN_HOME", filepath.Join(realHome, ".elan")); err != nil {
+				fmt.Fprintf(os.Stderr, "testhome: set ELAN_HOME: %v\n", err)
+				return 1
+			}
+			defer func() { _ = os.Unsetenv("ELAN_HOME") }()
+		}
+	}
 
 	// os.UserHomeDir reads $HOME on unix and USERPROFILE on Windows; setting
 	// both keeps the redirect working wherever the suite runs.
