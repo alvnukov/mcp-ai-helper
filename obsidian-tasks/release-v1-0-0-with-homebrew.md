@@ -25,7 +25,7 @@ verification_plan:
     - Запустить make quality и make lint
     - После push тега проверить GitHub Actions, наличие GitHub Release assets/checksums и формулу Homebrew tap
 created_at: "2026-08-01T17:07:33.076846Z"
-updated_at: "2026-08-01T17:25:09.206893Z"
+updated_at: "2026-08-01T17:33:55.354061Z"
 ---
 
 ## Body
