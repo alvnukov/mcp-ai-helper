@@ -78,7 +78,28 @@ type Result struct {
 	EvidenceLines []evidence.Line `json:"evidence_lines"`
 	OutputHash    string          `json:"output_hash"`
 	NextCall      *NextCall       `json:"next_call,omitempty"`
+	Previous      *PreviousRun    `json:"previous,omitempty"`
 }
+
+// PreviousRun reports that the same command already ran in the same repository
+// shortly before this one.
+//
+// The runner does not refuse a repeat: a command may be repeated for good
+// reason, and a check that ran before an edit is not the same check after it.
+// What it can do is remove the guesswork. SameOutput means the two runs produced
+// byte-identical output, which is as close as this layer gets to saying the
+// repeat learned nothing.
+type PreviousRun struct {
+	CommandID  string `json:"command_id"`
+	Status     string `json:"status"`
+	ExitCode   int    `json:"exit_code"`
+	AgeSeconds int64  `json:"age_seconds"`
+	SameOutput bool   `json:"same_output"`
+}
+
+// previousRunWindow bounds how far back a repeat is worth reporting. Older runs
+// are history, not duplication.
+const previousRunWindow = time.Hour
 
 // NextCall tells the caller how to inspect a still-running durable command.
 type NextCall struct {
@@ -338,7 +359,33 @@ func (r *Runner) executePrepared(ctx context.Context, commandID string, cmd stri
 		FilteredLines: filteredLines,
 		EvidenceLines: evidence.Select(evidenceLines, 30),
 		OutputHash:    outputHash,
+		Previous:      r.previousRun(repoPath, commandStr, commandID, outputHash, completed),
 	}, nil
+}
+
+// previousRun looks for a recent run of the same command in the same repository.
+func (r *Runner) previousRun(repoPath string, command string, exceptID string, outputHash string, now time.Time) *PreviousRun {
+	if r.history == nil || strings.TrimSpace(repoPath) == "" {
+		return nil
+	}
+	entry, ok := r.history.lastIdenticalRun(repoPath, command, exceptID)
+	if !ok {
+		return nil
+	}
+	age := now.Sub(entry.CreatedAt)
+	if age < 0 {
+		age = 0
+	}
+	if age > previousRunWindow {
+		return nil
+	}
+	return &PreviousRun{
+		CommandID:  entry.CommandID,
+		Status:     entry.Status,
+		ExitCode:   entry.ExitCode,
+		AgeSeconds: int64(age.Seconds()),
+		SameOutput: outputHash != "" && entry.OutputHash == outputHash,
+	}
 }
 
 func (r *Runner) maskText(ctx context.Context, text string) string {

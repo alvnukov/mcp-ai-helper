@@ -329,6 +329,69 @@ func latestEntries(entries []indexEntry) []indexEntry {
 	return collapsed
 }
 
+// lastIdenticalRun returns the newest completed run of command in repoPath,
+// ignoring the run identified by exceptID.
+//
+// Only that repository's own index is read. A repeat is only meaningful against
+// the tree it ran on, and scanning every project's index on every command would
+// make the lookup grow with the helper's entire history.
+func (h *History) lastIdenticalRun(repoPath string, command string, exceptID string) (indexEntry, bool) {
+	if h.root == "" {
+		return h.lastIdenticalCached(repoPath, command, exceptID)
+	}
+	logsDir, _, err := h.logsDir(repoPath)
+	if err != nil {
+		return indexEntry{}, false
+	}
+	entries, err := readEntriesFile(filepath.Join(logsDir, "index.jsonl"))
+	if err != nil {
+		return indexEntry{}, false
+	}
+	var best indexEntry
+	found := false
+	for _, entry := range latestEntries(entries) {
+		if entry.CommandID == exceptID || entry.Command != command {
+			continue
+		}
+		if !isTerminalStatus(entry.Status) {
+			continue
+		}
+		if !found || entry.CreatedAt.After(best.CreatedAt) {
+			best, found = entry, true
+		}
+	}
+	return best, found
+}
+
+// lastIdenticalCached answers the same question for a history with no disk root.
+func (h *History) lastIdenticalCached(repoPath string, command string, exceptID string) (indexEntry, bool) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	var best indexEntry
+	found := false
+	for id, record := range h.records {
+		if id == exceptID || record.Command != command || record.RepoPath != repoPath {
+			continue
+		}
+		if !isTerminalStatus(record.Status) {
+			continue
+		}
+		entry := indexEntry{
+			CommandID:  record.CommandID,
+			Status:     record.Status,
+			RepoPath:   record.RepoPath,
+			Command:    record.Command,
+			ExitCode:   record.ExitCode,
+			OutputHash: record.OutputHash,
+			CreatedAt:  record.CreatedAt,
+		}
+		if !found || entry.CreatedAt.After(best.CreatedAt) {
+			best, found = entry, true
+		}
+	}
+	return best, found
+}
+
 // Cleanup removes records outside retention policy and rewrites the search indexes.
 func (h *History) Cleanup() error {
 	h.mu.Lock()
