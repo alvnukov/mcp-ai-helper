@@ -33,6 +33,63 @@ func jsonArgs(args []string) []string {
 	return args
 }
 
+// sectionFor is the key each client keeps its MCP server list under.
+func sectionFor(format configFormat) string {
+	switch format {
+	case claudeJSON:
+		return "mcpServers"
+	case opencodeJSON:
+		return "mcp"
+	default:
+		return "mcp_servers"
+	}
+}
+
+// registeredCommand returns the executable a client would start for the helper,
+// and whether it has an entry for the helper at all.
+//
+// The clients disagree about the shape: Claude Code and Codex keep the
+// executable in "command" with the rest in "args", while OpenCode keeps the
+// whole argv in "command". Both are read, because a status check wants the same
+// fact either way — which binary this client is going to try to start, so that
+// an entry pointing at a helper that has since moved can be told apart from no
+// entry at all. The client itself cannot make that distinction visible: both
+// look like tools that are not there.
+func registeredCommand(existing string, format configFormat) (string, bool, error) {
+	if strings.TrimSpace(existing) == "" {
+		return "", false, nil
+	}
+	decode := decodeJSON
+	if format == codexTOML {
+		decode = decodeTOML
+	}
+	root, err := decode(existing)
+	if err != nil {
+		return "", false, err
+	}
+
+	table, ok := root[sectionFor(format)].(map[string]any)
+	if !ok {
+		return "", false, nil
+	}
+	entry, ok := table[serverName].(map[string]any)
+	if !ok {
+		return "", false, nil
+	}
+	switch command := entry["command"].(type) {
+	case string:
+		return command, true, nil
+	case []any:
+		if len(command) == 0 {
+			return "", true, nil
+		}
+		first, _ := command[0].(string)
+		return first, true, nil
+	default:
+		return "", true, nil
+	}
+}
+
 // mergeJSON inserts the helper under section, leaving every other key of the
 // file intact.
 func mergeJSON(existing string, section string, entry map[string]any) (string, error) {

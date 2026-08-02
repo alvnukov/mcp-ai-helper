@@ -64,10 +64,11 @@ The binary registers itself, so the per-client stanzas below are reference rathe
 
 ```sh
 bin/mcp-ai-helper setup -c claude,codex,opencode
+bin/mcp-ai-helper status -c claude,codex,opencode   # exits 1 if anything is missing or stale
 bin/mcp-ai-helper remove -c claude,codex,opencode   # alias: uninstall
 ```
 
-Each client gets three things: the MCP server entry, an `mcp-ai-helper` block in the file it reads for instructions (`CLAUDE.md` for Claude Code, `AGENTS.md` for Codex and opencode), and three focused skills: `mcp-ai-helper-tasks`, `mcp-ai-helper-edits`, and `mcp-ai-helper-commands`. Every skill includes Codex UI metadata. Codex installs them user-wide under `~/.codex/skills`; Claude Code and OpenCode use their documented project/global skill roots. `remove` takes back exactly those helper-owned files, leaving other servers, skills, and instructions alone.
+Each client gets three things: the MCP server entry, an `mcp-ai-helper` block in the file it reads for instructions (`CLAUDE.md` for Claude Code, `AGENTS.md` for Codex and opencode), and five focused skills: `mcp-ai-helper-tasks`, `mcp-ai-helper-edits`, `mcp-ai-helper-commands`, `mcp-ai-helper-web`, and `mcp-ai-helper-surface`. Their text lives in `internal/setup/skills/` and is embedded into the binary, so the markdown a model reads can be reviewed as markdown; adding a skill is a directory plus one line in `skillNames`. Every skill includes Codex UI metadata. Codex installs them user-wide under `~/.codex/skills`; Claude Code and OpenCode use their documented project/global skill roots. `remove` takes back exactly those helper-owned files, leaving other servers, skills, and instructions alone.
 
 | Flag | Effect |
 |---|---|
@@ -79,6 +80,8 @@ Each client gets three things: the MCP server entry, an `mcp-ai-helper` block in
 | `--config PATH` | Pin `--config PATH` in the command line the client runs. Omit it to let the server fall back to `~/.mcp-ai-helper/config.yaml`. |
 
 Both commands are idempotent: every write is compared against what is on disk first, so a re-run reports `already up to date` rather than reformatting a config or duplicating a block. The command registered is the absolute path of the binary you invoked, which is what makes it work from a client launched by a GUI with a thin `PATH`. For repo development, run `setup` from `bin/mcp-ai-helper-dev` — it registers itself the same way, wrapper arguments included.
+
+`status` writes nothing. It re-derives what `setup` would write, compares that against what is on disk, and exits 1 when anything is missing or out of date — including a server entry naming a binary that has since moved, which from inside the client is indistinguishable from one that works. It takes the same `-c`, `--global`, `--no-instructions` and `--no-skills` flags, which makes it usable as a check rather than as something somebody remembers to read.
 
 Two caveats worth knowing before the first run. Re-registering preserves per-entry settings you added yourself, such as Codex `approval_mode` under `[mcp_servers.mcp-ai-helper.tools.*]`, but the TOML and JSON files are rewritten through a parser, so comments and key order in them do not survive. And a config left holding nothing but the helper is deleted rather than left as an empty husk.
 

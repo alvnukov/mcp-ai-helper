@@ -1,0 +1,4 @@
+interface:
+  display_name: "mcp-ai-helper Web"
+  short_description: "Research the web down to quotable document evidence"
+  default_prompt: "Use $mcp-ai-helper-web to research a question and cite retrieved documents rather than search snippets."

@@ -40,6 +40,9 @@ func main() {
 		case "remove", "uninstall":
 			runSetup(os.Args[1], os.Args[2:], setup.Remove)
 			return
+		case "status":
+			runStatus(os.Args[2:])
+			return
 		}
 	}
 	serve()
@@ -87,11 +90,36 @@ func runSetup(name string, argv []string, run func(setup.Options, io.Writer) err
 	}
 }
 
+// runStatus reports rather than changes, so a report of anything missing or out
+// of date becomes an exit code instead of an error message: this is the command
+// a CI step or a health check runs, and it has nothing to say on the way out
+// that the report has not already said.
+func runStatus(argv []string) {
+	opts, err := parseSetupArgs("status", argv)
+	if err != nil {
+		if !errors.Is(err, flag.ErrHelp) {
+			fmt.Fprintf(os.Stderr, "status: %v\n", err)
+		}
+		os.Exit(2)
+	}
+	current, err := setup.Status(opts, os.Stdout)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "status: %v\n", err)
+		os.Exit(1)
+	}
+	if !current {
+		os.Exit(1)
+	}
+}
+
 func parseSetupArgs(name string, argv []string) (setup.Options, error) {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	verb, past := "configure", "registered in"
-	if name != "setup" {
+	switch name {
+	case "remove", "uninstall":
 		verb, past = "clean up", "removed from"
+	case "status":
+		verb, past = "inspect", "reported for"
 	}
 
 	var requested clientList
@@ -149,6 +177,7 @@ func usage() {
 	out := flag.CommandLine.Output()
 	if _, err := fmt.Fprint(out, `Usage: mcp-ai-helper [flags]              start the stdio MCP server
        mcp-ai-helper setup -c CLIENTS     register the server in your AI clients
+       mcp-ai-helper status -c CLIENTS    report what is installed; exit 1 if stale
        mcp-ai-helper remove -c CLIENTS    remove it again (alias: uninstall)
 
 Clients: claude, codex, opencode. Run a subcommand with -h for its flags.

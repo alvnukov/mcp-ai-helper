@@ -637,7 +637,7 @@ func TestRunWorkflowCommandRejectsHelperConfigAccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Status != "failed" || !strings.Contains(result.Reason, "current helper config") || !strings.Contains(result.Reason, "config_replace") {
+	if result.Status != "failed" || !strings.Contains(result.Reason, "current helper config") || !strings.Contains(result.Reason, "config_reload") {
 		t.Fatalf("result status=%q reason=%q, want helper config denial with config tool recommendation", result.Status, result.Reason)
 	}
 }

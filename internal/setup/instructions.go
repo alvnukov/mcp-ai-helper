@@ -53,6 +53,11 @@ Prefer them over shell, editor, direct git and generic web tools. They return
 ids, hashes and bounded fragments rather than whole files and whole logs, which
 is the point: the same answer for a fraction of the context.
 
+The procedures live in skills, which cost nothing until they are loaded:
+` + "`mcp-ai-helper-tasks`" + `, ` + "`mcp-ai-helper-edits`" + `, ` + "`mcp-ai-helper-commands`" + `,
+` + "`mcp-ai-helper-web`" + ` and ` + "`mcp-ai-helper-surface`" + `. Load the one that matches the
+work rather than reconstructing the protocol from the tool schemas.
+
 Editing is guarded. Read the file, take ` + "`file action=snapshot`" + ` for its hash, then
 hand that hash to ` + "`edit action=replace`" + ` — the write fails rather than silently
 landing on a file that moved underneath you.
@@ -61,8 +66,10 @@ Finish a task in one ` + "`run action=workflow`" + ` call. The edits, the focuse
 task status transition and the owned-files commit belong in the same call; a
 commit followed by a separate status commit means the task is not done.
 
-If these tools are not visible, call ` + "`tool_manifest`" + ` and ask for an MCP client
-restart. Do not substitute shell, filesystem or direct git fallbacks.`
+If these tools are not visible, call ` + "`tool_manifest`" + ` and follow
+` + "`mcp-ai-helper-surface`" + `: some are opt-in layers that ship off, and a client's
+tool cache goes stale. Do not substitute shell, filesystem or direct git
+fallbacks.`
 
 // block is the block as it should appear, markers included.
 func block() string {
