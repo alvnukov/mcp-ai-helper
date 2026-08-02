@@ -28,9 +28,11 @@ report, never a reason to fall back to shell, direct git, or generic file tools.
    `task_export` need layers.task_advanced.enabled. The history, blame and
    worktree actions of `git` need layers.git_advanced.enabled.
 3. Read the current state with `config_read`, and `config_schema` for what a
-   field means and which options are settable. Set one allowlisted option with
-   `config_option_set`, or use `feature_list` and `feature_enable` for the flags
-   this build knows.
+   field means. `config_option_set` writes allowlisted scalars only, and the
+   layer flags above are not among them: turning `task_advanced` or
+   `git_advanced` on means editing the config file directly, because there is no
+   full-replacement tool. `feature_list` and `feature_enable` cover the separate
+   feature-flag namespace, where this build registers them.
 4. `config_reload` re-reads the config without restarting the client, but tool
    visibility changes only when the server process restarts. Enabling a layer
    and expecting the tool in the same session is the usual mistake.

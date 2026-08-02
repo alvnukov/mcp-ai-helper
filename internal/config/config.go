@@ -169,7 +169,7 @@ type ToolPermissions struct {
 }
 
 // RepoConfig is a repo-local optional config loaded from .mcp-ai-helper.yaml.
-// config_replace refuses to write this file; feature tools may update only the features section.
+// No helper tool writes this file wholesale; feature tools may update only the features section.
 type RepoConfig struct {
 	SourcePath    string              `yaml:"-" json:"repo_config_path"`
 	Permissions   RepoPermissions     `yaml:"permissions" json:"permissions"`

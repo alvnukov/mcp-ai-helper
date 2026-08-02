@@ -19,8 +19,8 @@ func Schema() map[string]any {
 			"Call config_schema before editing config when field meaning is unclear.",
 			"Use config_read to inspect the active sanitized config.",
 			"Use config_option_set/config_option_reset for allowlisted scalar option edits; prefer them over full YAML replacement.",
-			"Use config_replace only when a full validated YAML replacement is explicitly required; it preserves hidden token fields where possible.",
-			"Use config_reload after an external config edit; config_option_set and config_replace reload by default.",
+			"There is no full-replacement tool: a field outside the config_option_set allowlist, assistant_guidance among them, is edited in the config file directly.",
+			"Use config_reload after an external config edit; config_option_set and config_option_reset reload by default.",
 			"Use language_profiles before code edits so format/test/lint commands are selected by language instead of ad hoc shell habits.",
 		},
 		"fields": []FieldDoc{
@@ -94,9 +94,9 @@ func Schema() map[string]any {
 			{Path: "secrets.<handle>.enabled", Type: "bool", Default: "false", Description: "Enables a named secret handle for run action=pipeline and run action=workflow injection. Disabled or unknown handles fail closed before command execution."},
 			{Path: "features.overrides.<id>.enabled", Type: "bool", Description: "Feature override value. Global overrides live in helper-owned feature state; repo-local overrides live in .mcp-ai-helper.yaml and take precedence over global overrides."},
 			{Path: "features.audit", Type: "[]record", Description: "Compact helper-owned audit trail for feature changes: scope, previous value/source, new value/source, timestamp, and optional reason."},
-			{Path: "permissions.tools.deny", Type: "[]string", Description: "Repo-local only (.mcp-ai-helper.yaml). MCP tool names denied for LLM in this repo. User-editable; config_replace refuses to write repo configs."},
+			{Path: "permissions.tools.deny", Type: "[]string", Description: "Repo-local only (.mcp-ai-helper.yaml). MCP tool names denied for LLM in this repo. User-editable; no helper tool writes repo configs."},
 			{Path: "task_registry.obsidian.path", Type: "string", Description: "Obsidian task registry directory. In repo-local config this should be repo-relative; runtime resolves it against repo_path without exposing the absolute path in config_read."},
-			{Path: "repo_config", Type: "file", Default: ".mcp-ai-helper.yaml (optional)", Description: "Per-repository config merged on top of global config. Feature tools may create/update only the features section and ensure this file is gitignored; config_replace refuses to write repo configs."},
+			{Path: "repo_config", Type: "file", Default: ".mcp-ai-helper.yaml (optional)", Description: "Per-repository config merged on top of global config. Feature tools may create/update only the features section and ensure this file is gitignored; no helper tool writes the rest of a repo config."},
 		},
 	}
 }
