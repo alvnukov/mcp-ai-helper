@@ -212,24 +212,121 @@ func (h *History) UpdateRunningOutput(commandID string, stdoutLines []string, st
 	return nil
 }
 
+// getRecord returns the best record known for commandID.
+//
+// A terminal record never changes again, so a cached copy of one is
+// authoritative and is returned as it stands. A running record is not a fact but
+// a claim — that the command had not finished the last time this process looked
+// at it. The process that finishes it need not be this one: several helpers can
+// share a log directory, and even within one helper the command outlives the MCP
+// call that started it. Serving that claim from memory is what left a command
+// that had exited reporting itself as running until the helper restarted, with
+// its output already on disk and unreachable.
+//
+// So a cached running record is checked against the durable index before it is
+// believed, and a terminal record found there replaces it.
 func (h *History) getRecord(commandID string) (Record, bool, error) {
 	h.mu.RLock()
-	record, ok := h.records[commandID]
+	cached, cachedOK := h.records[commandID]
 	h.mu.RUnlock()
-	if ok || h.root == "" {
-		return record, ok, nil
+	if h.root == "" || (cachedOK && isTerminalStatus(cached.Status)) {
+		return cached, cachedOK, nil
 	}
 
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if record, ok := h.records[commandID]; ok {
-		return record, true, nil
-	}
-	if err := h.loadIndex(); err != nil {
+	durable, durableOK, err := h.durableRecord(commandID)
+	if err != nil {
 		return Record{}, false, err
 	}
-	record, ok = h.records[commandID]
-	return record, ok, nil
+	if durableOK && isTerminalStatus(durable.Status) {
+		h.mu.Lock()
+		h.records[commandID] = durable
+		h.mu.Unlock()
+		return durable, true, nil
+	}
+	if cachedOK {
+		// Still running as far as anyone knows. The local snapshot is preferred
+		// because it carries the output streamed so far, which the durable
+		// record does not hold until the command exits.
+		return cached, true, nil
+	}
+	return durable, durableOK, nil
+}
+
+// durableRecord reads one command's record from disk.
+//
+// It resolves the entry itself rather than calling loadIndex, because a caller
+// polling a running command would otherwise decompress every record the helper
+// has ever written, once per poll.
+func (h *History) durableRecord(commandID string) (Record, bool, error) {
+	entries, err := h.readEntries()
+	if err != nil {
+		return Record{}, false, err
+	}
+	var best indexEntry
+	found := false
+	for _, entry := range entries {
+		if entry.CommandID != commandID {
+			continue
+		}
+		if !found || supersedes(entry, best) {
+			best, found = entry, true
+		}
+	}
+	if !found {
+		return Record{}, false, nil
+	}
+	record, err := readJSONRecord(best.File)
+	if err != nil {
+		// A record file that cannot be read is reported as absent rather than as
+		// an error: the caller's next best answer is whatever it already had.
+		return Record{}, false, nil
+	}
+	return record, true, nil
+}
+
+// isTerminalStatus reports whether a status is one a command cannot leave.
+func isTerminalStatus(status string) bool {
+	return status != "" && status != "running"
+}
+
+// supersedes reports whether candidate is the better index row for a command
+// that has more than one.
+//
+// A terminal row always wins over a running one, whatever the two timestamps
+// say: the running row is written before the command starts and only records an
+// intention, while the terminal row is written from its result.
+func supersedes(candidate indexEntry, current indexEntry) bool {
+	if isTerminalStatus(candidate.Status) != isTerminalStatus(current.Status) {
+		return isTerminalStatus(candidate.Status)
+	}
+	return candidate.CreatedAt.After(current.CreatedAt)
+}
+
+// latestEntries collapses an index to one row per command.
+//
+// Every command writes at least twice — once when it starts and once when it
+// ends — and the index is append-only, so a reader that treats rows as commands
+// sees each finished command twice: once correctly, and once as a run that never
+// came back.
+func latestEntries(entries []indexEntry) []indexEntry {
+	best := make(map[string]indexEntry, len(entries))
+	order := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		current, seen := best[entry.CommandID]
+		if !seen {
+			order = append(order, entry.CommandID)
+			best[entry.CommandID] = entry
+			continue
+		}
+		if supersedes(entry, current) {
+			best[entry.CommandID] = entry
+		}
+	}
+	collapsed := make([]indexEntry, 0, len(order))
+	for _, commandID := range order {
+		collapsed = append(collapsed, best[commandID])
+	}
+	return collapsed
 }
 
 // Cleanup removes records outside retention policy and rewrites the search indexes.
@@ -243,11 +340,18 @@ func (h *History) Cleanup() error {
 	if err != nil {
 		return err
 	}
+	// Retention counts commands, not index rows. Every command has at least two
+	// rows and they all name the same record file, so dropping a superseded
+	// running row would delete the file its own terminal row still points at —
+	// and MaxRecords would budget for half the history it appears to. Collapsing
+	// first fixes both, and rewriting the index leaves it collapsed for good.
+	commands := latestEntries(entries)
 	cutoff := time.Now().UTC().AddDate(0, 0, -h.policy.RetentionDays)
-	kept := make([]indexEntry, 0, len(entries))
-	for _, entry := range entries {
+	kept := make([]indexEntry, 0, len(commands))
+	dropped := make([]indexEntry, 0, len(commands))
+	for _, entry := range commands {
 		if entry.CreatedAt.Before(cutoff) {
-			h.removeEntry(entry)
+			dropped = append(dropped, entry)
 			continue
 		}
 		kept = append(kept, entry)
@@ -257,10 +361,11 @@ func (h *History) Cleanup() error {
 	})
 	if h.policy.MaxRecords > 0 && len(kept) > h.policy.MaxRecords {
 		drop := len(kept) - h.policy.MaxRecords
-		for _, entry := range kept[:drop] {
-			h.removeEntry(entry)
-		}
+		dropped = append(dropped, kept[:drop]...)
 		kept = kept[drop:]
+	}
+	for _, entry := range dropped {
+		h.removeEntry(entry)
 	}
 	return rewriteIndexes(entries, kept)
 }
@@ -317,11 +422,14 @@ func (h *History) List(req ListRequest) (ListResult, error) {
 		}
 		return ListResult{Entries: entries, Total: len(entries)}, nil
 	}
-	// Persistent history: read index entries.
+	// Persistent history: read index entries, collapsed to one row per command
+	// so a finished command is listed once, by how it finished, instead of twice
+	// — the second time as a run that never came back.
 	idxEntries, err := h.readEntries()
 	if err != nil {
 		return ListResult{}, err
 	}
+	idxEntries = latestEntries(idxEntries)
 	entries := make([]ListEntry, 0, len(idxEntries))
 	for _, e := range idxEntries {
 		if req.Status != "" && e.Status != req.Status {
@@ -416,9 +524,14 @@ func (h *History) loadIndex() error {
 	if err != nil {
 		return err
 	}
-	for _, entry := range entries {
+	for _, entry := range latestEntries(entries) {
 		record, err := readJSONRecord(entry.File)
 		if err != nil {
+			continue
+		}
+		if _, cached := h.records[entry.CommandID]; cached && !isTerminalStatus(record.Status) {
+			// Anything already in memory is at least as fresh as a running
+			// record on disk, and may hold output streamed since it was written.
 			continue
 		}
 		h.records[entry.CommandID] = record
