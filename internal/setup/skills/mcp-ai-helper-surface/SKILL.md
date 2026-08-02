@@ -50,6 +50,17 @@ module, declaring the export executable in the lakefile, then verifying with a
 build and `task action=current` again. Legacy task files are not fallback
 storage: never read or edit registry sources with `file` or `edit` instead.
 
+## A call the user refuses
+
+A denied call is not a failed call. The tool works; the person watching decided
+this was not what they wanted. Reissuing a variation of it is how a session ends
+with four refusals in a row and nothing done.
+
+After the second denial in a row, stop calling tools and ask. Say what you were
+trying to establish and which tool you meant to use, and let the answer redirect
+you. A denial of one tool is often a preference for a different one, not a
+refusal of the work.
+
 ## Before you call it blocked
 
 Say which tool or action is missing, what `tool_manifest` actually returned, and
