@@ -326,6 +326,14 @@ Do not use `close_missing` in task batches unless the caller already has the com
 
 Command output is retained under `~/.mcp-ai-helper/repos/<project>/logs` by default. Each execution gets a `command_id`, an index entry, and a bounded record file so callers can later use `command action=filter` with a more precise filter instead of rerunning the command or flooding context. Retention is controlled by `command_policy.log_retention_days`, `log_max_records`, and `log_compress`.
 
+Three fields exist to keep a caller from spending turns on work it has already done or on a result it should not trust:
+
+- `previous` appears when the same command already ran in that repository within the hour, and carries the earlier `command_id`, its exit code, its age, and `same_output` — set when the two runs produced byte-identical output.
+- `failure_markers` appears when the output reports a failure the exit code does not. A command exits with the status of the last stage of its pipeline, so `go test ./... | tail -40` reports success whatever the tests did.
+- `command action=get` takes `wait_seconds` and blocks until a running command finishes, so waiting does not mean sleeping inside a shell command. An exhausted wait returns the running record rather than an error.
+
+Writing repository source through a shell command — `apply_patch`, a redirect or `tee` into a source file, `sed -i` — is refused, because it bypasses the snapshot and `expected_hash` that make an edit safe to retry. Use `file action=snapshot` with `edit action=replace`, or `edit action=write` for a new file.
+
 For this repository, project task state is canonical in the Lean/Lake registry under `MCPAIHelperProject/`. The task read and mutation tools require the Lean exporter and expose `source`/`projection_source` diagnostics. Legacy `tasks/*.lean` JSON-comment files are not fallback storage and must not be treated as active state.
 
 For local development in this repository, point MCP clients at the stable wrapper instead of the raw server:
