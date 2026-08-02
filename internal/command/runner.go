@@ -450,6 +450,9 @@ func (r *Runner) RunFilteredInRepoWithWait(ctx context.Context, cmd string, repo
 	if err := rejectProtectedLeanCommand(cmd); err != nil {
 		return Result{}, err
 	}
+	if err := rejectShellSourceWrite(cmd, repoPath); err != nil {
+		return Result{}, err
+	}
 	repo, err := resolveDir(repoPath)
 	if err != nil {
 		return Result{}, err
