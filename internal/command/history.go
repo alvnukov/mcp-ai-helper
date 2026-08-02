@@ -184,6 +184,8 @@ func (h *History) Filter(commandID string, filter Filter) (Result, error) {
 		EvidenceLines: evidenceFromLines(record.Combined),
 		OutputHash:    record.OutputHash,
 		NextCall:      nextCallForStatus(record.Status, commandID),
+
+		FailureMarkers: maskedFailureMarkers(record.ExitCode, record.Combined),
 	}, nil
 }
 

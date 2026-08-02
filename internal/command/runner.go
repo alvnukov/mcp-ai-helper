@@ -79,6 +79,9 @@ type Result struct {
 	OutputHash    string          `json:"output_hash"`
 	NextCall      *NextCall       `json:"next_call,omitempty"`
 	Previous      *PreviousRun    `json:"previous,omitempty"`
+	// FailureMarkers holds lines that report a failure the exit code did not,
+	// which happens whenever a command is piped into tail, grep or head.
+	FailureMarkers []string `json:"failure_markers,omitempty"`
 }
 
 // PreviousRun reports that the same command already ran in the same repository
@@ -360,6 +363,8 @@ func (r *Runner) executePrepared(ctx context.Context, commandID string, cmd stri
 		EvidenceLines: evidence.Select(evidenceLines, 30),
 		OutputHash:    outputHash,
 		Previous:      r.previousRun(repoPath, commandStr, commandID, outputHash, completed),
+
+		FailureMarkers: maskedFailureMarkers(exitCode, combined),
 	}, nil
 }
 
