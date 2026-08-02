@@ -123,7 +123,7 @@ func registerCommandTools(srv *server.MCPServer, deps *Server) {
 		"health":  withDeps(commandActionHealth, deps),
 	}
 	srv.AddTool(basemcp.NewTool("command",
-		basemcp.WithDescription("Command execution and history management. Required: action. Actions: run (command, repo_path, cwd?, timeout_seconds?, mcp_wait_seconds?) — run a command under policy limits; the reply carries previous when the same command already ran in this repo within the hour, and previous.same_output means the repeat produced byte-identical output; cleanup () — remove old command log records; abort (command_id) — abort a running command; list (repo_path?, status?, limit?) — list recent command history; get (command_id, mode?, include?, exclude?, preset?, max_lines?, context_before?, context_after?) — get durable command status/result; filter (command_id, include?, exclude?, preset?, max_lines?, context_before?, context_after?) — grep retained command output; health (repo_path) — quick build/vet/test check."),
+		basemcp.WithDescription("Command execution and history management. Required: action. Actions: run (command, repo_path, cwd?, timeout_seconds?, mcp_wait_seconds?) — run a command under policy limits; the reply carries previous when the same command already ran in this repo within the hour, and previous.same_output means the repeat produced byte-identical output; cleanup () — remove old command log records; abort (command_id) — abort a running command; list (repo_path?, status?, limit?) — list recent command history; get (command_id, mode?, wait_seconds?, include?, exclude?, preset?, max_lines?, context_before?, context_after?) — get durable command status/result, blocking up to wait_seconds until it finishes instead of sleeping in a shell; filter (command_id, include?, exclude?, preset?, max_lines?, context_before?, context_after?) — grep retained command output; health (repo_path) — quick build/vet/test check."),
 		basemcp.WithString("action", basemcp.Required(), actionEnum(commandActions)),
 		basemcp.WithString("command", basemcp.Description("Shell command. Required for run.")),
 		basemcp.WithString("repo_path", basemcp.Description("Repository root. Required for run and health; optional for list.")),
@@ -134,6 +134,7 @@ func registerCommandTools(srv *server.MCPServer, deps *Server) {
 		basemcp.WithNumber("limit", basemcp.Description("Max entries for list (default 50, max 200).")),
 		basemcp.WithNumber("timeout_seconds", basemcp.Description("Execution timeout in seconds (run action).")),
 		basemcp.WithNumber("mcp_wait_seconds", basemcp.Description("MCP wait budget before returning running + command_id (run action).")),
+		basemcp.WithNumber("wait_seconds", basemcp.Description("Block up to this long waiting for a running command to finish (get action, max 600). Use instead of sleeping in a shell command.")),
 		basemcp.WithString("include", basemcp.Description("Regex include pattern (get/filter).")),
 		basemcp.WithString("exclude", basemcp.Description("Regex exclude pattern applied after include (get/filter).")),
 		basemcp.WithString("preset", basemcp.Description("Filter preset: errors-only, test-failures, compile-errors, git-status, changed-files, summary-with-context (get/filter).")),
@@ -220,10 +221,11 @@ func commandActionList(_ context.Context, req basemcp.CallToolRequest, deps *Ser
 	return structured(result)
 }
 
-func commandActionGet(_ context.Context, req basemcp.CallToolRequest, deps *Server) (*basemcp.CallToolResult, error) {
+func commandActionGet(ctx context.Context, req basemcp.CallToolRequest, deps *Server) (*basemcp.CallToolResult, error) {
 	var args struct {
-		CommandID string `json:"command_id"`
-		Mode      string `json:"mode"`
+		CommandID   string `json:"command_id"`
+		Mode        string `json:"mode"`
+		WaitSeconds int    `json:"wait_seconds"`
 		commandFilterArgs
 	}
 	if err := bind(req, &args); err != nil {
@@ -233,7 +235,7 @@ func commandActionGet(_ context.Context, req basemcp.CallToolRequest, deps *Serv
 		return basemcp.NewToolResultError("command action=get requires command_id"), nil
 	}
 	_, _, cmds, _, _ := deps.loadDeps()
-	result, err := cmds.FilterHistory(args.CommandID, args.filter())
+	result, err := cmds.WaitForHistory(ctx, args.CommandID, args.filter(), args.WaitSeconds)
 	if err != nil {
 		return basemcp.NewToolResultError(err.Error()), nil
 	}

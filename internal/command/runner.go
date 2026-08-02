@@ -474,6 +474,66 @@ func (r *Runner) FilterHistory(commandID string, filter Filter) (Result, error) 
 	return r.history.Filter(commandID, filter)
 }
 
+const (
+	// waitPollInterval bounds how often a wait re-reads the durable record of a
+	// command some other helper process is running.
+	waitPollInterval = 500 * time.Millisecond
+	// maxWaitSeconds bounds how long a single get call may block.
+	maxWaitSeconds = 600
+)
+
+// WaitForHistory returns a retained record, blocking until the command reaches a
+// terminal state or waitSeconds elapses.
+//
+// Without it the only way to wait was to sleep inside a shell command, which
+// spends a whole turn per poll to learn one bit the helper already knew, and
+// leaves an orphaned waiter behind whenever the estimate is wrong.
+//
+// A wait that runs out is not an error: the caller gets the running record back
+// and can decide whether to keep waiting.
+func (r *Runner) WaitForHistory(ctx context.Context, commandID string, filter Filter, waitSeconds int) (Result, error) {
+	result, err := r.FilterHistory(commandID, filter)
+	if err != nil || waitSeconds <= 0 || isTerminalStatus(result.Status) {
+		return result, err
+	}
+	if waitSeconds > maxWaitSeconds {
+		waitSeconds = maxWaitSeconds
+	}
+
+	deadline := time.NewTimer(time.Duration(waitSeconds) * time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(waitPollInterval)
+	defer ticker.Stop()
+
+	// A command this process started can be awaited directly. One started by
+	// another helper sharing the log directory can only be polled.
+	var finished <-chan struct{}
+	if val, ok := r.running.Load(commandID); ok {
+		if active, ok := val.(activeCommand); ok {
+			finished = active.done
+		}
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return r.FilterHistory(commandID, filter)
+		case <-deadline.C:
+			return r.FilterHistory(commandID, filter)
+		case <-finished:
+			return r.FilterHistory(commandID, filter)
+		case <-ticker.C:
+			result, err := r.FilterHistory(commandID, filter)
+			if err != nil {
+				return Result{}, err
+			}
+			if isTerminalStatus(result.Status) {
+				return result, nil
+			}
+		}
+	}
+}
+
 // ListCommands returns a bounded list of command records from history.
 func (r *Runner) ListCommands(req ListRequest) (ListResult, error) {
 	return r.history.List(req)
