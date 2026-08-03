@@ -170,6 +170,7 @@ func (h *History) Filter(commandID string, filter Filter) (Result, error) {
 	if record.Status == "running" && !record.StartedAt.IsZero() {
 		durationMS = time.Since(record.StartedAt).Milliseconds()
 	}
+	evidenceLines, evidenceDistilled := evidenceFromLines(record.Combined)
 	return Result{
 		Status:        record.Status,
 		CommandID:     commandID,
@@ -181,11 +182,12 @@ func (h *History) Filter(commandID string, filter Filter) (Result, error) {
 		StdoutTail:    tail80(record.Stdout),
 		StderrTail:    tail80(record.Stderr),
 		FilteredLines: filteredLines,
-		EvidenceLines: evidenceFromLines(record.Combined),
+		EvidenceLines: evidenceLines,
 		OutputHash:    record.OutputHash,
 		NextCall:      nextCallForStatus(record.Status, commandID),
 
-		FailureMarkers: maskedFailureMarkers(record.ExitCode, record.Combined),
+		FailureMarkers:    maskedFailureMarkers(record.ExitCode, record.Combined),
+		EvidenceDistilled: evidenceDistilled,
 	}, nil
 }
 
@@ -790,8 +792,8 @@ func readJSONRecord(path string) (Record, error) {
 	return record, nil
 }
 
-func evidenceFromLines(lines []string) []evidence.Line {
-	return evidence.Select(lines, 30)
+func evidenceFromLines(lines []string) ([]evidence.Line, bool) {
+	return evidence.SelectDistilled(lines, 30)
 }
 
 func normalizeHistoryPolicy(policy HistoryPolicy) HistoryPolicy {

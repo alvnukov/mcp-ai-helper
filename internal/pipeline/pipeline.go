@@ -170,8 +170,8 @@ type WorkflowResult struct {
 	Status       string                  `json:"status"`
 	FailedStepID string                  `json:"failed_step_id,omitempty"`
 	StepResults  []WorkflowStepResult    `json:"step_results,omitempty"`
-	EditResults  []fileops.ReplaceResult `json:"edit_results"`
-	CheckResults []command.Result        `json:"check_results"`
+	EditResults  []fileops.ReplaceResult `json:"edit_results,omitempty"`
+	CheckResults []command.Result        `json:"check_results,omitempty"`
 	CommitResult *gitops.CommitResult    `json:"commit_result,omitempty"`
 	ChangedFiles []string                `json:"changed_files"`
 	Reason       string                  `json:"reason,omitempty"`

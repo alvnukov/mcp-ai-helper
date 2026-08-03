@@ -75,13 +75,20 @@ type Result struct {
 	StdoutTail    []string        `json:"stdout_tail"`
 	StderrTail    []string        `json:"stderr_tail"`
 	FilteredLines []string        `json:"filtered_lines,omitempty"`
-	EvidenceLines []evidence.Line `json:"evidence_lines"`
+	EvidenceLines []evidence.Line `json:"evidence_lines,omitempty"`
 	OutputHash    string          `json:"output_hash"`
 	NextCall      *NextCall       `json:"next_call,omitempty"`
 	Previous      *PreviousRun    `json:"previous,omitempty"`
 	// FailureMarkers holds lines that report a failure the exit code did not,
 	// which happens whenever a command is piped into tail, grep or head.
 	FailureMarkers []string `json:"failure_markers,omitempty"`
+	// EvidenceDistilled records whether EvidenceLines selected the lines that
+	// report a failure or only fell back to the tail of the output. It never
+	// travels: it exists so the response layer can drop a fallback that repeats
+	// StdoutTail, instead of re-deriving by text comparison what the selection
+	// already knew. Comparing text cannot tell a failure line that happens to
+	// sit in the tail from a copy of the tail.
+	EvidenceDistilled bool `json:"-"`
 }
 
 // PreviousRun reports that the same command already ran in the same repository
@@ -349,6 +356,7 @@ func (r *Runner) executePrepared(ctx context.Context, commandID string, cmd stri
 	}); err != nil {
 		return Result{}, err
 	}
+	selectedEvidence, evidenceDistilled := evidence.SelectDistilled(evidenceLines, 30)
 	return Result{
 		Status:        status,
 		CommandID:     commandID,
@@ -360,11 +368,12 @@ func (r *Runner) executePrepared(ctx context.Context, commandID string, cmd stri
 		StdoutTail:    tail80(stdoutLines),
 		StderrTail:    tail80(stderrLines),
 		FilteredLines: filteredLines,
-		EvidenceLines: evidence.Select(evidenceLines, 30),
+		EvidenceLines: selectedEvidence,
 		OutputHash:    outputHash,
 		Previous:      r.previousRun(repoPath, commandStr, commandID, outputHash, completed),
 
-		FailureMarkers: maskedFailureMarkers(exitCode, combined),
+		FailureMarkers:    maskedFailureMarkers(exitCode, combined),
+		EvidenceDistilled: evidenceDistilled,
 	}, nil
 }
 

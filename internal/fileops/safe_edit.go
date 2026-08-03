@@ -372,6 +372,11 @@ type SearchResult struct {
 	Path    string        `json:"path"`
 	Matches []SearchMatch `json:"matches"`
 	Total   int           `json:"total"`
+	// Truncated reports that the walk stopped at the match cap, so the tree may
+	// hold matches this result does not show. Without it Total reads as a count
+	// of everything, and a reader draws a conclusion from a partial answer
+	// without knowing that it is partial.
+	Truncated bool `json:"truncated"`
 }
 
 // SearchFiles runs a simple text search in a directory and returns structured results.
@@ -434,6 +439,7 @@ func searchFilesAtRoot(displayPath string, root *safefs.Root, walkRoot string, p
 			})
 			result.Total++
 			if result.Total >= maxMatches {
+				result.Truncated = true
 				return fs.SkipAll
 			}
 		}

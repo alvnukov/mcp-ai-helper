@@ -30,7 +30,7 @@ func bind(req basemcp.CallToolRequest, target any) error {
 // form alike, so the indent bought nothing and cost about a quarter of every
 // list-shaped response.
 func structured(value any) (*basemcp.CallToolResult, error) {
-	text, err := json.Marshal(value)
+	text, err := json.Marshal(forWire(value))
 	if err != nil {
 		return nil, err
 	}

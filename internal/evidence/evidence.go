@@ -32,6 +32,20 @@ var evidenceRefPattern = regexp.MustCompile(`\[(E[0-9]+)\]|\b(E[0-9]+)\b`)
 
 // Select returns a bounded set of relevant evidence lines.
 func Select(lines []string, limit int) []Line {
+	selected, _ := SelectDistilled(lines, limit)
+	return selected
+}
+
+// SelectDistilled returns evidence lines and reports whether they distil
+// anything.
+//
+// When some line reports a failure, the result is a real selection. When none
+// does, there is nothing to distil and the fallback is the tail of the output —
+// the same lines the caller usually already holds. Only the code that does the
+// matching can tell those apart, so it says which happened here. A caller
+// cannot recover this downstream by comparing text: that cannot tell a failure
+// line which happens to sit in the tail from a copy of the tail.
+func SelectDistilled(lines []string, limit int) ([]Line, bool) {
 	if limit <= 0 {
 		limit = 30
 	}
@@ -63,7 +77,8 @@ func Select(lines []string, limit int) []Line {
 			break
 		}
 	}
-	if len(selected) == 0 {
+	distilled := len(selected) > 0
+	if !distilled {
 		for _, line := range tail(lines, limit) {
 			trimmed := strings.TrimSpace(line)
 			if trimmed != "" {
@@ -75,7 +90,7 @@ func Select(lines []string, limit int) []Line {
 	for i, line := range selected {
 		out = append(out, Line{ID: "E" + strconv.Itoa(i+1), Source: "command_output", Text: line})
 	}
-	return out
+	return out, distilled
 }
 
 // ValidateLinks checks that analysis only cites evidence ids present in summary.
