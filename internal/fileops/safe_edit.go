@@ -445,9 +445,11 @@ func searchFilesAtRoot(displayPath string, root *safefs.Root, walkRoot string, p
 	return result, nil
 }
 
-// ReadFilesFileResult is a per-file result in batch reads.
+// ReadFilesFileResult is a per-file result in batch reads. RelativePath is the
+// only path it carries: the batch names its repo once, and an absolute path
+// would repeat that root on every file while naming nothing the repo-scoped
+// operations accept back.
 type ReadFilesFileResult struct {
-	Path          string     `json:"path,omitempty"`
 	RelativePath  string     `json:"relative_path,omitempty"`
 	Hash          string     `json:"hash,omitempty"`
 	Size          int        `json:"size"`
@@ -460,6 +462,7 @@ type ReadFilesFileResult struct {
 
 // ReadFilesResult holds the batch read result.
 type ReadFilesResult struct {
+	RepoPath      string                `json:"repo_path,omitempty"`
 	Files         []ReadFilesFileResult `json:"files"`
 	TotalFiles    int                   `json:"total_files"`
 	ReturnedFiles int                   `json:"returned_files"`
@@ -483,6 +486,7 @@ func ReadFilesInRepo(repoPath string, paths []string) (ReadFilesResult, error) {
 	}
 
 	result := ReadFilesResult{
+		RepoPath:   repoPath,
 		Files:      make([]ReadFilesFileResult, 0, len(paths)),
 		TotalFiles: len(paths),
 	}
@@ -501,7 +505,6 @@ func ReadFilesInRepo(repoPath string, paths []string) (ReadFilesResult, error) {
 		}
 
 		fr := ReadFilesFileResult{
-			Path:         fc.Path,
 			RelativePath: fc.RelativePath,
 			Hash:         fc.Hash,
 			Size:         fc.Size,

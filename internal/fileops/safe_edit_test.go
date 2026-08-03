@@ -544,6 +544,55 @@ func TestListDirWithoutRepoPathStillReportsTheDirectory(t *testing.T) {
 	}
 }
 
+// --- ReadFilesInRepo tests ---
+
+func TestReadFilesNamesItsRepoOnceAndFilesRelativeToIt(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "internal"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	paths := []string{"go.mod", "internal/main.go"}
+	for _, rel := range paths {
+		if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(rel)), []byte("package x\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result, err := ReadFilesInRepo(dir, paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.RepoPath != dir {
+		t.Fatalf("repo_path = %q, want %q", result.RepoPath, dir)
+	}
+	if len(result.Files) != len(paths) {
+		t.Fatalf("files = %d, want %d", len(result.Files), len(paths))
+	}
+	// What the batch reports about a file has to be enough to reach it again.
+	for _, file := range result.Files {
+		if file.Error != "" {
+			t.Fatalf("file %q: %s", file.RelativePath, file.Error)
+		}
+		if _, err := ReadSnapshotInRepo(result.RepoPath, file.RelativePath); err != nil {
+			t.Fatalf("file %q is not addressable from the batch: %v", file.RelativePath, err)
+		}
+	}
+}
+
+// A path that could not be read still has to say which path it was.
+func TestReadFilesNamesTheFileItCouldNotRead(t *testing.T) {
+	dir := t.TempDir()
+	result, err := ReadFilesInRepo(dir, []string{"missing.txt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Files) != 1 || result.Files[0].RelativePath != "missing.txt" {
+		t.Fatalf("files = %#v, want the requested path named", result.Files)
+	}
+	if result.Files[0].Error == "" {
+		t.Fatalf("missing file reported no error: %#v", result.Files[0])
+	}
+}
+
 // --- CreateIfAbsent tests ---
 
 func TestCreateIfAbsentCreatesNewFile(t *testing.T) {
