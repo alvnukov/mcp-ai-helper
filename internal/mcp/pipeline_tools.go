@@ -143,7 +143,10 @@ func runActionSchema() (*basemcp.CallToolResult, error) {
 			"if":         "Condition: 'always' (default), &&, ||, !, changed_files_count comparisons, changed_files contains path, steps.<id>.status/exit_code/validation comparisons, steps.<id>.output_contains text, file_exists/file_missing path, or tasks.<id>.status comparisons.",
 			"on_failure": "Optional: 'stop' (default) or 'continue'.",
 		},
-		"step_types": []map[string]any{
+		// Named for the key a step actually carries. "step_types" invited the
+		// "type" key that the engine does not read, which is the mistake this
+		// list exists to prevent.
+		"step_tools": []map[string]any{
 			{
 				"tool":        "command",
 				"description": "Run a shell command. Workflow stops on non-zero exit unless on_failure is 'continue'.",
@@ -170,8 +173,10 @@ func runActionSchema() (*basemcp.CallToolResult, error) {
 				"tool":        "task_batch_upsert",
 				"description": "Synchronize per-repository task state.",
 				"fields": map[string]string{
-					"tasks":         "Array of task objects with id, title, status, priority, model_level, tags, body (required).",
-					"close_missing": "Close active tasks not in this batch (boolean).",
+					"tasks":           "Array of task objects with id, title, status, priority, model_level, tags, body (required).",
+					"close_missing":   "Close active tasks not in this batch (boolean).",
+					"missing_status":  "Status written to every task close_missing closes: todo, in_progress, blocked or done (string, default done).",
+					"active_statuses": "Statuses that make a task eligible for close_missing, each todo, in_progress, blocked or done (array of strings, default todo/in_progress/blocked).",
 				},
 			},
 			{
