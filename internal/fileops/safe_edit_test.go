@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -281,7 +282,7 @@ func TestSearchFilesSkipsTaskRegistryDirectories(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Total != 1 || len(result.Matches) != 1 || result.Matches[0].File != "internal/visible.go" {
+	if result.Total != 1 || len(result.Matches) != 1 || !strings.HasPrefix(result.Matches[0], "internal/visible.go:") {
 		t.Fatalf("matches = %#v, want only non-task project files", result.Matches)
 	}
 }
@@ -348,11 +349,16 @@ func TestSearchFiles(t *testing.T) {
 		t.Fatalf("total = %d, want >= 2", result.Total)
 	}
 	for _, m := range result.Matches {
-		if !strings.Contains(m.Text, "Foo") {
-			t.Fatalf("match should contain pattern: %q", m.Text)
+		file, rest, ok := strings.Cut(m, ":")
+		if !ok || file == "" {
+			t.Fatalf("match should start with a file: %q", m)
 		}
-		if m.LineNumber < 1 {
-			t.Fatalf("line number should be >= 1: %d", m.LineNumber)
+		lineNumber, text, ok := strings.Cut(rest, ":")
+		if !ok || !strings.Contains(text, "Foo") {
+			t.Fatalf("match should contain pattern: %q", m)
+		}
+		if n, err := strconv.Atoi(lineNumber); err != nil || n < 1 {
+			t.Fatalf("line number should be >= 1: %q", m)
 		}
 	}
 }
@@ -375,6 +381,34 @@ func TestSearchFilesMaxMatches(t *testing.T) {
 	}
 }
 
+// A search that stops at the cap has to say so. Without the flag Total reads as
+// a count of everything there is, and a reader draws its conclusion from a
+// partial answer without ever learning that it was partial.
+func TestSearchFilesReportsTruncationAtCap(t *testing.T) {
+	dir := t.TempDir()
+	for i := range 5 {
+		name := filepath.Join(dir, fmt.Sprintf("f%d.go", i))
+		data := []byte(fmt.Sprintf("package p\nvar x%d = 1\nvar y%d = 2\n", i, i))
+		if err := os.WriteFile(name, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	capped, err := SearchFiles(dir, "var", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !capped.Truncated {
+		t.Fatalf("search stopped at the cap without reporting it: %#v", capped)
+	}
+	full, err := SearchFiles(dir, "var", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if full.Truncated {
+		t.Fatalf("search saw every match but reported truncation: %#v", full)
+	}
+}
+
 func TestSearchFilesSkipsHidden(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o700); err != nil {
@@ -392,8 +426,8 @@ func TestSearchFilesSkipsHidden(t *testing.T) {
 	}
 	// Should find main.go but not .git/config
 	for _, m := range result.Matches {
-		if strings.Contains(m.File, ".git") {
-			t.Fatalf("should skip .git dir: %s", m.File)
+		if file, _, _ := strings.Cut(m, ":"); strings.Contains(file, ".git") {
+			t.Fatalf("should skip .git dir: %s", m)
 		}
 	}
 }

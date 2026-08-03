@@ -359,19 +359,17 @@ func ReadFileContentInRepo(repoPath string, filePath string) (FileContent, error
 	}, nil
 }
 
-// SearchMatch is one search result.
-type SearchMatch struct {
-	File       string `json:"file"`
-	LineNumber int    `json:"line_number"`
-	Text       string `json:"text"`
-}
-
 // SearchResult holds structured search results.
 type SearchResult struct {
-	Pattern string        `json:"pattern"`
-	Path    string        `json:"path"`
-	Matches []SearchMatch `json:"matches"`
-	Total   int           `json:"total"`
+	Pattern string `json:"pattern"`
+	Path    string `json:"path"`
+	// Matches are grep's own file:line:text, one string per match, rather than
+	// objects with file, line_number and text keys. Those three key names would
+	// repeat on every match, which across a full result is most of the payload,
+	// and the reader is a model that has met this exact layout in grep and
+	// ripgrep output far more often than in any JSON shape of it.
+	Matches []string `json:"matches"`
+	Total   int      `json:"total"`
 	// Truncated reports that the walk stopped at the match cap, so the tree may
 	// hold matches this result does not show. Without it Total reads as a count
 	// of everything, and a reader draws a conclusion from a partial answer
@@ -432,11 +430,7 @@ func searchFilesAtRoot(displayPath string, root *safefs.Root, walkRoot string, p
 			if !strings.Contains(line, pattern) {
 				continue
 			}
-			result.Matches = append(result.Matches, SearchMatch{
-				File:       relative,
-				LineNumber: i + 1,
-				Text:       line,
-			})
+			result.Matches = append(result.Matches, fmt.Sprintf("%s:%d:%s", relative, i+1, line))
 			result.Total++
 			if result.Total >= maxMatches {
 				result.Truncated = true
