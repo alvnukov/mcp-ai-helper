@@ -132,12 +132,32 @@ type WorkflowStepResult struct {
 	Output any    `json:"output,omitempty"`
 }
 
-// WorkflowEdit describes one guarded text replacement.
+// WorkflowEdit describes one guarded text replacement. OldB64 and NewB64 carry
+// the same text base64-encoded, for spans that are awkward to quote in JSON;
+// a workflow step accepts them exactly as edit action=replace does, so a caller
+// need not remember which of the two surfaces it is writing for.
 type WorkflowEdit struct {
 	Path         string `json:"path"`
 	ExpectedHash string `json:"expected_hash"`
 	Old          string `json:"old"`
 	New          string `json:"new"`
+	OldB64       string `json:"old_b64,omitempty"`
+	NewB64       string `json:"new_b64,omitempty"`
+}
+
+// replaceRequest builds the replacement both workflow forms apply. Every
+// argument a caller can set travels through here, so the legacy edits list and
+// the guarded_replace step cannot drift apart over which ones they honour.
+func (e WorkflowEdit) replaceRequest(repoPath string) fileops.ReplaceRequest {
+	return fileops.ReplaceRequest{
+		RepoPath:     repoPath,
+		Path:         e.Path,
+		ExpectedHash: e.ExpectedHash,
+		Old:          e.Old,
+		New:          e.New,
+		OldB64:       e.OldB64,
+		NewB64:       e.NewB64,
+	}
 }
 
 // WorkflowCommand describes one repo-scoped command check.
@@ -240,11 +260,40 @@ func (r *Runner) prepareWorkflow(ctx context.Context, req WorkflowRequest) (cont
 		}
 		ctx = command.ContextWithSecrets(ctx, envs, mask)
 	}
+	if err := validateEditEncodings(req); err != nil {
+		return ctx, nil, err
+	}
 	waves, err := buildStepWaves(req.Steps)
 	if err != nil {
 		return ctx, nil, err
 	}
 	return ctx, waves, nil
+}
+
+// validateEditEncodings decodes every base64 edit argument in the request before
+// any of the request runs. ApplyGuardedReplace rejects a malformed encoding as
+// well, but by the time the tenth step reaches it the first nine have already
+// written; a request that cannot be decoded must fail before it changes
+// anything.
+func validateEditEncodings(req WorkflowRequest) error {
+	for i, edit := range req.Edits {
+		if err := fileops.ValidateReplaceEncoding(edit.replaceRequest(req.RepoPath)); err != nil {
+			return fmt.Errorf("edits[%d] (%s): %w", i, edit.Path, err)
+		}
+	}
+	for _, step := range req.Steps {
+		if step.Tool != "guarded_replace" {
+			continue
+		}
+		var args WorkflowEdit
+		if err := bindStepArgs(step.Args, &args); err != nil {
+			return fmt.Errorf("workflow step %q: %w", step.ID, err)
+		}
+		if err := fileops.ValidateReplaceEncoding(args.replaceRequest(req.RepoPath)); err != nil {
+			return fmt.Errorf("workflow step %q: %w", step.ID, err)
+		}
+	}
+	return nil
 }
 
 // RunWorkflow executes either the stable steps DSL or the legacy edit/check/commit workflow.
@@ -278,7 +327,7 @@ func (r *Runner) RunWorkflow(ctx context.Context, req WorkflowRequest) (result W
 	result = WorkflowResult{Status: "ok"}
 	changedSet := map[string]struct{}{}
 	for _, edit := range req.Edits {
-		replaceReq := fileops.ReplaceRequest{RepoPath: req.RepoPath, Path: edit.Path, ExpectedHash: edit.ExpectedHash, Old: edit.Old, New: edit.New}
+		replaceReq := edit.replaceRequest(req.RepoPath)
 		if replaceReq.ExpectedHash == "" {
 			snapshot, err := fileops.ReadSnapshotInRepo(req.RepoPath, edit.Path)
 			if err != nil {
@@ -736,7 +785,7 @@ func (r *Runner) executeWorkflowStep(ctx context.Context, repoPath string, step 
 		if err := bindStepArgs(step.Args, &args); err != nil {
 			return WorkflowStepResult{}, err
 		}
-		replaceReq := fileops.ReplaceRequest{RepoPath: repoPath, Path: args.Path, ExpectedHash: args.ExpectedHash, Old: args.Old, New: args.New}
+		replaceReq := args.replaceRequest(repoPath)
 		if currentHash, ok := files.hash(args.Path); ok {
 			replaceReq.ExpectedHash = currentHash
 		}

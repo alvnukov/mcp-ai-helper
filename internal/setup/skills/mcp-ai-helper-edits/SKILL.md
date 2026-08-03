@@ -25,8 +25,9 @@ For an existing file:
 2. Snapshot the file.
 3. Call `edit action=replace` with expected_hash and an old span that occurs once.
 
-Use old_b64 and new_b64 when transport escaping is risky. If the hash conflicts,
-re-read and re-snapshot; never remove the guard.
+Use old_b64 and new_b64 when transport escaping is risky; a `guarded_replace`
+workflow step takes the same arguments. If the hash conflicts, re-read and
+re-snapshot; never remove the guard.
 
 Use `edit action=write` for a whole or new file, with expected_hash when it
 already exists. Before a new-file task that requires atomic completion, verify

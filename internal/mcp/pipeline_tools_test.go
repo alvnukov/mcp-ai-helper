@@ -2,10 +2,13 @@ package mcp
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
 	basemcp "github.com/mark3labs/mcp-go/mcp"
+
+	"github.com/alvnukov/mcp-ai-helper/internal/pipeline"
 )
 
 // schemaStepTools decodes the step list out of run action=schema. Everything
@@ -74,12 +77,23 @@ func TestRunActionSchemaUsesToolNotType(t *testing.T) {
 	}
 }
 
-// guarded_replace inside a workflow binds only old/new; old_b64/new_b64 are not
-// decoded by the step (WorkflowEdit has no such fields). The schema must not
-// advertise them for the workflow path — that sends a model toward a step that
-// silently drops its payload.
-func TestRunActionSchemaDoesNotAdvertiseBase64ForWorkflowGuardedReplace(t *testing.T) {
+// The schema and the binder must name the same arguments. A field the schema
+// advertises but WorkflowEdit does not carry sends a model toward a payload that
+// json.Unmarshal drops without a word; a field WorkflowEdit carries but the
+// schema omits is one nobody knows to use. Both directions are checked against
+// the struct the step actually decodes into, because that struct is what decides
+// which arguments survive.
+func TestRunActionSchemaNamesEveryFieldGuardedReplaceBinds(t *testing.T) {
 	t.Parallel()
+
+	bound := map[string]bool{}
+	editType := reflect.TypeOf(pipeline.WorkflowEdit{})
+	for i := range editType.NumField() {
+		name, _, _ := strings.Cut(editType.Field(i).Tag.Get("json"), ",")
+		if name != "" && name != "-" {
+			bound[name] = true
+		}
+	}
 
 	var checked bool
 	for _, entry := range schemaStepTools(t) {
@@ -89,18 +103,17 @@ func TestRunActionSchemaDoesNotAdvertiseBase64ForWorkflowGuardedReplace(t *testi
 		checked = true
 		fields, ok := entry["fields"].(map[string]any)
 		if !ok || len(fields) == 0 {
-			t.Fatalf("guarded_replace entry has no readable fields map (%T); the base64 check below would pass on nothing", entry["fields"])
+			t.Fatalf("guarded_replace entry has no readable fields map (%T); the checks below would pass on nothing", entry["fields"])
 		}
 		for field := range fields {
-			if strings.Contains(field, "b64") {
-				t.Errorf("guarded_replace schema still advertises %q as a workflow field; base64 is only supported by edit action=replace", field)
+			if !bound[field] {
+				t.Errorf("guarded_replace schema advertises %q, which WorkflowEdit does not bind; a step sending it would lose it silently", field)
 			}
 		}
-		// The restriction must be stated so a model with backslash-heavy text
-		// knows to reach for edit action=replace instead of the workflow step.
-		desc, _ := entry["description"].(string)
-		if !strings.Contains(desc, "edit action=replace") {
-			t.Errorf("guarded_replace description must point to edit action=replace for base64; got %q", desc)
+		for field := range bound {
+			if _, present := fields[field]; !present {
+				t.Errorf("WorkflowEdit binds %q but the schema does not name it; a model cannot reach an argument it is never told about", field)
+			}
 		}
 	}
 	if !checked {

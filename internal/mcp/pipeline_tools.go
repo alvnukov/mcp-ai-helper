@@ -158,12 +158,14 @@ func runActionSchema() (*basemcp.CallToolResult, error) {
 			},
 			{
 				"tool":        "guarded_replace",
-				"description": "Replace one unique text span only if the file hash still matches. Use file action=read first, then file action=snapshot, then this. Inside a workflow step only old/new are decoded; for backslash-heavy text use edit action=replace, which also accepts old_b64/new_b64.",
+				"description": "Replace one unique text span only if the file hash still matches. Use file action=read first, then file action=snapshot, then this. Takes the same text arguments as edit action=replace, base64 included; a malformed encoding fails the workflow before its first step runs.",
 				"fields": map[string]string{
 					"path":          "Repo-relative file path (string, required).",
 					"expected_hash": "SHA-256 hash from file action=snapshot before edit (string, required).",
-					"old":           "Text to replace (string, required inside a workflow step).",
-					"new":           "Replacement text (string, required inside a workflow step).",
+					"old":           "Text to replace (string, required unless old_b64 is set).",
+					"new":           "Replacement text (string, required unless new_b64 is set).",
+					"old_b64":       "Base64-encoded old text (string). Use instead of old for backslash-heavy spans; it wins when both are set.",
+					"new_b64":       "Base64-encoded replacement text (string). Use instead of new for backslash-heavy spans; it wins when both are set.",
 				},
 			},
 			{

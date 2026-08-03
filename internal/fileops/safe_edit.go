@@ -179,6 +179,16 @@ func resolveText(req ReplaceRequest) (oldText string, newText string, err error)
 	return oldText, newText, nil
 }
 
+// ValidateReplaceEncoding reports whether a request's base64 arguments decode,
+// without reading or writing the file. A caller that applies several
+// replacements in sequence uses it to reject a malformed encoding before the
+// first one writes. It runs the decoder ApplyGuardedReplace runs, so the two
+// cannot disagree about what decodes.
+func ValidateReplaceEncoding(req ReplaceRequest) error {
+	_, _, err := resolveText(req)
+	return err
+}
+
 func findBestPartialMatch(text string, old string) string {
 	best := 0
 	bestPos := 0

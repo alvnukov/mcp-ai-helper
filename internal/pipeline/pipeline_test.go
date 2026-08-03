@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"github.com/alvnukov/mcp-ai-helper/internal/tasks"
 	"os"
@@ -156,6 +157,114 @@ func TestRunWorkflowEditsThenChecks(t *testing.T) {
 	}
 	if string(data) != "new\n" {
 		t.Fatalf("file = %q", string(data))
+	}
+}
+
+// A guarded_replace step accepts the same base64 arguments edit action=replace
+// accepts. The span below is a Go string literal made mostly of backslashes:
+// carried as JSON text it survives only if every layer between the caller and
+// strings.Replace escapes it identically, which is the assumption base64 exists
+// to remove.
+func TestRunWorkflowStepDecodesBase64EditArguments(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "main.go")
+	if err := os.WriteFile(path, []byte("fmt.Println(\"a\\nb\\\\c\")\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runner := NewRunner(testConfig(dir), nil)
+	result, err := runner.RunWorkflow(t.Context(), WorkflowRequest{
+		RepoPath: dir,
+		Steps: []WorkflowStep{{
+			ID:   "edit",
+			Tool: "guarded_replace",
+			Args: map[string]any{
+				"path":    "main.go",
+				"old_b64": base64.StdEncoding.EncodeToString([]byte("\"a\\nb\\\\c\"")),
+				"new_b64": base64.StdEncoding.EncodeToString([]byte("\"x\\ty\"")),
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "ok" {
+		t.Fatalf("status = %q, reason = %q", result.Status, result.Reason)
+	}
+	// #nosec G304 -- test reads a file created inside t.TempDir.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "fmt.Println(\"x\\ty\")\n"; string(data) != want {
+		t.Fatalf("file = %q, want %q", string(data), want)
+	}
+}
+
+// The legacy edits list builds its replacement from the same struct as the step
+// form, so it honours the same arguments. Two constructors drifting apart is how
+// the step form came to drop base64 in the first place.
+func TestRunWorkflowEditsDecodeBase64Arguments(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "main.go")
+	if err := os.WriteFile(path, []byte("fmt.Println(\"a\\nb\\\\c\")\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runner := NewRunner(testConfig(dir), nil)
+	result, err := runner.RunWorkflow(t.Context(), WorkflowRequest{
+		RepoPath: dir,
+		Edits: []WorkflowEdit{{
+			Path:   "main.go",
+			OldB64: base64.StdEncoding.EncodeToString([]byte("\"a\\nb\\\\c\"")),
+			NewB64: base64.StdEncoding.EncodeToString([]byte("\"x\\ty\"")),
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "ok" {
+		t.Fatalf("status = %q, reason = %q", result.Status, result.Reason)
+	}
+	// #nosec G304 -- test reads a file created inside t.TempDir.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "fmt.Println(\"x\\ty\")\n"; string(data) != want {
+		t.Fatalf("file = %q, want %q", string(data), want)
+	}
+}
+
+// A malformed encoding must stop the request, not just the step that carries it:
+// by the time a later step is dispatched the earlier ones have already written.
+// The bad argument sits in the second step here, and the first step's file must
+// still hold its original text.
+func TestRunWorkflowRejectsMalformedBase64BeforeAnyStepRuns(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "x.txt")
+	if err := os.WriteFile(path, []byte("old\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runner := NewRunner(testConfig(dir), nil)
+	_, err := runner.RunWorkflow(t.Context(), WorkflowRequest{
+		RepoPath: dir,
+		Steps: []WorkflowStep{
+			{ID: "good", Tool: "guarded_replace", Args: map[string]any{"path": "x.txt", "old": "old", "new": "new"}},
+			{ID: "bad", Tool: "guarded_replace", Args: map[string]any{"path": "y.txt", "old_b64": "not base64!!"}},
+		},
+	})
+	if err == nil {
+		t.Fatal("malformed base64 was accepted; the request must fail before any step writes")
+	}
+	if !strings.Contains(err.Error(), "bad") {
+		t.Errorf("error does not name the offending step: %v", err)
+	}
+	// #nosec G304 -- test reads a file created inside t.TempDir.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "old\n" {
+		t.Fatalf("the first step already wrote %q; validation ran too late", string(data))
 	}
 }
 
