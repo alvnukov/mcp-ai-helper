@@ -68,3 +68,25 @@ func TestCurrentTasksEmpty(t *testing.T) {
 		t.Fatalf("len = %d, want 0", len(got))
 	}
 }
+
+// structured() is the single place that decides the wire shape of every
+// successful tool result, so the contract belongs here rather than in each
+// tool's own test. The payload goes in content and nowhere else: repeating it
+// in structuredContent would put the same bytes on the wire twice, and that
+// field earns its place only beside a declared outputSchema, which no tool in
+// this server declares.
+func TestStructuredResultCarriesPayloadOnce(t *testing.T) {
+	res, err := structured(map[string]any{"status": "ok"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StructuredContent != nil {
+		t.Fatalf("payload repeated in structuredContent: %#v", res.StructuredContent)
+	}
+	want := `{
+  "status": "ok"
+}`
+	if got := resultText(t, res); got != want {
+		t.Fatalf("content = %q, want %q", got, want)
+	}
+}

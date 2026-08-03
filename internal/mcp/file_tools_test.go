@@ -42,7 +42,7 @@ func writeTestFile(t *testing.T, dir, name, content string) {
 
 func resultMap(t *testing.T, r *basemcp.CallToolResult) map[string]any {
 	t.Helper()
-	// An error result carries no structured content, so without this the caller
+	// An error result carries no JSON payload, so without this the caller
 	// reads a nil map and panics — which takes the whole package down and hides
 	// every test after it. Reporting the tool's own message instead says what
 	// actually went wrong.
@@ -53,16 +53,13 @@ func resultMap(t *testing.T, r *basemcp.CallToolResult) map[string]any {
 	if r.IsError {
 		t.Fatalf("tool returned an error: %s", resultText(t, r))
 	}
-	data, err := json.Marshal(r.StructuredContent)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
+	text := resultText(t, r)
 	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
+	if err := json.Unmarshal([]byte(text), &m); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
 	if m == nil {
-		t.Fatalf("tool returned no structured content: %s", resultText(t, r))
+		t.Fatalf("tool returned no JSON payload: %s", text)
 	}
 	return m
 }

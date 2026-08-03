@@ -21,12 +21,16 @@ func bind(req basemcp.CallToolRequest, target any) error {
 	return nil
 }
 
+// The payload travels once, as JSON text in content. structuredContent would
+// carry the very same bytes a second time, and that field earns its place only
+// beside a declared outputSchema — no tool here declares one, and clients
+// disagree about which of the two they read. content is the one they all read.
 func structured(value any) (*basemcp.CallToolResult, error) {
 	text, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
 		return nil, err
 	}
-	return basemcp.NewToolResultStructured(value, string(text)), nil
+	return basemcp.NewToolResultText(string(text)), nil
 }
 
 func uniqueStrings(values []string) []string {

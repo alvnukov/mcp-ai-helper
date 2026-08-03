@@ -2,7 +2,6 @@ package mcp
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -64,11 +63,7 @@ func TestWebFetchToolReturnsBoundedMetadata(t *testing.T) {
 	if m["status"] != "complete" || m["doc_id"] == "" {
 		t.Fatalf("result = %#v", m)
 	}
-	data, err := json.Marshal(res.StructuredContent)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(data), "full page body") {
+	if data := resultText(t, res); strings.Contains(data, "full page body") {
 		t.Fatalf("tool response leaked page body: %s", data)
 	}
 }
@@ -157,11 +152,7 @@ func TestWebSearchReturnsCompactHits(t *testing.T) {
 	if m["status"] != "complete" || len(m["hits"].([]any)) != 1 {
 		t.Fatalf("result = %#v", m)
 	}
-	data, err := json.Marshal(res.StructuredContent)
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(data)
+	text := resultText(t, res)
 	if strings.Contains(text, "raw search markup") || !strings.Contains(text, "compact snippet") {
 		t.Fatalf("unexpected search response: %s", text)
 	}
@@ -188,11 +179,8 @@ func TestWebSearchGoogleProviderThroughMCP(t *testing.T) {
 	if m["status"] != "complete" || len(m["hits"].([]any)) != 1 {
 		t.Fatalf("result = %#v", m)
 	}
-	data, err := json.Marshal(res.StructuredContent)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(data), "secret-key") || !strings.Contains(string(data), "google snippet") {
+	data := resultText(t, res)
+	if strings.Contains(data, "secret-key") || !strings.Contains(data, "google snippet") {
 		t.Fatalf("unexpected google response: %s", data)
 	}
 }
