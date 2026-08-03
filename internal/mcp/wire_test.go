@@ -70,6 +70,75 @@ func TestCommandWireKeepsDistilledEvidenceFoundInTail(t *testing.T) {
 	}
 }
 
+// A check that runs as a workflow step repeats its tail in its evidence just
+// like one run on its own, and workflows are how checks usually run.
+func TestWorkflowWireShapesStepOutputs(t *testing.T) {
+	got := workflowForWire(pipeline.WorkflowResult{
+		Status: "ok",
+		StepResults: []pipeline.WorkflowStepResult{{
+			ID: "test", Tool: "command", Status: "ok",
+			Output: command.Result{
+				StdoutTail:    []string{"ok  github.com/x/y  0.6s"},
+				EvidenceLines: []evidence.Line{{ID: "E1", Source: "command_output", Text: "ok  github.com/x/y  0.6s"}},
+			},
+		}},
+	})
+	step, ok := got.StepResults[0].Output.(command.Result)
+	if !ok {
+		t.Fatalf("step output changed type: %#v", got.StepResults[0].Output)
+	}
+	if step.EvidenceLines != nil {
+		t.Fatalf("nested evidence_lines repeats stdout_tail: %#v", step.EvidenceLines)
+	}
+}
+
+// Shaping runs on the way out, while the runner still holds the records its
+// closeout decision read.
+func TestWorkflowWireLeavesTheRunnersRecordsAlone(t *testing.T) {
+	original := pipeline.WorkflowResult{
+		Status: "ok",
+		StepResults: []pipeline.WorkflowStepResult{{
+			ID: "test", Tool: "command", Status: "ok",
+			Output: command.Result{
+				StdoutTail:    []string{"done"},
+				EvidenceLines: []evidence.Line{{ID: "E1", Source: "command_output", Text: "done"}},
+			},
+		}},
+	}
+	_ = workflowForWire(original)
+	step, ok := original.StepResults[0].Output.(command.Result)
+	if !ok || len(step.EvidenceLines) != 1 {
+		t.Fatalf("shaping wrote through to the runner's own record: %#v", original.StepResults[0].Output)
+	}
+}
+
+func TestPipelineWireDropsTheCommandsCopyOfTheSummary(t *testing.T) {
+	lines := []evidence.Line{{ID: "E1", Source: "command_output", Text: "--- FAIL: TestThing"}}
+	got := pipelineForWire(pipeline.Result{
+		Status:  "error",
+		Command: command.Result{ExitCode: 1, StdoutTail: []string{"--- FAIL: TestThing", "FAIL"}, EvidenceLines: lines, EvidenceDistilled: true},
+		Summary: evidence.Summary{EvidenceLines: lines},
+	})
+	if got.Command.EvidenceLines != nil {
+		t.Fatalf("command repeats summary.evidence_lines: %#v", got.Command.EvidenceLines)
+	}
+	if len(got.Summary.EvidenceLines) != 1 {
+		t.Fatalf("summary = %#v, want the copy the analysis cites kept", got.Summary.EvidenceLines)
+	}
+}
+
+// The still-running result has no summary lines, so the command's copy is the
+// only one there is and an emptied summary must not be read as a duplicate.
+func TestPipelineWireKeepsEvidenceAnEmptySummaryCannotCarry(t *testing.T) {
+	got := pipelineForWire(pipeline.Result{
+		Status:  "running",
+		Command: command.Result{StdoutTail: []string{"still building"}, EvidenceLines: []evidence.Line{{ID: "E1", Source: "command_output", Text: "cannot find package"}}, EvidenceDistilled: true},
+	})
+	if len(got.Command.EvidenceLines) != 1 {
+		t.Fatalf("command evidence = %#v, want it kept when the summary has none", got.Command.EvidenceLines)
+	}
+}
+
 // The shaping has to happen inside structured(), because a call site that
 // forgets it ships the duplicate silently and there are dozens of them.
 func TestStructuredAppliesWireShaping(t *testing.T) {
