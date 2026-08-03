@@ -25,8 +25,12 @@ func bind(req basemcp.CallToolRequest, target any) error {
 // carry the very same bytes a second time, and that field earns its place only
 // beside a declared outputSchema — no tool here declares one, and clients
 // disagree about which of the two they read. content is the one they all read.
+//
+// Marshal rather than MarshalIndent: the reader is a model, which parses either
+// form alike, so the indent bought nothing and cost about a quarter of every
+// list-shaped response.
 func structured(value any) (*basemcp.CallToolResult, error) {
-	text, err := json.MarshalIndent(value, "", "  ")
+	text, err := json.Marshal(value)
 	if err != nil {
 		return nil, err
 	}

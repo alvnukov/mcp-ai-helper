@@ -83,9 +83,7 @@ func TestStructuredResultCarriesPayloadOnce(t *testing.T) {
 	if res.StructuredContent != nil {
 		t.Fatalf("payload repeated in structuredContent: %#v", res.StructuredContent)
 	}
-	want := `{
-  "status": "ok"
-}`
+	want := `{"status":"ok"}`
 	if got := resultText(t, res); got != want {
 		t.Fatalf("content = %q, want %q", got, want)
 	}
