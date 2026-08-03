@@ -47,6 +47,7 @@ type taskRegistryInitRequest struct {
 func registerConfigTools(srv *server.MCPServer, deps *Server, reload configReloadFunc) {
 	registerConfigOptionTools(srv, deps, reload)
 	srv.AddTool(basemcp.NewTool("task_registry_init",
+		setsLocal,
 		basemcp.WithDescription("Initialize a repository task registry through MCP-only setup. For backend=obsidian, creates the configured task directory and optionally writes repo-local .mcp-ai-helper.yaml. Use dry_run first when the caller needs to review actions."),
 		basemcp.WithString("repo_path", basemcp.Required(), basemcp.Description("Repository root to initialize.")),
 		basemcp.WithString("backend", basemcp.Description("Task registry backend to initialize. Currently supports obsidian. Defaults to obsidian.")),
@@ -66,12 +67,14 @@ func registerConfigTools(srv *server.MCPServer, deps *Server, reload configReloa
 	})
 
 	srv.AddTool(basemcp.NewTool("config_schema",
+		readsLocal,
 		basemcp.WithDescription("Return machine-readable documentation for every mcp-ai-helper config field and the safe model-driven setup workflow."),
 	), func(_ context.Context, _ basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
 		return structured(config.Schema())
 	})
 
 	srv.AddTool(basemcp.NewTool("config_read",
+		readsLocal,
 		basemcp.WithDescription("Return the active sanitized config, or validate/read another config path without exposing literal api_key values. Pass repo_path to merge repo-local .mcp-ai-helper.yaml."),
 		basemcp.WithString("path", basemcp.Description("Optional config path. Empty means active in-memory config.")),
 		basemcp.WithString("repo_path", basemcp.Description("Optional repo root to load and merge .mcp-ai-helper.yaml.")),
@@ -109,6 +112,7 @@ func registerConfigTools(srv *server.MCPServer, deps *Server, reload configReloa
 	})
 
 	srv.AddTool(basemcp.NewTool("config_reload",
+		setsLocal,
 		basemcp.WithDescription("Reload the running helper from config YAML without restarting Codex. Tool visibility still changes only on process restart."),
 		basemcp.WithString("path", basemcp.Description("Optional config path. Empty means the active config path.")),
 	), func(_ context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
@@ -232,6 +236,7 @@ func pathInsideDir(root string, child string) bool {
 
 func registerConfigOptionTools(srv *server.MCPServer, deps *Server, reload configReloadFunc) {
 	srv.AddTool(basemcp.NewTool("config_option_set",
+		setsLocal,
 		basemcp.WithDescription("Set one allowlisted scalar config option without replacing the whole YAML config. Preserves hidden token fields and reloads by default."),
 		basemcp.WithString("path", basemcp.Required(), basemcp.Description("Allowlisted config option path, for example layers.tasks.enabled or command_policy.max_lines.")),
 		basemcp.WithString("value", basemcp.Required(), basemcp.Description("Scalar value as string. Bool options accept true/false; int options accept decimal integers.")),
@@ -259,6 +264,7 @@ func registerConfigOptionTools(srv *server.MCPServer, deps *Server, reload confi
 	})
 
 	srv.AddTool(basemcp.NewTool("config_option_reset",
+		setsLocal,
 		basemcp.WithDescription("Reset one allowlisted optional config option without replacing the whole YAML config. Currently supports optional bool overrides."),
 		basemcp.WithString("path", basemcp.Required(), basemcp.Description("Allowlisted optional config option path, for example layers.tasks.enabled or command_policy.log_enabled.")),
 		basemcp.WithString("config_path", basemcp.Description("Optional config file path. Empty means the active config path.")),

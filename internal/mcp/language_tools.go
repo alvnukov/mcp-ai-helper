@@ -12,11 +12,13 @@ import (
 func registerLanguageTools(srv *server.MCPServer) {
 	languageRegistry := language.DefaultRegistry()
 	srv.AddTool(basemcp.NewTool("language_profiles",
+		readsLocal,
 		basemcp.WithDescription("List built-in language profiles with formatter, test, static-check, and guardrail recommendations."),
 	), func(_ context.Context, _ basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
 		return structured(map[string]any{"profiles": languageRegistry.List()})
 	})
 	srv.AddTool(basemcp.NewTool("language_detect",
+		readsLocal,
 		basemcp.WithDescription("Detect language profiles for repo-relative paths before building an edit/test workflow."),
 		basemcp.WithArray("paths", basemcp.Description("Repo-relative file paths.")),
 	), func(_ context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {

@@ -48,17 +48,20 @@ func registerGuidance(srv *server.MCPServer, deps *Server) {
 		return currentGuidance(cfg)
 	}
 	srv.AddTool(basemcp.NewTool("assistant_guidance",
+		readsLocal,
 		basemcp.WithDescription("Return mandatory operating guidance for using mcp-ai-helper efficiently and safely."),
 	), func(_ context.Context, _ basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
 		return structured(map[string]string{"guidance": guidanceText()})
 	})
 	srv.AddTool(basemcp.NewTool("server_setup_guidance",
+		readsLocal,
 		basemcp.WithDescription("Return recommendations for configuring mcp-ai-helper and its repo-local config file."),
 	), func(_ context.Context, _ basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
 		cfg, _, _, _, _ := deps.loadDeps()
 		return structured(config.SetupGuidanceForConfig(cfg))
 	})
 	srv.AddTool(basemcp.NewTool("tool_manifest",
+		readsLocal,
 		basemcp.WithDescription("Return a compact sorted list of helper-registered MCP tools for surface mismatch diagnostics."),
 	), func(_ context.Context, _ basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
 		return structured(toolManifest(srv))

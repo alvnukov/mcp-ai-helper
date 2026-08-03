@@ -18,11 +18,8 @@ func registerPipelineTools(srv *server.MCPServer, deps *Server) {
 		},
 	}
 	srv.AddTool(basemcp.NewTool("run",
+		runsCommands,
 		basemcp.WithDescription("Run pipelines and workflows. Required: action, repo_path (except schema). Actions: pipeline (command, repo_path, cwd?, timeout_seconds?, mcp_wait_seconds?, current_task_id?, task_on_start?, task_on_success?, task_on_failure?, compact_output?, secret_handles?) — run command with evidence extraction; workflow (repo_path, steps[], owned_files?, commit_message?, current_task_id?, task_on_start?, task_on_success?, task_on_failure?, secret_handles?, preview?) — run guarded edits, checks, and optional commit; schema () — return valid workflow step types and parameters."),
-		basemcp.WithReadOnlyHintAnnotation(false),
-		basemcp.WithDestructiveHintAnnotation(true),
-		basemcp.WithIdempotentHintAnnotation(false),
-		basemcp.WithOpenWorldHintAnnotation(true),
 		basemcp.WithString("action", basemcp.Required(), actionEnum(runActions)),
 		basemcp.WithString("repo_path", basemcp.Required()),
 		basemcp.WithString("command", basemcp.Description("Shell command (pipeline action).")),

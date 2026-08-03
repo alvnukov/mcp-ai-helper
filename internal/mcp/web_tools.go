@@ -69,6 +69,7 @@ func (e *toolDeniedError) Error() string {
 func registerWebTools(srv *server.MCPServer, deps *Server) {
 	registerFetchTool := func(name string) {
 		srv.AddTool(basemcp.NewTool(name,
+			addsRemote,
 			basemcp.WithDescription("Step 2 after web_search. Fetch URL to cache; returns doc_id and metadata only, never page body. Next: fetched_doc_find, then fetched_doc_read."),
 			basemcp.WithString("url", basemcp.Required(), basemcp.Description("Absolute http/https URL to fetch.")),
 			basemcp.WithString("repo_path", basemcp.Description("Optional repository root used only for repo-local tool deny policy.")),
@@ -94,6 +95,7 @@ func registerWebTools(srv *server.MCPServer, deps *Server) {
 	registerFetchTool("web_fetch")
 
 	srv.AddTool(basemcp.NewTool("web_search",
+		readsRemote,
 		basemcp.WithDescription("Step 1 of web research. Return compact hits only; search hits are not evidence. Next: choose URLs and call web_fetch. Unsupported providers fail closed."),
 		basemcp.WithString("query", basemcp.Required()),
 		basemcp.WithString("repo_path", basemcp.Description("Optional repository root used only for repo-local tool deny policy.")),
@@ -113,6 +115,7 @@ func registerWebTools(srv *server.MCPServer, deps *Server) {
 	})
 
 	srv.AddTool(basemcp.NewTool("fetched_doc_read",
+		readsLocal,
 		basemcp.WithDescription("Step 4. Read one bounded fragment after fetched_doc_find gives offsets; do not request full pages. Cite doc_id/source/offset/snippet."),
 		basemcp.WithString("doc_id", basemcp.Required()),
 		basemcp.WithString("repo_path", basemcp.Description("Optional repository root used only for repo-local tool deny policy.")),
@@ -132,6 +135,7 @@ func registerWebTools(srv *server.MCPServer, deps *Server) {
 	})
 
 	srv.AddTool(basemcp.NewTool("fetched_doc_find",
+		readsLocal,
 		basemcp.WithDescription("Step 3. Search fetched normalized text without loading the full page. Returns bounded snippets with offsets. Next: fetched_doc_read."),
 		basemcp.WithString("doc_id", basemcp.Required()),
 		basemcp.WithString("query", basemcp.Required()),

@@ -24,6 +24,7 @@ type featureWriteRequest struct {
 
 func registerFeatureTools(srv *server.MCPServer, deps *Server) {
 	srv.AddTool(basemcp.NewTool("feature_list",
+		readsLocal,
 		basemcp.WithDescription("List known helper feature flags with code default, global override, repo override, effective value, and source."),
 		basemcp.WithString("repo_path", basemcp.Description("Optional repository root. When provided, repo-local overrides participate in resolution.")),
 	), func(_ context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
@@ -40,6 +41,7 @@ func registerFeatureTools(srv *server.MCPServer, deps *Server) {
 	})
 
 	srv.AddTool(basemcp.NewTool("feature_get",
+		readsLocal,
 		basemcp.WithDescription("Return one helper feature flag with code default, global override, repo override, effective value, and source."),
 		basemcp.WithString("id", basemcp.Required(), basemcp.Description("Known feature id.")),
 		basemcp.WithString("repo_path", basemcp.Description("Optional repository root. When provided, repo-local overrides participate in resolution.")),
@@ -57,6 +59,7 @@ func registerFeatureTools(srv *server.MCPServer, deps *Server) {
 	})
 
 	srv.AddTool(basemcp.NewTool("feature_enable",
+		setsLocal,
 		basemcp.WithDescription("Enable a known helper feature flag in scope global or repo. Repo scope requires repo_path."),
 		basemcp.WithString("id", basemcp.Required(), basemcp.Description("Known feature id.")),
 		basemcp.WithString("scope", basemcp.Required(), basemcp.Description("Override scope: global or repo.")),
@@ -67,6 +70,7 @@ func registerFeatureTools(srv *server.MCPServer, deps *Server) {
 	})
 
 	srv.AddTool(basemcp.NewTool("feature_disable",
+		setsLocal,
 		basemcp.WithDescription("Disable a known helper feature flag in scope global or repo. Repo scope requires repo_path."),
 		basemcp.WithString("id", basemcp.Required(), basemcp.Description("Known feature id.")),
 		basemcp.WithString("scope", basemcp.Required(), basemcp.Description("Override scope: global or repo.")),
@@ -77,6 +81,7 @@ func registerFeatureTools(srv *server.MCPServer, deps *Server) {
 	})
 
 	srv.AddTool(basemcp.NewTool("feature_reset",
+		setsLocal,
 		basemcp.WithDescription("Remove a global or repo-local helper feature override so lower-priority state applies again."),
 		basemcp.WithString("id", basemcp.Required(), basemcp.Description("Known feature id.")),
 		basemcp.WithString("scope", basemcp.Required(), basemcp.Description("Override scope: global or repo.")),

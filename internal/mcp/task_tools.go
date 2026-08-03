@@ -22,11 +22,8 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 		"delete":       withDeps(taskActionDelete, deps),
 	}
 	srv.AddTool(basemcp.NewTool("task",
+		rewritesLocal,
 		basemcp.WithDescription("Per-repository task registry. Required: repo_path, action. Actions: current (no extra args, returns active tasks); get (id); list (status?, query?); search (query, status?); upsert (id?, title, status?, task_type?, priority?, model_level?, body?, tags?, acceptance_criteria?, verification_plan?, parent_id?); set_status (id, status); batch_upsert (tasks[], close_missing?, missing_status?, active_statuses?); delete (id)."),
-		basemcp.WithReadOnlyHintAnnotation(false),
-		basemcp.WithDestructiveHintAnnotation(true),
-		basemcp.WithIdempotentHintAnnotation(false),
-		basemcp.WithOpenWorldHintAnnotation(false),
 		basemcp.WithString("repo_path", basemcp.Required()),
 		basemcp.WithString("action", basemcp.Required(), actionEnum(taskActions)),
 		basemcp.WithString("id", basemcp.Description("Task id. Required for get, set_status, delete. Optional for upsert (creates new if absent).")),
@@ -196,6 +193,7 @@ func taskActionDelete(ctx context.Context, req basemcp.CallToolRequest, deps *Se
 
 func registerTaskAdvancedTools(srv *server.MCPServer, deps *Server) {
 	srv.AddTool(basemcp.NewTool("task_graph",
+		ensuresLocal,
 		basemcp.WithDescription("Bounded task graph after task action=current. focus_task_id=task-123 centers one task. Edges: kind=parent_child, provenance=explicit. Reports truncated data; next_call: task action=current or retry focused."),
 		basemcp.WithString("repo_path", basemcp.Required(), basemcp.Description("Repository root.")),
 		basemcp.WithString("focus_task_id", basemcp.Description("Optional task id to center the graph.")),
@@ -224,6 +222,7 @@ func registerTaskAdvancedTools(srv *server.MCPServer, deps *Server) {
 		return structured(graph)
 	})
 	srv.AddTool(basemcp.NewTool("task_context",
+		ensuresLocal,
 		basemcp.WithDescription("Compact execution context for task_id=task-123 after task action=current. Includes goals, boundaries, criteria, verification, warnings, usage_contract, truncated metadata. Use task_graph for dependency overview. next_call: task action=current on missing ids."),
 		basemcp.WithString("repo_path", basemcp.Required(), basemcp.Description("Repository root.")),
 		basemcp.WithString("task_id", basemcp.Required(), basemcp.Description("Task id; discover with task action=current.")),
@@ -252,6 +251,7 @@ func registerTaskAdvancedTools(srv *server.MCPServer, deps *Server) {
 		return structured(ctxResult)
 	})
 	srv.AddTool(basemcp.NewTool("task_export",
+		setsLocal,
 		basemcp.WithDescription("Export tasks from the current backend to an Obsidian Markdown directory."),
 		basemcp.WithString("repo_path", basemcp.Required()),
 		basemcp.WithString("target_dir", basemcp.Required()),

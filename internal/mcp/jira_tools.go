@@ -106,6 +106,7 @@ func registerJiraTools(srv *server.MCPServer, deps *Server) {
 	// --- Issue tools ---
 
 	srv.AddTool(basemcp.NewTool("jira_search",
+		readsRemote,
 		basemcp.WithDescription("Search Jira issues by JQL query."),
 		basemcp.WithString("jql", basemcp.Required(), basemcp.Description("JQL query string.")),
 		basemcp.WithNumber("max_results", basemcp.Description("Maximum results. Defaults to 20.")),
@@ -153,6 +154,7 @@ func registerJiraTools(srv *server.MCPServer, deps *Server) {
 	})
 
 	srv.AddTool(basemcp.NewTool("jira_read",
+		readsRemote,
 		basemcp.WithDescription("Read a single Jira issue by key, including available transitions."),
 		basemcp.WithString("issue_key", basemcp.Required(), basemcp.Description("Jira issue key, e.g. PROJ-123.")),
 	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
@@ -183,6 +185,7 @@ func registerJiraTools(srv *server.MCPServer, deps *Server) {
 	})
 
 	srv.AddTool(basemcp.NewTool("jira_get_property",
+		readsRemote,
 		basemcp.WithDescription("Smart Checklist workflow:\n1. Read: jira_get_property(issue_key, property_key=\"com.railsware.SmartChecklist.checklist\") — returns Markdown-formatted checklist. Each line starting with '- ' is an unchecked item, '+ ' is a checked/done item.\n2. Modify the text: add/remove lines, change '- ' to '+ ' to check an item, '+ ' to '- ' to uncheck.\n3. Write: jira_update(issue_key, custom_fields={\"com.railsware.SmartChecklist.checklist\": modified_markdown})."),
 		basemcp.WithString("issue_key", basemcp.Required(), basemcp.Description("Jira issue key.")),
 		basemcp.WithString("property_key", basemcp.Required(), basemcp.Description("Entity property key, e.g. com.railsware.SmartChecklist.checklist.")),
@@ -213,6 +216,7 @@ func registerJiraTools(srv *server.MCPServer, deps *Server) {
 	})
 
 	srv.AddTool(basemcp.NewTool("jira_update",
+		setsRemote,
 		basemcp.WithDescription("Update Jira issue fields. Only provided fields are changed."),
 		basemcp.WithString("issue_key", basemcp.Required(), basemcp.Description("Jira issue key.")),
 		basemcp.WithString("summary", basemcp.Description("New summary.")),
@@ -292,6 +296,7 @@ func registerJiraTools(srv *server.MCPServer, deps *Server) {
 	})
 
 	srv.AddTool(basemcp.NewTool("jira_transition",
+		rewritesRemote,
 		basemcp.WithDescription("Transition a Jira issue to a new status by transition name."),
 		basemcp.WithString("issue_key", basemcp.Required(), basemcp.Description("Jira issue key.")),
 		basemcp.WithString("transition_name", basemcp.Required(), basemcp.Description("Target transition name, e.g. 'Done', 'In Progress'.")),
@@ -314,6 +319,7 @@ func registerJiraTools(srv *server.MCPServer, deps *Server) {
 	})
 
 	srv.AddTool(basemcp.NewTool("jira_assign",
+		setsRemote,
 		basemcp.WithDescription("Assign or unassign a Jira issue."),
 		basemcp.WithString("issue_key", basemcp.Required(), basemcp.Description("Jira issue key.")),
 		basemcp.WithString("username", basemcp.Description("Username to assign. Omit when unassigning.")),
@@ -345,6 +351,7 @@ func registerJiraTools(srv *server.MCPServer, deps *Server) {
 	// --- Worklog tools ---
 
 	srv.AddTool(basemcp.NewTool("jira_worklog_list",
+		readsRemote,
 		basemcp.WithDescription("List worklog entries for an issue, optionally filtered by date range and user."),
 		basemcp.WithString("issue_key", basemcp.Required(), basemcp.Description("Jira issue key.")),
 		basemcp.WithString("since", basemcp.Description("Start date in YYYY-MM-DD or RFC3339 format.")),
@@ -380,6 +387,7 @@ func registerJiraTools(srv *server.MCPServer, deps *Server) {
 	})
 
 	srv.AddTool(basemcp.NewTool("jira_worklog_report",
+		readsRemote,
 		basemcp.WithDescription("Aggregated worklog report for a user over a date range, grouped by issue."),
 		basemcp.WithString("username", basemcp.Required(), basemcp.Description("Jira username.")),
 		basemcp.WithString("since", basemcp.Required(), basemcp.Description("Start date in YYYY-MM-DD format.")),
@@ -432,6 +440,7 @@ func registerJiraTools(srv *server.MCPServer, deps *Server) {
 	})
 
 	srv.AddTool(basemcp.NewTool("jira_worklog_add",
+		addsRemote,
 		basemcp.WithDescription("Add a worklog entry to a Jira issue."),
 		basemcp.WithString("issue_key", basemcp.Required(), basemcp.Description("Jira issue key.")),
 		basemcp.WithString("time_spent", basemcp.Required(), basemcp.Description("Time spent in Jira format, e.g. '1h 30m', '2d', '4h'.")),
@@ -465,6 +474,7 @@ func registerJiraTools(srv *server.MCPServer, deps *Server) {
 	})
 
 	srv.AddTool(basemcp.NewTool("jira_worklog_update",
+		setsRemote,
 		basemcp.WithDescription("Update a worklog entry's time spent or comment."),
 		basemcp.WithString("issue_key", basemcp.Required(), basemcp.Description("Jira issue key.")),
 		basemcp.WithString("worklog_id", basemcp.Required(), basemcp.Description("Worklog entry ID.")),
@@ -489,6 +499,7 @@ func registerJiraTools(srv *server.MCPServer, deps *Server) {
 	})
 
 	srv.AddTool(basemcp.NewTool("jira_worklog_delete",
+		setsRemote,
 		basemcp.WithDescription("Delete a worklog entry from a Jira issue."),
 		basemcp.WithString("issue_key", basemcp.Required(), basemcp.Description("Jira issue key.")),
 		basemcp.WithString("worklog_id", basemcp.Required(), basemcp.Description("Worklog entry ID to delete.")),

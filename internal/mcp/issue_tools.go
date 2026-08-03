@@ -34,6 +34,7 @@ type issueAcceptRequest struct {
 
 func registerIssueTools(srv *server.MCPServer, deps *Server) {
 	srv.AddTool(basemcp.NewTool("issue_add",
+		addsLocal,
 		basemcp.WithDescription("Record cross-repository feedback as an actionable Lean-backed task issue."),
 		basemcp.WithString("repo_path", basemcp.Required(), basemcp.Description("Target repository root that should receive the issue.")),
 		basemcp.WithString("source_repo_path", basemcp.Description("Repository root where the feedback originated.")),
@@ -59,6 +60,7 @@ func registerIssueTools(srv *server.MCPServer, deps *Server) {
 	})
 
 	srv.AddTool(basemcp.NewTool("issue_list",
+		ensuresLocal,
 		basemcp.WithDescription("List open feedback issues recorded in the Lean task registry."),
 		basemcp.WithString("repo_path", basemcp.Required(), basemcp.Description("Repository root used for issue lookup.")),
 		basemcp.WithString("status", basemcp.Description("Optional task status filter; defaults to todo.")),
@@ -80,6 +82,7 @@ func registerIssueTools(srv *server.MCPServer, deps *Server) {
 	})
 
 	srv.AddTool(basemcp.NewTool("issue_accept",
+		setsLocal,
 		basemcp.WithDescription("Accept one feedback issue as current work by moving it to in_progress."),
 		basemcp.WithString("repo_path", basemcp.Required(), basemcp.Description("Repository root used for issue lookup.")),
 		basemcp.WithString("id", basemcp.Required(), basemcp.Description("Canonical task-NNN issue id to accept.")),

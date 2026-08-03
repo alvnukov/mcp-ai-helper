@@ -39,6 +39,7 @@ type lakeInitResult struct {
 
 func registerLakeTools(srv *server.MCPServer, deps *Server) {
 	srv.AddTool(basemcp.NewTool("lake_smoke",
+		runsCommands,
 		basemcp.WithDescription("Run a compact Lean/Lake workspace smoke check through the bounded command pipeline."),
 		basemcp.WithString("repo_path", basemcp.Required(), basemcp.Description("Repository root containing lean-toolchain and lakefile.lean or lakefile.toml.")),
 		basemcp.WithString("mode", basemcp.Description("Smoke mode: build or check. Defaults to build.")),
@@ -62,6 +63,7 @@ func registerLakeTools(srv *server.MCPServer, deps *Server) {
 	})
 
 	srv.AddTool(basemcp.NewTool("lake_init",
+		ensuresLocal,
 		basemcp.WithDescription("Initialize a minimal Lake/Lean workspace in a repository. Creates lean-toolchain, lakefile.lean, and a minimal Main.lean. Idempotent: returns ok if the workspace already exists."),
 		basemcp.WithString("repo_path", basemcp.Required(), basemcp.Description("Repository root where the Lake project should be created.")),
 	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {

@@ -11,12 +11,14 @@ import (
 
 func registerModelTools(srv *server.MCPServer, deps *Server) {
 	srv.AddTool(basemcp.NewTool("health",
+		readsLocal,
 		basemcp.WithDescription("Return server health status."),
 	), func(_ context.Context, _ basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
 		return structured(map[string]string{"status": "ok"})
 	})
 
 	srv.AddTool(basemcp.NewTool("list_models",
+		readsLocal,
 		basemcp.WithDescription("List configured model profiles and routing policy."),
 	), func(_ context.Context, _ basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
 		cfg, _, _, _, _ := deps.loadDeps()
@@ -24,6 +26,7 @@ func registerModelTools(srv *server.MCPServer, deps *Server) {
 	})
 
 	srv.AddTool(basemcp.NewTool("query_model",
+		readsRemote,
 		basemcp.WithDescription("Send a bounded prompt to a configured OpenAI-compatible model."),
 		basemcp.WithString("model_id", basemcp.Description("Configured model id.")),
 		basemcp.WithString("prompt", basemcp.Description("User prompt.")),

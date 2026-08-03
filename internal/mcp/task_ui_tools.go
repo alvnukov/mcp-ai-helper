@@ -43,6 +43,7 @@ type taskUIServer struct {
 
 func registerTaskUITools(srv *server.MCPServer, deps *Server) {
 	srv.AddTool(basemcp.NewTool("task_ui_start",
+		ensuresLocal,
 		basemcp.WithDescription("Start the local task browser HTTP UI inside the current MCP helper process and return a browser URL."),
 		basemcp.WithString("repo_path", basemcp.Required(), basemcp.Description("Repository path to prefill in the UI.")),
 		basemcp.WithString("addr", basemcp.Description("Optional loopback TCP address. Defaults to 127.0.0.1:18067.")),
@@ -59,6 +60,7 @@ func registerTaskUITools(srv *server.MCPServer, deps *Server) {
 	})
 
 	srv.AddTool(basemcp.NewTool("task_ui_stop",
+		setsLocal,
 		basemcp.WithDescription("Stop the in-process local task browser HTTP UI if it is running."),
 	), func(ctx context.Context, _ basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
 		stopped, err := deps.stopTaskUI(ctx)

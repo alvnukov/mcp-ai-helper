@@ -33,6 +33,7 @@ func registerConfluenceTools(srv *server.MCPServer, deps *Server) {
 	}
 
 	srv.AddTool(basemcp.NewTool("conf_search",
+		readsRemote,
 		basemcp.WithDescription("Search Confluence pages by CQL (Confluence Query Language)."),
 		basemcp.WithString("cql", basemcp.Required(), basemcp.Description("CQL query string, e.g. 'title ~ kubernetes'.")),
 		basemcp.WithNumber("max_results", basemcp.Description("Maximum results. Defaults to 20.")),
@@ -56,6 +57,7 @@ func registerConfluenceTools(srv *server.MCPServer, deps *Server) {
 	})
 
 	srv.AddTool(basemcp.NewTool("conf_read",
+		readsRemote,
 		basemcp.WithDescription("Read a Confluence page by ID, including content body and version."),
 		basemcp.WithString("page_id", basemcp.Required(), basemcp.Description("Confluence page ID (numeric string).")),
 	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
@@ -78,6 +80,7 @@ func registerConfluenceTools(srv *server.MCPServer, deps *Server) {
 	})
 
 	srv.AddTool(basemcp.NewTool("conf_spaces",
+		readsRemote,
 		basemcp.WithDescription("List all Confluence spaces."),
 	), func(ctx context.Context, _ basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
 		jc, err := getClient()
