@@ -836,10 +836,12 @@ type ListDirRequest struct {
 	Path     string `json:"path,omitempty"` // repo-relative, defaults to "."
 }
 
-// DirEntry is one item in a directory listing.
+// DirEntry is one item in a directory listing. It carries no path of its own:
+// every entry sits directly in the one directory the result already names, so
+// a per-entry path would repeat that directory once per entry — on a listing
+// of any size, most of the payload.
 type DirEntry struct {
 	Name       string `json:"name"`
-	Path       string `json:"path"`
 	IsDir      bool   `json:"is_dir"`
 	Size       int64  `json:"size,omitempty"`
 	ModifiedAt string `json:"modified_at,omitempty"`
@@ -848,9 +850,17 @@ type DirEntry struct {
 
 // ListDirResult holds structured directory listing.
 type ListDirResult struct {
-	Path    string     `json:"path"`
-	Entries []DirEntry `json:"entries"`
-	Total   int        `json:"total"`
+	Path string `json:"path"`
+	// RepoPath and RelativePath report the listed directory the way read and
+	// snapshot report a file, and they are what makes an entry addressable:
+	// every repo-scoped operation here rejects an absolute path outright, so
+	// Path alone names nothing that can be read, snapshotted or edited next.
+	// RelativePath is empty for the repo root, where an entry name already is
+	// the repo-relative path.
+	RepoPath     string     `json:"repo_path,omitempty"`
+	RelativePath string     `json:"relative_path,omitempty"`
+	Entries      []DirEntry `json:"entries"`
+	Total        int        `json:"total"`
 }
 
 // ListDir returns a structured directory listing.
@@ -859,6 +869,7 @@ func ListDir(req ListDirRequest) (ListDirResult, error) {
 		root     *safefs.Root
 		relative = "."
 		display  string
+		repoRel  string
 		err      error
 	)
 	if strings.TrimSpace(req.RepoPath) != "" {
@@ -869,12 +880,12 @@ func ListDir(req ListDirRequest) (ListDirResult, error) {
 		if strings.TrimSpace(req.Path) == "" {
 			display = root.Path()
 		} else {
-			display, relative, err = repoRelativePath(req.RepoPath, req.Path)
+			display, repoRel, err = repoRelativePath(req.RepoPath, req.Path)
 			if err != nil {
 				_ = root.Close()
 				return ListDirResult{}, err
 			}
-			relative = filepath.FromSlash(relative)
+			relative = filepath.FromSlash(repoRel)
 		}
 	} else {
 		filePath := req.Path
@@ -897,13 +908,14 @@ func ListDir(req ListDirRequest) (ListDirResult, error) {
 		return ListDirResult{}, err
 	}
 	result := ListDirResult{
-		Path:    display,
-		Entries: make([]DirEntry, 0, len(entries)),
+		Path:         display,
+		RepoPath:     strings.TrimSpace(req.RepoPath),
+		RelativePath: repoRel,
+		Entries:      make([]DirEntry, 0, len(entries)),
 	}
 	for _, e := range entries {
 		entry := DirEntry{
 			Name:  e.Name(),
-			Path:  filepath.ToSlash(filepath.Join(display, e.Name())),
 			IsDir: e.IsDir(),
 		}
 		if e.Type()&os.ModeSymlink != 0 {

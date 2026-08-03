@@ -458,6 +458,92 @@ func TestReadFileContentInRepoRejectsSymlinkEscape(t *testing.T) {
 	}
 }
 
+// --- ListDir tests ---
+
+// childOf builds the repo-relative path of an entry the way a reader of the
+// result has to: the listing names its directory once, and the entry adds its
+// name to it.
+func childOf(result ListDirResult, entry DirEntry) string {
+	if result.RelativePath == "" {
+		return entry.Name
+	}
+	return result.RelativePath + "/" + entry.Name
+}
+
+func TestListDirEntriesAreAddressableFromTheListing(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "internal", "sub"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "internal", "main.go"), []byte("package main\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := ListDir(ListDirRequest{RepoPath: dir, Path: "internal"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.RelativePath != "internal" {
+		t.Fatalf("relative_path = %q, want %q", result.RelativePath, "internal")
+	}
+	if len(result.Entries) != 2 {
+		t.Fatalf("entries = %d, want 2", len(result.Entries))
+	}
+	// Every entry has to be nameable back to the repo-scoped readers, which
+	// reject an absolute path. That round trip is what a per-entry path used
+	// to spend most of the payload on without ever achieving.
+	for _, entry := range result.Entries {
+		child := childOf(result, entry)
+		if entry.IsDir {
+			_, err = ListDir(ListDirRequest{RepoPath: dir, Path: child})
+		} else {
+			_, err = ReadSnapshotInRepo(dir, child)
+		}
+		if err != nil {
+			t.Fatalf("entry %q is not addressable as %q: %v", entry.Name, child, err)
+		}
+	}
+}
+
+func TestListDirOfRepoRootNamesEntriesByNameAlone(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := ListDir(ListDirRequest{RepoPath: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.RelativePath != "" {
+		t.Fatalf("relative_path = %q, want empty at the repo root", result.RelativePath)
+	}
+	if result.RepoPath != dir {
+		t.Fatalf("repo_path = %q, want %q", result.RepoPath, dir)
+	}
+	if len(result.Entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(result.Entries))
+	}
+	if _, err := ReadSnapshotInRepo(dir, childOf(result, result.Entries[0])); err != nil {
+		t.Fatalf("root entry is not addressable from the listing: %v", err)
+	}
+}
+
+func TestListDirWithoutRepoPathStillReportsTheDirectory(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "note.txt"), []byte("hi\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := ListDir(ListDirRequest{Path: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Path != dir {
+		t.Fatalf("path = %q, want %q", result.Path, dir)
+	}
+	if result.RepoPath != "" || result.RelativePath != "" {
+		t.Fatalf("unscoped listing claimed a repo: %#v", result)
+	}
+}
+
 // --- CreateIfAbsent tests ---
 
 func TestCreateIfAbsentCreatesNewFile(t *testing.T) {
