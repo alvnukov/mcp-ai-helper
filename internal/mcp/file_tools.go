@@ -37,6 +37,7 @@ func registerFileTools(srv *server.MCPServer) {
 	}
 	srv.AddTool(basemcp.NewTool("edit",
 		basemcp.WithDescription("Repo file writing and guarded replacement. Required: repo_path, action. Actions: replace (path, expected_hash, old|old_b64, new|new_b64) — replace one unique text span only if file hash matches; write (path, content|content_b64, expected_hash?, mode?) — write content to a file, creating parent dirs if needed."),
+		basemcp.WithReadOnlyHintAnnotation(false),
 		basemcp.WithDestructiveHintAnnotation(true),
 		basemcp.WithIdempotentHintAnnotation(false),
 		basemcp.WithOpenWorldHintAnnotation(false),
