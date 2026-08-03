@@ -265,6 +265,31 @@ func (b *obsidianTaskBackend) BatchUpsert(_ context.Context, req tasks.BatchUpse
 	if err := b.ensureDir(); err != nil {
 		return taskBatchMutationResult{}, err
 	}
+	// close_missing writes MissingStatus straight into every note the batch did
+	// not name, and ActiveStatuses decides which notes those are, so both are
+	// checked here, before the first note is written. An unchecked
+	// MissingStatus lands in many files at once and drops every one of them
+	// from every listing, because scanNotes skips a note whose status it cannot
+	// parse; an unchecked ActiveStatuses entry matches no note and closes
+	// nothing while the batch still reports success.
+	missingStatus := normalizeFrontmatterEnum(req.MissingStatus)
+	if missingStatus == "" {
+		missingStatus = "done"
+	}
+	activeStatuses := make([]string, 0, len(req.ActiveStatuses))
+	for _, status := range req.ActiveStatuses {
+		activeStatuses = append(activeStatuses, normalizeFrontmatterEnum(status))
+	}
+	if req.CloseMissing {
+		if !validStatus(missingStatus) {
+			return taskBatchMutationResult{}, fmt.Errorf("invalid missing_status %q; expected one of todo, in_progress, blocked, done", req.MissingStatus)
+		}
+		for i, status := range activeStatuses {
+			if !validStatus(status) {
+				return taskBatchMutationResult{}, fmt.Errorf("invalid active_statuses[%d] %q; expected one of todo, in_progress, blocked, done", i, req.ActiveStatuses[i])
+			}
+		}
+	}
 	upserted := make([]tasks.Task, 0, len(req.Tasks))
 	changedFiles := make([]string, 0, len(req.Tasks))
 	for _, item := range req.Tasks {
@@ -282,15 +307,10 @@ func (b *obsidianTaskBackend) BatchUpsert(_ context.Context, req tasks.BatchUpse
 	}
 	closed := make([]tasks.Task, 0)
 	if req.CloseMissing {
-		missingStatus := req.MissingStatus
-		if missingStatus == "" {
-			missingStatus = "done"
-		}
 		batchIDs := make(map[string]bool, len(req.Tasks))
 		for _, item := range req.Tasks {
 			batchIDs[item.ID] = true
 		}
-		activeStatuses := req.ActiveStatuses
 		if len(activeStatuses) == 0 {
 			activeStatuses = []string{"todo", "in_progress", "blocked"}
 		}

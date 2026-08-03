@@ -784,6 +784,101 @@ func TestObsidianAutoHealRejectsSymlinkedRenameTarget(t *testing.T) {
 // SetStatus used to accept any string and write it to the note. The invalid
 // value only surfaced on the next read, as "invalid status in <id>.md" — an
 // error that blames the file, not the caller. Now SetStatus validates on write.
+// close_missing is the widest write path in the backend: one call sets the
+// status of every note the batch did not name. An invalid missing_status must
+// therefore be refused before the first write, not written to N files and
+// discovered later — a note whose status cannot be parsed is dropped from every
+// listing, so the tasks would simply disappear.
+func TestBatchUpsertRejectsInvalidMissingStatusBeforeWriting(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	backend := newObsidianTaskBackend(dir)
+	for _, seed := range []tasks.AddRequest{
+		{ID: "keep-1", Title: "Keep 1", Status: "todo"},
+		{ID: "keep-2", Title: "Keep 2", Status: "in_progress"},
+	} {
+		if _, err := backend.Upsert(t.Context(), seed); err != nil {
+			t.Fatalf("seed Upsert %s: %v", seed.ID, err)
+		}
+	}
+	if _, err := backend.BatchUpsert(t.Context(), tasks.BatchUpsertRequest{
+		CloseMissing:  true,
+		MissingStatus: "banana",
+	}); err == nil {
+		t.Fatal("BatchUpsert accepted missing_status \"banana\"; expected an error naming the valid enum")
+	}
+	all, _, err := backend.ListAll(t.Context(), "")
+	if err != nil {
+		t.Fatalf("ListAll after rejected BatchUpsert: %v", err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("expected both notes to survive the rejected batch, got %d", len(all))
+	}
+	for _, task := range all {
+		if task.Status != "todo" && task.Status != "in_progress" {
+			t.Fatalf("task %s status changed despite rejected BatchUpsert: %q", task.ID, task.Status)
+		}
+	}
+}
+
+// active_statuses selects which notes close_missing rewrites. An invalid entry
+// matches no note, so the batch would close nothing and still report success.
+func TestBatchUpsertRejectsInvalidActiveStatus(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	backend := newObsidianTaskBackend(dir)
+	if _, err := backend.Upsert(t.Context(), tasks.AddRequest{ID: "keep-1", Title: "Keep 1", Status: "todo"}); err != nil {
+		t.Fatalf("seed Upsert: %v", err)
+	}
+	if _, err := backend.BatchUpsert(t.Context(), tasks.BatchUpsertRequest{
+		CloseMissing:   true,
+		ActiveStatuses: []string{"todo", "banana"},
+	}); err == nil {
+		t.Fatal("BatchUpsert accepted active_statuses entry \"banana\"; expected an error naming the valid enum")
+	}
+}
+
+// The check and the match must read the same form of a status, or a value that
+// passes validation still selects nothing.
+func TestBatchUpsertNormalizesMissingAndActiveStatuses(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	backend := newObsidianTaskBackend(dir)
+	for _, seed := range []tasks.AddRequest{
+		{ID: "named-1", Title: "Named 1", Status: "todo"},
+		{ID: "omitted-1", Title: "Omitted 1", Status: "in_progress"},
+	} {
+		if _, err := backend.Upsert(t.Context(), seed); err != nil {
+			t.Fatalf("seed Upsert %s: %v", seed.ID, err)
+		}
+	}
+	if _, err := backend.BatchUpsert(t.Context(), tasks.BatchUpsertRequest{
+		Tasks:          []tasks.AddRequest{{ID: "named-1", Title: "Named 1", Status: "todo"}},
+		CloseMissing:   true,
+		MissingStatus:  "Done",
+		ActiveStatuses: []string{"In-Progress"},
+	}); err != nil {
+		t.Fatalf("BatchUpsert with unnormalized statuses: %v", err)
+	}
+	omitted, _, err := backend.Get(t.Context(), "", "omitted-1")
+	if err != nil {
+		t.Fatalf("Get omitted-1: %v", err)
+	}
+	if omitted.Status != "done" {
+		t.Fatalf("omitted-1 status = %q, want \"done\": \"In-Progress\" must select it and \"Done\" must be stored normalized", omitted.Status)
+	}
+	named, _, err := backend.Get(t.Context(), "", "named-1")
+	if err != nil {
+		t.Fatalf("Get named-1: %v", err)
+	}
+	if named.Status != "todo" {
+		t.Fatalf("named-1 status = %q, want \"todo\": a task the batch named must not be closed", named.Status)
+	}
+}
+
 func TestSetStatusRejectsInvalidStatus(t *testing.T) {
 	t.Parallel()
 
