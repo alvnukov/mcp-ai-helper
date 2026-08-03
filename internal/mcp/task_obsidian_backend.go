@@ -179,6 +179,21 @@ func (b *obsidianTaskBackend) Upsert(_ context.Context, req tasks.AddRequest) (t
 	if strings.TrimSpace(req.Title) == "" {
 		return taskMutationResult{}, errors.New("title is required")
 	}
+	status := normalizeFrontmatterEnum(req.Status)
+	if strings.TrimSpace(status) == "" {
+		status = "todo"
+	}
+	if !validStatus(status) {
+		return taskMutationResult{}, fmt.Errorf("invalid status %q; expected one of todo, in_progress, blocked, done", req.Status)
+	}
+	priority := normalizeFrontmatterEnum(req.Priority)
+	if priority != "" && !validPriority(priority) {
+		return taskMutationResult{}, fmt.Errorf("invalid priority %q; expected one of low, medium, high, critical", req.Priority)
+	}
+	modelLevel := normalizeFrontmatterEnum(req.ModelLevel)
+	if modelLevel != "" && !validModelLevel(modelLevel) {
+		return taskMutationResult{}, fmt.Errorf("invalid model_level %q; expected one of low, medium, high, very_high", req.ModelLevel)
+	}
 	id := req.ID
 	if id == "" {
 		id = tasks.WorktreePathForID(req.Title)
@@ -205,8 +220,8 @@ func (b *obsidianTaskBackend) Upsert(_ context.Context, req tasks.AddRequest) (t
 		}
 	}
 	note := taskNote{
-		ID: id, Title: req.Title, Status: req.Status,
-		Priority: req.Priority, ModelLevel: req.ModelLevel,
+		ID: id, Title: req.Title, Status: status,
+		Priority: priority, ModelLevel: modelLevel,
 		TaskType: req.TaskType, ParentID: req.ParentID,
 		Tags: nonNilTags(req.Tags), Branch: req.Branch,
 		WorktreePath:       req.WorktreePath,
@@ -226,14 +241,18 @@ func (b *obsidianTaskBackend) SetStatus(_ context.Context, req tasks.StatusReque
 	if err := b.ensureDir(); err != nil {
 		return taskMutationResult{}, err
 	}
-	if strings.TrimSpace(req.Status) == "" {
+	status := normalizeFrontmatterEnum(req.Status)
+	if strings.TrimSpace(status) == "" {
 		return taskMutationResult{}, errors.New("status is required")
+	}
+	if !validStatus(status) {
+		return taskMutationResult{}, fmt.Errorf("invalid status %q; expected one of todo, in_progress, blocked, done", req.Status)
 	}
 	note, err := b.readNote(req.ID)
 	if err != nil {
 		return taskMutationResult{}, err
 	}
-	note.Status = req.Status
+	note.Status = status
 	note.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	if err := b.writeNote(note); err != nil {
 		return taskMutationResult{}, err

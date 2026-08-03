@@ -17,6 +17,10 @@ func registerFileTools(srv *server.MCPServer) {
 	}
 	srv.AddTool(basemcp.NewTool("file",
 		basemcp.WithDescription("Repo file reading and inspection. Required: repo_path, action. Actions: read (path, offset?, limit?) — read single file with line numbers; read_many (paths[]) — read up to 8 files in one call; list (path?) — structured directory listing; search (path?, pattern, max_matches?) — search text in files under a directory; snapshot (path) — read file hash/size before guarded edits."),
+		basemcp.WithReadOnlyHintAnnotation(true),
+		basemcp.WithDestructiveHintAnnotation(false),
+		basemcp.WithIdempotentHintAnnotation(true),
+		basemcp.WithOpenWorldHintAnnotation(false),
 		basemcp.WithString("repo_path", basemcp.Required()),
 		basemcp.WithString("action", basemcp.Required(), actionEnum(fileActions)),
 		basemcp.WithString("path", basemcp.Description("Repo-relative file or directory path. Required for read/snapshot; optional dir for list/search (defaults to repo root).")),
@@ -33,6 +37,9 @@ func registerFileTools(srv *server.MCPServer) {
 	}
 	srv.AddTool(basemcp.NewTool("edit",
 		basemcp.WithDescription("Repo file writing and guarded replacement. Required: repo_path, action. Actions: replace (path, expected_hash, old|old_b64, new|new_b64) — replace one unique text span only if file hash matches; write (path, content|content_b64, expected_hash?, mode?) — write content to a file, creating parent dirs if needed."),
+		basemcp.WithDestructiveHintAnnotation(true),
+		basemcp.WithIdempotentHintAnnotation(false),
+		basemcp.WithOpenWorldHintAnnotation(false),
 		basemcp.WithString("repo_path", basemcp.Required()),
 		basemcp.WithString("action", basemcp.Required(), actionEnum(editActions)),
 		basemcp.WithString("path", basemcp.Required(), basemcp.Description("Repo-relative file path.")),

@@ -780,3 +780,92 @@ func TestObsidianAutoHealRejectsSymlinkedRenameTarget(t *testing.T) {
 		t.Fatalf("diagnostics = %#v", meta.Diagnostics)
 	}
 }
+
+// SetStatus used to accept any string and write it to the note. The invalid
+// value only surfaced on the next read, as "invalid status in <id>.md" — an
+// error that blames the file, not the caller. Now SetStatus validates on write.
+func TestSetStatusRejectsInvalidStatus(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	backend := newObsidianTaskBackend(dir)
+	if _, err := backend.Upsert(t.Context(), tasks.AddRequest{ID: "bad-status", Title: "Status validation", Status: "todo"}); err != nil {
+		t.Fatalf("seed Upsert: %v", err)
+	}
+	if _, err := backend.SetStatus(t.Context(), tasks.StatusRequest{ID: "bad-status", Status: "banana"}); err == nil {
+		t.Fatal("SetStatus accepted invalid status \"banana\"; expected an error naming the valid enum")
+	}
+	// The note on disk must keep the prior status; the bad write must not land.
+	got, _, err := backend.Get(t.Context(), "", "bad-status")
+	if err != nil {
+		t.Fatalf("Get after rejected SetStatus: %v", err)
+	}
+	if got.Status != "todo" {
+		t.Fatalf("status changed despite rejected SetStatus: %q", got.Status)
+	}
+}
+
+// Upsert must reject an invalid priority at write time, not on a later read.
+func TestUpsertRejectsInvalidPriority(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	backend := newObsidianTaskBackend(dir)
+	if _, err := backend.Upsert(t.Context(), tasks.AddRequest{ID: "bad-priority", Title: "Priority validation", Status: "todo", Priority: "ultra"}); err == nil {
+		t.Fatal("Upsert accepted invalid priority \"ultra\"; expected an error naming the valid enum")
+	}
+}
+
+// model_level uses the same write-time validation path as priority.
+func TestUpsertRejectsInvalidModelLevel(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	backend := newObsidianTaskBackend(dir)
+	if _, err := backend.Upsert(t.Context(), tasks.AddRequest{ID: "bad-level", Title: "Model level validation", Status: "todo", ModelLevel: "max"}); err == nil {
+		t.Fatal("Upsert accepted invalid model_level \"max\"; expected an error naming the valid enum")
+	}
+}
+
+// A task created without an explicit status must land with a usable default;
+// leaving it empty would break the next read (no valid status to normalise to).
+func TestUpsertDefaultsEmptyStatusToTodo(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	backend := newObsidianTaskBackend(dir)
+	result, err := backend.Upsert(t.Context(), tasks.AddRequest{ID: "default-status", Title: "Status default"})
+	if err != nil {
+		t.Fatalf("Upsert with empty status: %v", err)
+	}
+	if result.Task.Status != "todo" {
+		t.Fatalf("empty status defaulted to %q, want todo", result.Task.Status)
+	}
+	got, _, err := backend.Get(t.Context(), "", "default-status")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Status != "todo" {
+		t.Fatalf("status on disk = %q, want todo", got.Status)
+	}
+}
+
+// Status, priority and model_level arrive case-insensitive and with hyphens or
+// spaces (frontmatter convention). The write path normalises them so the same
+// value reads back canonically.
+func TestUpsertNormalizesEnums(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	backend := newObsidianTaskBackend(dir)
+	result, err := backend.Upsert(t.Context(), tasks.AddRequest{
+		ID: "norm-enums", Title: "Enum normalisation",
+		Status: "In-Progress", Priority: "High", ModelLevel: "Very High",
+	})
+	if err != nil {
+		t.Fatalf("Upsert with mixed-case enums: %v", err)
+	}
+	if result.Task.Status != "in_progress" || result.Task.Priority != "high" || result.Task.ModelLevel != "very_high" {
+		t.Fatalf("normalised enums = status:%q priority:%q level:%q", result.Task.Status, result.Task.Priority, result.Task.ModelLevel)
+	}
+}

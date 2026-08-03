@@ -23,6 +23,9 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 	}
 	srv.AddTool(basemcp.NewTool("task",
 		basemcp.WithDescription("Per-repository task registry. Required: repo_path, action. Actions: current (no extra args, returns active tasks); get (id); list (status?, query?); search (query, status?); upsert (id?, title, status?, task_type?, priority?, model_level?, body?, tags?, acceptance_criteria?, verification_plan?, parent_id?); set_status (id, status); batch_upsert (tasks[], close_missing?, missing_status?, active_statuses?); delete (id)."),
+		basemcp.WithDestructiveHintAnnotation(true),
+		basemcp.WithIdempotentHintAnnotation(false),
+		basemcp.WithOpenWorldHintAnnotation(false),
 		basemcp.WithString("repo_path", basemcp.Required()),
 		basemcp.WithString("action", basemcp.Required(), actionEnum(taskActions)),
 		basemcp.WithString("id", basemcp.Description("Task id. Required for get, set_status, delete. Optional for upsert (creates new if absent).")),

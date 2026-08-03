@@ -24,6 +24,9 @@ func registerGitTools(srv *server.MCPServer, deps *Server) {
 	}
 	srv.AddTool(basemcp.NewTool("git",
 		basemcp.WithDescription("Git operations. Required: repo_path, action. Actions (always available): status — structured git status; diff (cached?, path?) — structured git diff; commit (files[], message) — commit only explicit owned files. Actions (require git_advanced layer): log (limit?, path?, author?, since?, until?, grep?) — git log; log_diff (hash) — show commit details; stash_list — git stash list; branch_list (all?) — git branch list; remote_list — git remote list; tag_list (pattern?) — git tag list; blame (file) — git blame; prepare_task_worktree (task_id, task_type) — create or reuse .worktrees/<task_id>."),
+		basemcp.WithDestructiveHintAnnotation(true),
+		basemcp.WithIdempotentHintAnnotation(false),
+		basemcp.WithOpenWorldHintAnnotation(false),
 		basemcp.WithString("repo_path", basemcp.Required()),
 		basemcp.WithString("action", basemcp.Required(), actionEnum(gitActions)),
 		basemcp.WithArray("files", basemcp.Description("Files to commit (commit action).")),

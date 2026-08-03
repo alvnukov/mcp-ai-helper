@@ -124,6 +124,9 @@ func registerCommandTools(srv *server.MCPServer, deps *Server) {
 	}
 	srv.AddTool(basemcp.NewTool("command",
 		basemcp.WithDescription("Command execution and history management. Required: action. Actions: run (command, repo_path, cwd?, timeout_seconds?, mcp_wait_seconds?) — run a command under policy limits; the reply carries previous when the same command already ran in this repo within the hour, and previous.same_output means the repeat produced byte-identical output; cleanup () — remove old command log records; abort (command_id) — abort a running command; list (repo_path?, status?, limit?) — list recent command history; get (command_id, mode?, wait_seconds?, include?, exclude?, preset?, max_lines?, context_before?, context_after?) — get durable command status/result, blocking up to wait_seconds until it finishes instead of sleeping in a shell; filter (command_id, include?, exclude?, preset?, max_lines?, context_before?, context_after?) — grep retained command output; health (repo_path) — quick build/vet/test check. A run or get reply carries failure_markers when the output reports a failure the exit code did not, which is what a pipe into tail, head or grep does to it."),
+		basemcp.WithDestructiveHintAnnotation(true),
+		basemcp.WithIdempotentHintAnnotation(false),
+		basemcp.WithOpenWorldHintAnnotation(true),
 		basemcp.WithString("action", basemcp.Required(), actionEnum(commandActions)),
 		basemcp.WithString("command", basemcp.Description("Shell command. Required for run.")),
 		basemcp.WithString("repo_path", basemcp.Description("Repository root. Required for run and health; optional for list.")),

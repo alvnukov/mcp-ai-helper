@@ -19,6 +19,9 @@ func registerPipelineTools(srv *server.MCPServer, deps *Server) {
 	}
 	srv.AddTool(basemcp.NewTool("run",
 		basemcp.WithDescription("Run pipelines and workflows. Required: action, repo_path (except schema). Actions: pipeline (command, repo_path, cwd?, timeout_seconds?, mcp_wait_seconds?, current_task_id?, task_on_start?, task_on_success?, task_on_failure?, compact_output?, secret_handles?) — run command with evidence extraction; workflow (repo_path, steps[], owned_files?, commit_message?, current_task_id?, task_on_start?, task_on_success?, task_on_failure?, secret_handles?, preview?) — run guarded edits, checks, and optional commit; schema () — return valid workflow step types and parameters."),
+		basemcp.WithDestructiveHintAnnotation(true),
+		basemcp.WithIdempotentHintAnnotation(false),
+		basemcp.WithOpenWorldHintAnnotation(true),
 		basemcp.WithString("action", basemcp.Required(), actionEnum(runActions)),
 		basemcp.WithString("repo_path", basemcp.Required()),
 		basemcp.WithString("command", basemcp.Description("Shell command (pipeline action).")),
@@ -141,7 +144,7 @@ func runActionSchema() (*basemcp.CallToolResult, error) {
 		},
 		"step_types": []map[string]any{
 			{
-				"type":        "command",
+				"tool":        "command",
 				"description": "Run a shell command. Workflow stops on non-zero exit unless on_failure is 'continue'.",
 				"fields": map[string]string{
 					"command":          "Shell command to run (string, required).",
@@ -153,19 +156,17 @@ func runActionSchema() (*basemcp.CallToolResult, error) {
 				},
 			},
 			{
-				"type":        "guarded_replace",
-				"description": "Replace one unique text span only if the file hash still matches. Use file action=read first, then file action=snapshot, then this.",
+				"tool":        "guarded_replace",
+				"description": "Replace one unique text span only if the file hash still matches. Use file action=read first, then file action=snapshot, then this. Inside a workflow step only old/new are decoded; for backslash-heavy text use edit action=replace, which also accepts old_b64/new_b64.",
 				"fields": map[string]string{
 					"path":          "Repo-relative file path (string, required).",
 					"expected_hash": "SHA-256 hash from file action=snapshot before edit (string, required).",
-					"old":           "Text to replace. Use old_b64 for strings with backslashes (string, either old or old_b64 required).",
-					"old_b64":       "Base64-encoded old text. Safer for strings with backslashes (string).",
-					"new":           "Replacement text. Use new_b64 for strings with backslashes (string).",
-					"new_b64":       "Base64-encoded new text (string).",
+					"old":           "Text to replace (string, required inside a workflow step).",
+					"new":           "Replacement text (string, required inside a workflow step).",
 				},
 			},
 			{
-				"type":        "task_batch_upsert",
+				"tool":        "task_batch_upsert",
 				"description": "Synchronize per-repository task state.",
 				"fields": map[string]string{
 					"tasks":         "Array of task objects with id, title, status, priority, model_level, tags, body (required).",
@@ -173,7 +174,7 @@ func runActionSchema() (*basemcp.CallToolResult, error) {
 				},
 			},
 			{
-				"type":        "task_transition",
+				"tool":        "task_transition",
 				"description": "Guardedly transition task statuses inside a workflow.",
 				"fields": map[string]string{
 					"task_ids": "Task IDs to transition (array of strings, required).",
@@ -182,7 +183,7 @@ func runActionSchema() (*basemcp.CallToolResult, error) {
 				},
 			},
 			{
-				"type":        "git_commit_owned",
+				"tool":        "git_commit_owned",
 				"description": "Commit only explicit owned files. Never stages all files.",
 				"fields": map[string]string{
 					"files":   "Repo-relative files to commit (array of strings, required).",
@@ -190,7 +191,7 @@ func runActionSchema() (*basemcp.CallToolResult, error) {
 				},
 			},
 			{
-				"type":        "git_prepare_task_worktree",
+				"tool":        "git_prepare_task_worktree",
 				"description": "Create or reuse .worktrees/<task_id> on branch <task_type>/<task_id>.",
 				"fields": map[string]string{
 					"task_id":   "Task id, e.g. task-057 (string, required).",
