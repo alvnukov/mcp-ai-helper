@@ -65,16 +65,9 @@ func registerConfluenceTools(srv *server.MCPServer, deps *Server) {
 		if err := bind(req, &args); err != nil {
 			return nil, err
 		}
-		jc, err := getClient()
-		if err != nil {
-			return safeError(deps, err), nil
-		}
-		page, err := jc.GetContentByIDContext(ctx, args.PageID)
-		if err != nil {
-			return safeError(deps, err), nil
-		}
-		if !checkConfSpace(deps, page.Space) {
-			return safeError(deps, fmt.Errorf("confluence: space %q not in allowed_spaces", page.Space)), nil
+		page, refusal := confReadPage(ctx, deps, args.PageID)
+		if refusal != nil {
+			return refusal, nil
 		}
 		return structured(map[string]any{"page": page})
 	})
@@ -97,13 +90,13 @@ func registerConfluenceTools(srv *server.MCPServer, deps *Server) {
 	editActions := confEditActions(deps)
 	srv.AddTool(basemcp.NewTool("conf_edit",
 		rewritesRemote,
-		basemcp.WithDescription("Write to Confluence. Required: action. Actions: update (page_id, expected_version, body|old+new, title?, version_message?, minor_edit?) — replace the whole page body or one unique span of it; create (space_key, title, body?, parent_id?) — add a page; delete (page_id, expected_version) — remove one. Read the page with conf_read first and pass back the version it reported: every edit is refused unless the page is still at that version, so a page someone else changed meanwhile is never overwritten. Refused entirely when the integration is read_only or the space is outside allowed_spaces."),
+		basemcp.WithDescription("Edit Confluence. Required: action. Actions: read (page_id) — the page with its body and current version, which is where an edit starts; update (page_id, expected_version, body|old+new, title?, version_message?, minor_edit?) — replace the whole page body or one unique span of it; create (space_key, title, body?, parent_id?) — add a page; delete (page_id, expected_version) — remove one. Read the page here first and pass back the version that read reported: every edit is refused unless the page is still at that version, so a page someone else changed meanwhile is never overwritten. Editing is refused entirely when the integration is read_only or the space is outside allowed_spaces; reading is not."),
 		basemcp.WithString("action", basemcp.Required(), actionEnum(editActions)),
-		basemcp.WithString("page_id", basemcp.Description("Confluence page ID (update, delete; required).")),
-		basemcp.WithNumber("expected_version", basemcp.Description("Version conf_read reported for the page (update, delete; required). The edit is refused if the page has moved past it.")),
+		basemcp.WithString("page_id", basemcp.Description("Confluence page ID (read, update, delete; required).")),
+		basemcp.WithNumber("expected_version", basemcp.Description("Version the read action reported for the page (update, delete; required). The edit is refused if the page has moved past it.")),
 		basemcp.WithString("space_key", basemcp.Description("Space key to create the page in (create; required).")),
 		basemcp.WithString("title", basemcp.Description("Page title. Required for create; on update it renames the page, and omitting it keeps the current title.")),
-		basemcp.WithString("body", basemcp.Description("Whole page body in Confluence storage format, the XHTML conf_read returns (create; update when replacing everything). On update, omit when using old and new.")),
+		basemcp.WithString("body", basemcp.Description("Whole page body in Confluence storage format, the XHTML the read action returns (create; update when replacing everything). On update, omit when using old and new.")),
 		basemcp.WithString("old", basemcp.Description("Span of the current body to replace (update). It must appear exactly once, as in edit action=replace.")),
 		basemcp.WithString("new", basemcp.Description("Text to put in place of old (update). Empty deletes the span.")),
 		basemcp.WithString("parent_id", basemcp.Description("Page ID to create the new page under (create).")),
@@ -125,8 +118,13 @@ type confEditRequest struct {
 	MinorEdit       bool   `json:"minor_edit"`
 }
 
+// confEditActions is the whole editing loop, read included. An edit has to
+// start from the page as it stands — its body to edit and its version to guard
+// against — so a caller that reached for this tool finds that read here rather
+// than having to know which other tool to call first.
 func confEditActions(deps *Server) actions {
 	return actions{
+		"read":   withDeps(confEditRead, deps),
 		"update": withDeps(confEditUpdate, deps),
 		"create": withDeps(confEditCreate, deps),
 		"delete": withDeps(confEditDelete, deps),
@@ -149,30 +147,64 @@ func confWritesAllowed(deps *Server) error {
 	return nil
 }
 
-// confPageForEdit reads the page an edit names and puts it through both gates:
-// the integration must allow writes at all, and the page's space must be one
-// conf_read would have answered for. It hands back the page it checked, so the
-// page that passed the allowlist and the page that gets written are one read
-// apart from nothing — not two reads that could disagree.
-func confPageForEdit(ctx context.Context, deps *Server, pageID string) (*confluence.Client, *confluence.PageInfo, *basemcp.CallToolResult) {
+// confReadPage reads one page and refuses a space outside the allowlist. Both
+// the read tool and the read action of the edit tool answer with it, so the page
+// an edit starts from is exactly the page a plain read would have shown.
+func confReadPage(ctx context.Context, deps *Server, pageID string) (*confluence.PageInfo, *basemcp.CallToolResult) {
 	if pageID == "" {
-		return nil, nil, basemcp.NewToolResultError("conf_edit: page_id is required")
+		return nil, basemcp.NewToolResultError("confluence: page_id is required")
 	}
+	client, err := deps.getConfluenceClient()
+	if err != nil {
+		return nil, safeError(deps, err)
+	}
+	page, err := client.GetContentByIDContext(ctx, pageID)
+	if err != nil {
+		return nil, safeError(deps, err)
+	}
+	if !checkConfSpace(deps, page.Space) {
+		return nil, safeError(deps, fmt.Errorf("confluence: space %q not in allowed_spaces", page.Space))
+	}
+	return page, nil
+}
+
+// confPageForEdit reads the page an edit names and puts it through both gates:
+// the integration must allow writes at all, and the page's space must be one a
+// read would have answered for. It hands back the page it checked, so the page
+// that passed the allowlist and the page that gets written are the same read —
+// not two reads that could disagree.
+//
+// The write gate runs first, so a read_only integration refuses without
+// reaching Confluence at all.
+func confPageForEdit(ctx context.Context, deps *Server, pageID string) (*confluence.Client, *confluence.PageInfo, *basemcp.CallToolResult) {
 	if err := confWritesAllowed(deps); err != nil {
 		return nil, nil, safeError(deps, err)
+	}
+	page, refusal := confReadPage(ctx, deps, pageID)
+	if refusal != nil {
+		return nil, nil, refusal
 	}
 	client, err := deps.getConfluenceClient()
 	if err != nil {
 		return nil, nil, safeError(deps, err)
 	}
-	page, err := client.GetContentByIDContext(ctx, pageID)
-	if err != nil {
-		return nil, nil, safeError(deps, err)
-	}
-	if !checkConfSpace(deps, page.Space) {
-		return nil, nil, safeError(deps, fmt.Errorf("confluence: space %q not in allowed_spaces", page.Space))
-	}
 	return client, page, nil
+}
+
+// confEditRead answers with the page an edit will be built from. It is not
+// gated on write permission: a read_only integration can still be read, and the
+// refusal a caller then gets from update names read_only rather than pretending
+// the page was unreachable.
+func confEditRead(ctx context.Context, req basemcp.CallToolRequest, deps *Server) (*basemcp.CallToolResult, error) {
+	var args confEditRequest
+	if err := bind(req, &args); err != nil {
+		return nil, err
+	}
+	page, refusal := confReadPage(ctx, deps, args.PageID)
+	if refusal != nil {
+		return refusal, nil
+	}
+	return structured(map[string]any{"page": page})
 }
 
 func confEditUpdate(ctx context.Context, req basemcp.CallToolRequest, deps *Server) (*basemcp.CallToolResult, error) {
