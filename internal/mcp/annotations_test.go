@@ -110,7 +110,7 @@ func TestEveryRegisteredToolPublishesAllFourAnnotations(t *testing.T) {
 		{
 			toolHints{readOnly: false, destructive: true, idempotent: false, openWorld: true},
 			"changes remote state depending on what it finds, or runs a command that can do anything",
-			[]string{"jira_transition", "command", "run", "lake_smoke"},
+			[]string{"conf_edit", "jira_transition", "command", "run", "lake_smoke"},
 		},
 	}
 

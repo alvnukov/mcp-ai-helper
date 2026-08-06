@@ -11,6 +11,74 @@ import (
 	"testing"
 )
 
+// ApplyGuardedReplace used to decide all of this inline, against text it had
+// just read from a file. ReplaceUniqueSpan is that decision on its own, so an
+// editor holding a document from elsewhere reaches the same one. These cases are
+// what both callers now inherit.
+func TestReplaceUniqueSpanDecidesWhatBothCallersInherit(t *testing.T) {
+	t.Parallel()
+
+	for name, testCase := range map[string]struct {
+		text, old, replacement string
+		wantStatus             string
+		wantText               string
+		wantChanged            bool
+		wantReason             string
+	}{
+		"one occurrence is replaced": {
+			text: "a b c", old: "b", replacement: "B",
+			wantStatus: "ok", wantText: "a B c", wantChanged: true,
+		},
+		"a second occurrence leaves the target ambiguous": {
+			text: "a b b", old: "b", replacement: "B",
+			wantStatus: "conflict", wantReason: "old text is not unique",
+		},
+		"an edit already applied is success, not a miss": {
+			text: "a B c", old: "b", replacement: "B",
+			wantStatus: "ok", wantText: "a B c", wantReason: "desired text already present",
+		},
+		"replacing text with itself changes nothing": {
+			text: "a b c", old: "b", replacement: "b",
+			wantStatus: "ok", wantText: "a b c",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			got := ReplaceUniqueSpan(testCase.text, testCase.old, testCase.replacement)
+			if got.Status != testCase.wantStatus {
+				t.Fatalf("status = %q, want %q (%+v)", got.Status, testCase.wantStatus, got)
+			}
+			if got.Text != testCase.wantText {
+				t.Errorf("text = %q, want %q", got.Text, testCase.wantText)
+			}
+			if got.Changed != testCase.wantChanged {
+				t.Errorf("changed = %v, want %v", got.Changed, testCase.wantChanged)
+			}
+			if got.Reason != testCase.wantReason {
+				t.Errorf("reason = %q, want %q", got.Reason, testCase.wantReason)
+			}
+		})
+	}
+}
+
+// The near-miss tells a caller which of its assumptions about the document was
+// wrong, which is the difference between a retry that can work and one that
+// repeats the same guess. It is part of the answer, not decoration.
+func TestReplaceUniqueSpanQuotesTheNearestMissWhenNothingMatches(t *testing.T) {
+	t.Parallel()
+
+	got := ReplaceUniqueSpan("the quick brown fox", "quick brwn", "slow")
+	if got.Status != "conflict" {
+		t.Fatalf("status = %q, want conflict", got.Status)
+	}
+	if !strings.Contains(got.Reason, "old text not found") {
+		t.Errorf("reason = %q, want it to say the text was not found", got.Reason)
+	}
+	if !strings.Contains(got.Reason, "quick br") {
+		t.Errorf("reason = %q, want it to quote how far the match got", got.Reason)
+	}
+}
+
 func TestApplyGuardedReplaceWithBase64(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "x.txt")

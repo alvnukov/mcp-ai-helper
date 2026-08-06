@@ -216,6 +216,42 @@ func findBestPartialMatch(text string, old string) string {
 	return text[start:end]
 }
 
+// SpanEdit is what replacing one span in a document produced: the text to
+// store, whether it differs from what was there, and — when there is nothing to
+// store — why.
+type SpanEdit struct {
+	Text    string
+	Status  string
+	Changed bool
+	Reason  string
+}
+
+// ReplaceUniqueSpan replaces the single occurrence of oldText with newText.
+//
+// It is the decision ApplyGuardedReplace makes about text, lifted out of the
+// file that text came from. A caller holding a document from somewhere else — a
+// Confluence page body — then answers to the same rules a model already knows
+// from editing files: exactly one occurrence or none, an edit already applied
+// reported as success rather than as a miss, and a near-miss quoted back so the
+// caller can see what it got wrong.
+func ReplaceUniqueSpan(text string, oldText string, newText string) SpanEdit {
+	if strings.Contains(text, newText) && !strings.Contains(text, oldText) {
+		return SpanEdit{Text: text, Status: "ok", Reason: "desired text already present"}
+	}
+	switch count := strings.Count(text, oldText); {
+	case count == 0:
+		reason := "old text not found"
+		if detail := findBestPartialMatch(text, oldText); detail != "" {
+			reason += fmt.Sprintf("; best partial match near: %q", detail)
+		}
+		return SpanEdit{Status: "conflict", Reason: reason}
+	case count > 1:
+		return SpanEdit{Status: "conflict", Reason: "old text is not unique"}
+	}
+	next := strings.Replace(text, oldText, newText, 1)
+	return SpanEdit{Text: next, Status: "ok", Changed: next != text}
+}
+
 // ApplyGuardedReplace replaces one unique text span only if the file hash still matches.
 // Prefer OldB64/NewB64 over Old/New when the text contains characters that are
 // difficult to represent in JSON strings (e.g. Go raw string literals).
@@ -247,28 +283,18 @@ func ApplyGuardedReplace(req ReplaceRequest) (ReplaceResult, error) {
 	if oldHash != req.ExpectedHash {
 		return ReplaceResult{Status: "conflict", Path: clean, OldHash: oldHash, Reason: "file hash changed after snapshot"}, nil
 	}
-	text := string(data)
-	if strings.Contains(text, newText) && !strings.Contains(text, oldText) {
-		return ReplaceResult{Status: "ok", Path: clean, Changed: false, OldHash: oldHash, NewHash: oldHash, Reason: "desired text already present"}, nil
+	edit := ReplaceUniqueSpan(string(data), oldText, newText)
+	if edit.Status != "ok" {
+		return ReplaceResult{Status: edit.Status, Path: clean, OldHash: oldHash, Reason: edit.Reason}, nil
 	}
-	count := strings.Count(text, oldText)
-	if count == 0 {
-		detail := findBestPartialMatch(text, oldText)
-		msg := "old text not found"
-		if detail != "" {
-			msg += fmt.Sprintf("; best partial match near: %q", detail)
-		}
-		return ReplaceResult{Status: "conflict", Path: clean, OldHash: oldHash, Reason: msg}, nil
+	if !edit.Changed {
+		return ReplaceResult{Status: "ok", Path: clean, Changed: false, OldHash: oldHash, NewHash: oldHash, Reason: edit.Reason}, nil
 	}
-	if count > 1 {
-		return ReplaceResult{Status: "conflict", Path: clean, OldHash: oldHash, Reason: "old text is not unique"}, nil
-	}
-	next := strings.Replace(text, oldText, newText, 1)
-	newHash := Hash([]byte(next))
-	if err := scoped.root.WriteFile(scoped.name, []byte(next), 0o600); err != nil {
+	newHash := Hash([]byte(edit.Text))
+	if err := scoped.root.WriteFile(scoped.name, []byte(edit.Text), 0o600); err != nil {
 		return ReplaceResult{}, err
 	}
-	return ReplaceResult{Status: "ok", Path: clean, Changed: newHash != oldHash, OldHash: oldHash, NewHash: newHash}, nil
+	return ReplaceResult{Status: "ok", Path: clean, Changed: true, OldHash: oldHash, NewHash: newHash}, nil
 }
 
 // FileLine is one numbered line of file content.

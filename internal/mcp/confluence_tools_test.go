@@ -1,8 +1,11 @@
 package mcp
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/mark3labs/mcp-go/server"
@@ -93,5 +96,92 @@ func TestCheckConfSpace_Integration(t *testing.T) {
 	}}}
 	if !checkConfSpace(deps, page.Space) {
 		t.Fatal("page from VEGA space should be allowed")
+	}
+}
+
+func confluenceDeps(readOnly *bool) *Server {
+	return &Server{cfg: &config.Config{Integrations: config.IntegrationsConfig{
+		Confluence: &config.ConfluenceConfig{AllowedSpaces: []string{"VEGA"}, ReadOnly: readOnly},
+	}}}
+}
+
+// read_only is the setting an operator uses to say the helper may read this
+// wiki and nothing more. It had a CanMutate() and no caller until conf_edit;
+// this is the caller.
+func TestConfWritesAreRefusedWhenTheIntegrationIsReadOnly(t *testing.T) {
+	readOnly := true
+	err := confWritesAllowed(confluenceDeps(&readOnly))
+	if err == nil {
+		t.Fatal("read_only must refuse an edit")
+	}
+	if !strings.Contains(err.Error(), "read_only") {
+		t.Errorf("refusal = %q; it has to name the setting standing in the way, or the caller cannot tell its user what to change", err)
+	}
+}
+
+func TestConfWritesAreAllowedWhenReadOnlyIsUnset(t *testing.T) {
+	if err := confWritesAllowed(confluenceDeps(nil)); err != nil {
+		t.Fatalf("an integration without read_only may be edited: %v", err)
+	}
+	writable := false
+	if err := confWritesAllowed(confluenceDeps(&writable)); err != nil {
+		t.Fatalf("read_only: false may be edited: %v", err)
+	}
+}
+
+func TestConfWritesAreRefusedWithoutAnIntegration(t *testing.T) {
+	if err := confWritesAllowed(&Server{cfg: &config.Config{}}); err == nil {
+		t.Fatal("an unconfigured integration must refuse an edit")
+	}
+}
+
+// conf_edit binds its arguments with json.Unmarshal, which drops a key the
+// struct has no field for without saying anything: the model would be told its
+// edit succeeded while half of what it asked for was discarded. So the schema
+// and the binder have to name the same arguments, checked in both directions —
+// an advertised field nothing binds is a silent loss, and a bound field nothing
+// advertises is one no caller knows to send.
+func TestConfEditSchemaAndBinderNameTheSameArguments(t *testing.T) {
+	t.Parallel()
+
+	bound := map[string]bool{}
+	requestType := reflect.TypeOf(confEditRequest{})
+	for i := range requestType.NumField() {
+		name, _, _ := strings.Cut(requestType.Field(i).Tag.Get("json"), ",")
+		if name != "" && name != "-" {
+			bound[name] = true
+		}
+	}
+
+	tool, ok := New(allLayersConfig()).ListTools()["conf_edit"]
+	if !ok {
+		t.Fatal("conf_edit is not registered")
+	}
+	schemaBytes, err := json.Marshal(tool.Tool.InputSchema)
+	if err != nil {
+		t.Fatalf("marshal conf_edit schema: %v", err)
+	}
+	var schema struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if err := json.Unmarshal(schemaBytes, &schema); err != nil {
+		t.Fatalf("decode conf_edit schema: %v", err)
+	}
+	if len(schema.Properties) == 0 {
+		t.Fatal("conf_edit advertises no arguments; nothing was checked")
+	}
+
+	for name := range schema.Properties {
+		// The dispatcher reads action off the raw arguments before any struct
+		// binds it, so it is the one argument advertised without being bound.
+		if name == "action" || bound[name] {
+			continue
+		}
+		t.Errorf("conf_edit advertises %q, which confEditRequest does not bind: a caller that sends it gets no error and no effect", name)
+	}
+	for name := range bound {
+		if _, advertised := schema.Properties[name]; !advertised {
+			t.Errorf("confEditRequest binds %q but the schema does not name it: no caller can discover it", name)
+		}
 	}
 }
