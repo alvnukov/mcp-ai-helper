@@ -91,7 +91,7 @@ var toolActions = map[string][]string{
 
 // workflowSteps pins the step types run action=workflow dispatches on.
 var workflowSteps = []string{
-	"command", "guarded_replace", "task_batch_upsert", "task_transition",
+	"command", "guarded_replace", "write_file", "task_batch_upsert", "task_transition",
 	"git_commit_owned", "git_prepare_task_worktree",
 }
 
@@ -192,7 +192,7 @@ func TestSkillsCoverTheFailureProneHelperWorkflows(t *testing.T) {
 	required := map[string][]string{
 		"mcp-ai-helper-tasks": {
 			"tool_manifest", "task action=current", "task action=get", "git action=status",
-			"run action=schema", "run action=workflow", "task_transition", "git_commit_owned",
+			"run action=schema", "run action=workflow", "write_file", "task_transition", "git_commit_owned",
 			"surface_mismatch", "command_id",
 		},
 		"mcp-ai-helper-edits": {

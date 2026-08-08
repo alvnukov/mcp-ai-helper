@@ -160,6 +160,19 @@ func (e WorkflowEdit) replaceRequest(repoPath string) fileops.ReplaceRequest {
 	}
 }
 
+// WorkflowWriteFile describes one whole-file create or replacement.
+type WorkflowWriteFile struct {
+	Path         string `json:"path"`
+	Content      string `json:"content,omitempty"`
+	ContentB64   string `json:"content_b64,omitempty"`
+	ExpectedHash string `json:"expected_hash,omitempty"`
+	Mode         int    `json:"mode,omitempty"`
+}
+
+func (w WorkflowWriteFile) writeRequest(repoPath string) fileops.WriteFileRequest {
+	return fileops.WriteFileRequest{RepoPath: repoPath, Path: w.Path, Content: w.Content, ContentB64: w.ContentB64, ExpectedHash: w.ExpectedHash, Mode: w.Mode}
+}
+
 // WorkflowCommand describes one repo-scoped command check.
 type WorkflowCommand struct {
 	Command        string         `json:"command"`
@@ -282,15 +295,23 @@ func validateEditEncodings(req WorkflowRequest) error {
 		}
 	}
 	for _, step := range req.Steps {
-		if step.Tool != "guarded_replace" {
-			continue
-		}
-		var args WorkflowEdit
-		if err := bindStepArgs(step.Args, &args); err != nil {
-			return fmt.Errorf("workflow step %q: %w", step.ID, err)
-		}
-		if err := fileops.ValidateReplaceEncoding(args.replaceRequest(req.RepoPath)); err != nil {
-			return fmt.Errorf("workflow step %q: %w", step.ID, err)
+		switch step.Tool {
+		case "guarded_replace":
+			var args WorkflowEdit
+			if err := bindStepArgs(step.Args, &args); err != nil {
+				return fmt.Errorf("workflow step %q: %w", step.ID, err)
+			}
+			if err := fileops.ValidateReplaceEncoding(args.replaceRequest(req.RepoPath)); err != nil {
+				return fmt.Errorf("workflow step %q: %w", step.ID, err)
+			}
+		case "write_file":
+			var args WorkflowWriteFile
+			if err := bindStepArgs(step.Args, &args); err != nil {
+				return fmt.Errorf("workflow step %q: %w", step.ID, err)
+			}
+			if err := fileops.ValidateWriteFileEncoding(args.writeRequest(req.RepoPath)); err != nil {
+				return fmt.Errorf("workflow step %q: %w", step.ID, err)
+			}
 		}
 	}
 	return nil
@@ -502,7 +523,7 @@ func buildStepWaves(steps []WorkflowStep) ([][]WorkflowStep, error) {
 
 	var editIndices []int
 	for i, step := range steps {
-		if step.Tool == "guarded_replace" {
+		if isWorkflowFileEdit(&step) {
 			editIndices = append(editIndices, i)
 		}
 	}
@@ -548,12 +569,12 @@ func buildStepWaves(steps []WorkflowStep) ([][]WorkflowStep, error) {
 	// Serialize edits to the same file unless the caller already ordered the
 	// pair in the opposite direction through explicit dependencies.
 	for i, step := range steps {
-		if step.Tool != "guarded_replace" {
+		if !isWorkflowFileEdit(&step) {
 			continue
 		}
 		path := stepFilePath(&step)
 		for j := i - 1; j >= 0 && path != ""; j-- {
-			if steps[j].Tool != "guarded_replace" || stepFilePath(&steps[j]) != path {
+			if !isWorkflowFileEdit(&steps[j]) || stepFilePath(&steps[j]) != path {
 				continue
 			}
 			if !dependencyPathExists(i, j) {
@@ -651,8 +672,12 @@ func stepConditionDependency(field string) string {
 	}
 }
 
+func isWorkflowFileEdit(s *WorkflowStep) bool {
+	return s.Tool == "guarded_replace" || s.Tool == "write_file"
+}
+
 func stepFilePath(s *WorkflowStep) string {
-	if s.Tool == "guarded_replace" {
+	if isWorkflowFileEdit(s) {
 		if p, ok := s.Args["path"].(string); ok {
 			return p
 		}
@@ -780,6 +805,26 @@ func (f *workflowFiles) changedFiles() []string {
 func (r *Runner) executeWorkflowStep(ctx context.Context, repoPath string, step WorkflowStep, files *workflowFiles, topLevelCommit *WorkflowCommit) (WorkflowStepResult, error) {
 	base := WorkflowStepResult{ID: step.ID, Tool: step.Tool, Status: "ok"}
 	switch step.Tool {
+	case "write_file":
+		var args WorkflowWriteFile
+		if err := bindStepArgs(step.Args, &args); err != nil {
+			return WorkflowStepResult{}, err
+		}
+		writeReq := args.writeRequest(repoPath)
+		if currentHash, ok := files.hash(args.Path); ok {
+			writeReq.ExpectedHash = currentHash
+		}
+		writeResult, err := fileops.WriteFile(writeReq)
+		if err != nil {
+			return WorkflowStepResult{}, err
+		}
+		base.Status = writeResult.Status
+		base.Reason = writeResult.Reason
+		base.Output = writeResult
+		if writeResult.Changed {
+			files.recordEdit(args.Path, writeResult.NewHash)
+		}
+		return base, nil
 	case "guarded_replace":
 		var args WorkflowEdit
 		if err := bindStepArgs(step.Args, &args); err != nil {

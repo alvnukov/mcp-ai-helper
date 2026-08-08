@@ -1359,3 +1359,51 @@ func TestSecretNotLeakedInResultCommandField(t *testing.T) {
 		t.Error("T7-FAIL: masked token not found in result — command field may leak or injection failed")
 	}
 }
+
+func TestRunWorkflowWriteFileStepCreatesFile(t *testing.T) {
+	dir := t.TempDir()
+	runner := NewRunner(testConfig(dir), nil)
+	result, err := runner.RunWorkflow(t.Context(), WorkflowRequest{RepoPath: dir, Steps: []WorkflowStep{{ID: "create", Tool: "write_file", Args: map[string]any{"path": "created.txt", "content_b64": base64.StdEncoding.EncodeToString([]byte("created\n"))}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "ok" {
+		t.Fatalf("status = %q, reason = %q", result.Status, result.Reason)
+	}
+	if len(result.ChangedFiles) != 1 || result.ChangedFiles[0] != "created.txt" {
+		t.Fatalf("changed_files = %#v", result.ChangedFiles)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "created.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "created\n" {
+		t.Fatalf("file = %q", data)
+	}
+}
+
+func TestRunWorkflowRejectsMalformedWriteBase64BeforeAnyStepRuns(t *testing.T) {
+	dir := t.TempDir()
+	existing := filepath.Join(dir, "existing.txt")
+	if err := os.WriteFile(existing, []byte("old\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runner := NewRunner(testConfig(dir), nil)
+	_, err := runner.RunWorkflow(t.Context(), WorkflowRequest{RepoPath: dir, Steps: []WorkflowStep{
+		{ID: "edit", Tool: "guarded_replace", Args: map[string]any{"path": "existing.txt", "old": "old", "new": "new"}},
+		{ID: "bad-create", Tool: "write_file", Args: map[string]any{"path": "created.txt", "content_b64": "not base64!!"}},
+	}})
+	if err == nil {
+		t.Fatal("malformed write_file base64 was accepted")
+	}
+	data, readErr := os.ReadFile(existing)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(data) != "old\n" {
+		t.Fatalf("earlier step mutated file before preflight failed: %q", data)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "created.txt")); !os.IsNotExist(statErr) {
+		t.Fatalf("created.txt state: %v", statErr)
+	}
+}

@@ -819,6 +819,12 @@ type WriteFileRequest struct {
 	Mode         int    `json:"mode,omitempty"`
 }
 
+// ValidateWriteFileEncoding checks transport encoding without touching the filesystem.
+func ValidateWriteFileEncoding(req WriteFileRequest) error {
+	_, err := resolveContent(req.Content, req.ContentB64)
+	return err
+}
+
 // WriteFile writes content to a file, creating parent directories if needed.
 // If ExpectedHash is set and the file exists with a different hash, returns conflict.
 // If the file already has the desired content, returns ok with changed=false (idempotent).

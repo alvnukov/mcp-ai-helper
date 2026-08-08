@@ -44,10 +44,10 @@ mismatch и работай через текущий canonical surface, не и�
 `run action=workflow` contract использует:
 
 ```json
-{"id":"step-id","tool":"guarded_replace|command|git_commit_owned|task_batch_upsert|task_transition|git_prepare_task_worktree","args":{}}
+{"id":"step-id","tool":"guarded_replace|write_file|command|git_commit_owned|task_batch_upsert|task_transition|git_prepare_task_worktree","args":{}}
 ```
 
-Имена step'ов — не имена tools: `guarded_replace` и `git_commit_owned`
+Имена step'ов — не имена tools: `guarded_replace`, `write_file` и `git_commit_owned`
 существуют только внутри `steps`.
 
 Для guarded edits сначала `file action=read` / `file action=snapshot`, затем

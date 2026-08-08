@@ -29,7 +29,7 @@ current policy; the manifest is the current surface. Never infer hidden tools.
 ## Closing a task
 
 Use only workflow steps returned by the schema. The current step set includes
-`guarded_replace`, `command`, `task_batch_upsert`, `task_transition`,
+`guarded_replace`, `write_file`, `command`, `task_batch_upsert`, `task_transition`,
 `git_commit_owned`, and `git_prepare_task_worktree`.
 
 Explicitly order edits, formatting, focused checks, risk-based wider gates,

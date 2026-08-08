@@ -33,7 +33,7 @@ func registerPipelineTools(srv *server.MCPServer, deps *Server) {
 		basemcp.WithBoolean("compact_output", basemcp.Description("Collapse successful command output (pipeline action). Defaults to true.")),
 		basemcp.WithArray("secret_handles", basemcp.Description("Optional server-config secret handles to inject as HELPER_SECRET_<HANDLE>."), basemcp.WithStringItems()),
 		basemcp.WithArray("steps",
-			basemcp.Description("Workflow steps: command, guarded_replace, task_batch_upsert, task_transition, git_commit_owned, git_prepare_task_worktree."),
+			basemcp.Description("Workflow steps: command, guarded_replace, write_file, task_batch_upsert, task_transition, git_commit_owned, git_prepare_task_worktree."),
 			basemcp.Items(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -166,6 +166,17 @@ func runActionSchema() (*basemcp.CallToolResult, error) {
 					"new":           "Replacement text (string, required unless new_b64 is set).",
 					"old_b64":       "Base64-encoded old text (string). Use instead of old for backslash-heavy spans; it wins when both are set.",
 					"new_b64":       "Base64-encoded replacement text (string). Use instead of new for backslash-heavy spans; it wins when both are set.",
+				},
+			},
+			{
+				"tool":        "write_file",
+				"description": "Whole-file create/replace using edit.write semantics. Malformed base64 fails before the first workflow step.",
+				"fields": map[string]string{
+					"path":          "Repo-relative file path (string, required).",
+					"content":       "Whole-file text content (string, required unless content_b64 is set).",
+					"content_b64":   "Base64-encoded whole-file content (string). It wins when both are set.",
+					"expected_hash": "Optional SHA-256 overwrite guard from file action=snapshot.",
+					"mode":          "Optional file mode (number, default 0644).",
 				},
 			},
 			{

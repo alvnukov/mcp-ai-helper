@@ -50,7 +50,7 @@ func TestRunActionSchemaUsesToolNotType(t *testing.T) {
 	t.Parallel()
 
 	want := map[string]bool{
-		"command": true, "guarded_replace": true, "task_batch_upsert": true,
+		"command": true, "guarded_replace": true, "write_file": true, "task_batch_upsert": true,
 		"task_transition": true, "git_commit_owned": true, "git_prepare_task_worktree": true,
 	}
 	got := make(map[string]bool, len(want))
@@ -119,6 +119,39 @@ func TestRunActionSchemaNamesEveryFieldGuardedReplaceBinds(t *testing.T) {
 	if !checked {
 		t.Fatal("no guarded_replace entry in step_tools; nothing was checked")
 	}
+}
+
+func TestRunActionSchemaNamesEveryFieldWriteFileBinds(t *testing.T) {
+	t.Parallel()
+	bound := map[string]bool{}
+	writeType := reflect.TypeOf(pipeline.WorkflowWriteFile{})
+	for i := range writeType.NumField() {
+		name, _, _ := strings.Cut(writeType.Field(i).Tag.Get("json"), ",")
+		if name != "" && name != "-" {
+			bound[name] = true
+		}
+	}
+	for _, entry := range schemaStepTools(t) {
+		if name, _ := entry["tool"].(string); name != "write_file" {
+			continue
+		}
+		fields, ok := entry["fields"].(map[string]any)
+		if !ok || len(fields) == 0 {
+			t.Fatalf("write_file entry has no readable fields map (%T)", entry["fields"])
+		}
+		for field := range fields {
+			if !bound[field] {
+				t.Errorf("write_file schema advertises %q, which WorkflowWriteFile does not bind", field)
+			}
+		}
+		for field := range bound {
+			if _, present := fields[field]; !present {
+				t.Errorf("WorkflowWriteFile binds %q but the schema does not name it", field)
+			}
+		}
+		return
+	}
+	t.Fatal("no write_file entry in step_tools")
 }
 
 // The schema must name every argument the step reads, or a model cannot reach

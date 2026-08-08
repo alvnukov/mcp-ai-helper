@@ -33,6 +33,13 @@ var retiredToolNames = []string{
 	"run_pipeline", "run_workflow", "workflow_schema",
 }
 
+var retiredToolNameAllowedFiles = map[string]map[string]bool{
+	"write_file": {
+		"mcp/pipeline_tools.go": true,
+		"pipeline/pipeline.go":  true,
+	},
+}
+
 func TestNoProductionStringNamesARetiredTool(t *testing.T) {
 	// Word boundaries, so task_batch_upsert does not trip on task_upsert and
 	// task_registry_init does not trip on anything.
@@ -49,15 +56,24 @@ func TestNoProductionStringNamesARetiredTool(t *testing.T) {
 		if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return nil
 		}
+		relativePath, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		relativePath = filepath.ToSlash(relativePath)
 		source, err := os.ReadFile(path) // #nosec G304 -- walking the repo's own source tree.
 		if err != nil {
 			return err
 		}
 		for _, line := range strings.Split(string(source), "\n") {
 			for name, pattern := range patterns {
-				if pattern.MatchString(line) {
-					t.Errorf("%s names the retired tool %q: %s", path, name, strings.TrimSpace(line))
+				if !pattern.MatchString(line) {
+					continue
 				}
+				if retiredToolNameAllowedFiles[name][relativePath] {
+					continue
+				}
+				t.Errorf("%s names the retired tool %q: %s", path, name, strings.TrimSpace(line))
 			}
 		}
 		return nil
