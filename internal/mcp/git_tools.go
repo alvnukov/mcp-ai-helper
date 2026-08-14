@@ -47,7 +47,7 @@ func registerGitTools(srv *server.MCPServer, deps *Server) {
 
 func gitAdvancedAction(action string, deps *Server) actionHandler {
 	return func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
-		if deps != nil && deps.cfg != nil && !deps.cfg.LayerEnabled("git_advanced") {
+		if deps != nil && !deps.layerEnabled("git_advanced") {
 			return basemcp.NewToolResultError("git action=" + action + " requires git_advanced layer to be enabled"), nil
 		}
 		return gitActionAdvanced(ctx, req, action)

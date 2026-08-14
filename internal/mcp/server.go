@@ -89,6 +89,15 @@ func (s *Server) loadDeps() (*config.Config, provider.ChatClient, *command.Runne
 	return s.cfg, s.chat, s.commands, s.pipelines, s.taskStore
 }
 
+// layerEnabled reads the active config's layer flags under the same lock
+// config_reload swaps the config with, so a gate checked at call time cannot
+// race a reload.
+func (s *Server) layerEnabled(name string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.cfg != nil && s.cfg.LayerEnabled(name)
+}
+
 func (s *Server) loadTaskBackendForRepo(repoPath string) (taskBackend, error) {
 	cfg, _, cmds, _, store := s.loadDeps()
 	repoCfg, err := config.LoadRepoConfig(repoPath)
