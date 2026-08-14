@@ -2,6 +2,8 @@
 package safefs
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -118,6 +120,94 @@ func (r *Root) WriteFile(name string, data []byte, perm fs.FileMode) error {
 		return err
 	}
 	return r.root.WriteFile(clean, data, perm)
+}
+
+// WriteFileAtomic writes data through a temp file in the same directory
+// and renames it over name, so a crash mid-write cannot truncate the file
+// in place of the original. The existing file's mode is preserved.
+func (r *Root) WriteFileAtomic(name string, data []byte, perm fs.FileMode) error {
+	clean, err := cleanRelative(name, false)
+	if err != nil {
+		return err
+	}
+	if info, statErr := r.root.Stat(clean); statErr == nil {
+		perm = info.Mode().Perm()
+	}
+	dir := filepath.Dir(clean)
+	base := filepath.Base(clean)
+	var file *os.File
+	var tmpName string
+	for range 5 {
+		var noise [6]byte
+		if _, err := rand.Read(noise[:]); err != nil {
+			return err
+		}
+		tmpName = filepath.Join(dir, "."+base+"."+hex.EncodeToString(noise[:])+".tmp")
+		file, err = r.root.OpenFile(tmpName, os.O_CREATE|os.O_EXCL|os.O_WRONLY, perm)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, os.ErrExist) {
+			return err
+		}
+	}
+	if file == nil {
+		return errors.New("atomic write: temp name allocation failed")
+	}
+	writeErr := func() error {
+		if _, err := file.Write(data); err != nil {
+			return err
+		}
+		return file.Sync()
+	}()
+	closeErr := file.Close()
+	if writeErr != nil || closeErr != nil {
+		_ = r.root.Remove(tmpName)
+		if writeErr != nil {
+			return writeErr
+		}
+		return closeErr
+	}
+	if err := r.root.Rename(tmpName, clean); err != nil {
+		_ = r.root.Remove(tmpName)
+		return err
+	}
+	return nil
+}
+
+// WriteFileAtomicPath is WriteFileAtomic for absolute paths outside any Root.
+func WriteFileAtomicPath(path string, data []byte, perm fs.FileMode) error {
+	if info, err := os.Stat(path); err == nil {
+		perm = info.Mode().Perm()
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	writeErr := func() error {
+		if _, err := tmp.Write(data); err != nil {
+			return err
+		}
+		return tmp.Sync()
+	}()
+	closeErr := tmp.Close()
+	if writeErr != nil || closeErr != nil {
+		_ = os.Remove(tmpName)
+		if writeErr != nil {
+			return writeErr
+		}
+		return closeErr
+	}
+	if err := os.Chmod(tmpName, perm); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	return nil
 }
 
 // CreateExclusive creates a file with data only if it does not exist yet,

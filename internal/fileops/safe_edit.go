@@ -298,7 +298,7 @@ func ApplyGuardedReplace(req ReplaceRequest) (ReplaceResult, error) {
 		return ReplaceResult{Status: "ok", Path: clean, Changed: false, OldHash: oldHash, NewHash: oldHash, Reason: edit.Reason}, nil
 	}
 	newHash := Hash([]byte(edit.Text))
-	if err := scoped.root.WriteFile(scoped.name, []byte(edit.Text), 0o600); err != nil {
+	if err := scoped.root.WriteFileAtomic(scoped.name, []byte(edit.Text), 0o600); err != nil {
 		return ReplaceResult{}, err
 	}
 	return ReplaceResult{Status: "ok", Path: clean, Changed: true, OldHash: oldHash, NewHash: newHash}, nil
@@ -733,7 +733,7 @@ func AppendUnique(req AppendUniqueRequest) (ReplaceResult, error) {
 		next = text + separator + content
 	}
 	newHash := Hash([]byte(next))
-	if err := scoped.root.WriteFile(scoped.name, []byte(next), 0o600); err != nil {
+	if err := scoped.root.WriteFileAtomic(scoped.name, []byte(next), 0o600); err != nil {
 		return ReplaceResult{}, err
 	}
 	return ReplaceResult{Status: "ok", Path: clean, Changed: true, OldHash: oldHash, NewHash: newHash}, nil
@@ -802,7 +802,7 @@ func DeleteExactBlock(req DeleteExactBlockRequest) (ReplaceResult, error) {
 	}
 	next := left + right
 	newHash := Hash([]byte(next))
-	if err := scoped.root.WriteFile(scoped.name, []byte(next), 0o600); err != nil {
+	if err := scoped.root.WriteFileAtomic(scoped.name, []byte(next), 0o600); err != nil {
 		return ReplaceResult{}, err
 	}
 	return ReplaceResult{Status: "ok", Path: clean, Changed: true, OldHash: oldHash, NewHash: newHash}, nil
@@ -881,7 +881,7 @@ func WriteFile(req WriteFileRequest) (ReplaceResult, error) {
 		if oldHash == newHash {
 			return ReplaceResult{Status: "ok", Path: scoped.display, Changed: false, OldHash: oldHash, NewHash: oldHash, Reason: "content already matches"}, nil
 		}
-		if err := scoped.root.WriteFile(scoped.name, []byte(content), 0o600); err != nil {
+		if err := scoped.root.WriteFileAtomic(scoped.name, []byte(content), 0o600); err != nil {
 			return ReplaceResult{}, err
 		}
 		return ReplaceResult{Status: "ok", Path: scoped.display, Changed: true, OldHash: oldHash, NewHash: newHash}, nil
@@ -889,7 +889,7 @@ func WriteFile(req WriteFileRequest) (ReplaceResult, error) {
 	if !errors.Is(readErr, os.ErrNotExist) {
 		return ReplaceResult{}, readErr
 	}
-	if err := scoped.root.WriteFile(scoped.name, []byte(content), mode); err != nil {
+	if err := scoped.root.WriteFileAtomic(scoped.name, []byte(content), mode); err != nil {
 		return ReplaceResult{}, err
 	}
 	newHash := Hash([]byte(content))

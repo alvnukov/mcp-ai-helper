@@ -28,6 +28,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/alvnukov/mcp-ai-helper/internal/safefs"
 )
 
 // serverName is the key the helper is registered under, and therefore the
@@ -498,7 +500,7 @@ func apply(path string, wanted *string, dryRun bool) (outcome, error) {
 			return outcomeNothing, fmt.Errorf("create %s: %w", dir, err)
 		}
 	}
-	if err := os.WriteFile(path, []byte(*wanted), 0o600); err != nil {
+	if err := safefs.WriteFileAtomicPath(path, []byte(*wanted), 0o600); err != nil {
 		return outcomeNothing, fmt.Errorf("write %s: %w", path, err)
 	}
 	return outcomeDone, nil
