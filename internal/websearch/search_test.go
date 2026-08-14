@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/alvnukov/mcp-ai-helper/internal/config"
@@ -99,5 +100,33 @@ func TestSearchFailsClosedForUnsupportedProvider(t *testing.T) {
 	result := Search(context.Background(), config.WebPolicy{SearchProvider: "other"}, Request{Query: "bounded fetch"})
 	if result.Status != "blocked" || len(result.Diagnostics) == 0 || result.Diagnostics[0].Code != "unsupported_search_provider" {
 		t.Fatalf("result = %#v", result)
+	}
+}
+
+// The Google CSE key travels in the request URL's query string, and a
+// transport failure embeds that URL verbatim inside *url.Error. The
+// diagnostic must not carry the key into model-visible output or logs.
+func TestSearchFailureDiagnosticsRedactAPIKey(t *testing.T) {
+	t.Setenv("GOOGLE_TEST_KEY", "secret-key-123")
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {}))
+	searchURL := srv.URL
+	srv.Close() // the next request fails, and its error carries the full URL
+
+	policy := config.WebPolicy{SearchProvider: ProviderGoogleCSE, GoogleCSEURL: searchURL, GoogleCSEID: "engine-id", GoogleAPIKeyEnv: "GOOGLE_TEST_KEY", TimeoutSeconds: 2, AllowedSchemes: []string{"http"}, AllowedHosts: []string{"127.0.0.1"}, MaxSearchResults: 5}
+	result := Search(context.Background(), policy, Request{Query: "bounded fetch"})
+	failedIdx := -1
+	for i := range result.Diagnostics {
+		if strings.Contains(result.Diagnostics[i].Message, "secret-key-123") {
+			t.Fatalf("diagnostic %s leaks the API key: %s", result.Diagnostics[i].Code, result.Diagnostics[i].Message)
+		}
+		if result.Diagnostics[i].Code == "search_failed" {
+			failedIdx = i
+		}
+	}
+	if failedIdx < 0 {
+		t.Fatalf("no search_failed diagnostic in result = %#v", result)
+	}
+	if !strings.Contains(result.Diagnostics[failedIdx].Message, "key=REDACTED") {
+		t.Fatalf("search_failed message does not show redaction: %s", result.Diagnostics[failedIdx].Message)
 	}
 }

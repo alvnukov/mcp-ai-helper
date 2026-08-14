@@ -218,14 +218,14 @@ func googleResultLimit(policy config.WebPolicy, requested int) int {
 func getSearchBody(ctx context.Context, policy config.WebPolicy, rawURL string, result *Result) ([]byte, bool, bool) {
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		result.Diagnostics = append(result.Diagnostics, diag("search_request_invalid", err.Error()))
+		result.Diagnostics = append(result.Diagnostics, diag("search_request_invalid", redactURLKey(err.Error())))
 		return nil, false, false
 	}
 	httpReq.Header.Set("User-Agent", policy.UserAgent)
 	client := &http.Client{Timeout: time.Duration(policy.TimeoutSeconds) * time.Second}
 	resp, err := client.Do(httpReq)
 	if err != nil {
-		result.Diagnostics = append(result.Diagnostics, diag("search_failed", err.Error()))
+		result.Diagnostics = append(result.Diagnostics, diag("search_failed", redactURLKey(err.Error())))
 		return nil, false, false
 	}
 	defer func() {
@@ -431,6 +431,17 @@ func cleanHTML(value string) string {
 
 func diag(code string, message string) webfetch.Diagnostic {
 	return webfetch.Diagnostic{Code: code, Message: message}
+}
+
+// urlKeyParamRe matches the key= query parameter inside URLs that
+// transport errors embed verbatim; the Google CSE key travels in the
+// request URL.
+var urlKeyParamRe = regexp.MustCompile(`([?&])key=[^&\s"]+`)
+
+// redactURLKey blanks the key= value in a diagnostic message without
+// touching the rest of the URL.
+func redactURLKey(message string) string {
+	return urlKeyParamRe.ReplaceAllString(message, "${1}key=REDACTED")
 }
 
 func publicIP(ip net.IP) bool {
