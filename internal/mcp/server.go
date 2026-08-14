@@ -222,7 +222,7 @@ func New(cfg *config.Config) *server.MCPServer {
 	deps.chat, deps.commands, deps.pipelines, deps.taskStore, deps.taskBackend = buildDeps(cfg)
 
 	registerLanguageTools(srv)
-	registerFileTools(srv)
+	registerFileTools(srv, deps)
 	registerGitTools(srv, deps)
 
 	if cfg.LayerEnabled("guidance") {

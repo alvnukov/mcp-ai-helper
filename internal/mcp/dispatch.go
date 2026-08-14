@@ -2,11 +2,14 @@ package mcp
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 
 	basemcp "github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+
+	"github.com/alvnukov/mcp-ai-helper/internal/config"
 )
 
 // The six merged tools — file, edit, command, git, task, run — all take an
@@ -36,10 +39,23 @@ func (a actions) names() []string {
 	return names
 }
 
-// dispatch builds the handler for a merged tool from its action set.
-func dispatch(tool string, handlers actions) server.ToolHandlerFunc {
+// dispatch builds the handler for a merged tool from its action set. The
+// repo-local tools.deny policy is enforced here, ahead of every action,
+// because a denial that only some tools consult is not a policy.
+func dispatch(deps *Server, tool string, handlers actions) server.ToolHandlerFunc {
 	return func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
 		argsMap, _ := req.Params.Arguments.(map[string]any)
+		if deps != nil {
+			if repoPath, _ := argsMap["repo_path"].(string); strings.TrimSpace(repoPath) != "" {
+				repoCfg, err := config.LoadRepoConfig(repoPath)
+				if err != nil {
+					return basemcp.NewToolResultError(fmt.Sprintf("load repo config: %v", err)), nil
+				}
+				if repoCfg.ToolDenied(tool) {
+					return basemcp.NewToolResultError(fmt.Sprintf("tool %q is denied by repo-local config", tool)), nil
+				}
+			}
+		}
 		action, _ := argsMap["action"].(string)
 		if handler, ok := handlers[action]; ok {
 			return handler(ctx, req)

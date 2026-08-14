@@ -42,7 +42,7 @@ func registerGitTools(srv *server.MCPServer, deps *Server) {
 		basemcp.WithString("file", basemcp.Description("File path for blame (blame action).")),
 		basemcp.WithString("task_id", basemcp.Description("Task ID for worktree (prepare_task_worktree action).")),
 		basemcp.WithString("task_type", basemcp.Description("Branch type for worktree (prepare_task_worktree action).")),
-	), dispatch("git", gitActions))
+	), dispatch(deps, "git", gitActions))
 }
 
 func gitAdvancedAction(action string, deps *Server) actionHandler {

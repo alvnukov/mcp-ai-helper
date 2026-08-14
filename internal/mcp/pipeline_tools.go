@@ -50,7 +50,7 @@ func registerPipelineTools(srv *server.MCPServer, deps *Server) {
 		basemcp.WithArray("owned_files", basemcp.Description("Repo-relative files the workflow is allowed to modify or commit.")),
 		basemcp.WithString("commit_message", basemcp.Description("Optional commit message used by git workflow steps.")),
 		basemcp.WithBoolean("preview", basemcp.Description("Set to true for dry-run: returns steps that would execute without running them.")),
-	), dispatch("run", runActions))
+	), dispatch(deps, "run", runActions))
 }
 
 func runActionPipeline(ctx context.Context, req basemcp.CallToolRequest, deps *Server) (*basemcp.CallToolResult, error) {

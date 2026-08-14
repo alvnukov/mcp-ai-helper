@@ -102,7 +102,7 @@ func registerConfluenceTools(srv *server.MCPServer, deps *Server) {
 		basemcp.WithString("parent_id", basemcp.Description("Page ID to create the new page under (create).")),
 		basemcp.WithString("version_message", basemcp.Description("Note recorded beside the new version in page history (update).")),
 		basemcp.WithBoolean("minor_edit", basemcp.Description("Record the new version as a minor edit, which does not notify watchers (update).")),
-	), dispatch("conf_edit", editActions))
+	), dispatch(deps, "conf_edit", editActions))
 }
 
 type confEditRequest struct {

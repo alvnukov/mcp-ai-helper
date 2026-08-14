@@ -143,7 +143,7 @@ func registerCommandTools(srv *server.MCPServer, deps *Server) {
 		basemcp.WithNumber("context_before", basemcp.Description("Lines of context before each match (get/filter).")),
 		basemcp.WithNumber("context_after", basemcp.Description("Lines of context after each match (get/filter).")),
 		basemcp.WithObject("filter", basemcp.Description("Structured filter object (run action).")),
-	), dispatch("command", commandActions))
+	), dispatch(deps, "command", commandActions))
 }
 
 func commandActionRun(ctx context.Context, req basemcp.CallToolRequest, deps *Server) (*basemcp.CallToolResult, error) {

@@ -77,7 +77,7 @@ func testActions() actions {
 }
 
 func TestDispatchRoutesToTheNamedAction(t *testing.T) {
-	got := resultText(t, callWithAction(t, dispatch("file", testActions()), map[string]any{"action": "write"}))
+	got := resultText(t, callWithAction(t, dispatch(nil, "file", testActions()), map[string]any{"action": "write"}))
 	if got != "write ran" {
 		t.Errorf("got %q, want the write handler to run", got)
 	}
@@ -86,7 +86,7 @@ func TestDispatchRoutesToTheNamedAction(t *testing.T) {
 // A model that guesses an action wrong can only recover if the refusal says what
 // would have worked, so that is part of the contract rather than a nicety.
 func TestAnUnknownActionIsAnsweredWithTheOnesThatExist(t *testing.T) {
-	result := callWithAction(t, dispatch("file", testActions()), map[string]any{"action": "delete"})
+	result := callWithAction(t, dispatch(nil, "file", testActions()), map[string]any{"action": "delete"})
 	if !result.IsError {
 		t.Fatal("an unknown action must be an error")
 	}
@@ -105,7 +105,7 @@ func TestAMissingActionSaysSoRatherThanReportingAnEmptyOne(t *testing.T) {
 		"wrong type": map[string]any{"action": 7},
 		"no map":     nil,
 	} {
-		result := callWithAction(t, dispatch("task", testActions()), arguments)
+		result := callWithAction(t, dispatch(nil, "task", testActions()), arguments)
 		if !result.IsError {
 			t.Errorf("%s action: expected an error", name)
 			continue

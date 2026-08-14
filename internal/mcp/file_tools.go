@@ -7,7 +7,7 @@ import (
 	"github.com/alvnukov/mcp-ai-helper/internal/fileops"
 )
 
-func registerFileTools(srv *server.MCPServer) {
+func registerFileTools(srv *server.MCPServer, deps *Server) {
 	fileActions := actions{
 		"read":      ignoringContext(fileActionRead),
 		"read_many": ignoringContext(fileActionReadMany),
@@ -26,7 +26,7 @@ func registerFileTools(srv *server.MCPServer) {
 		basemcp.WithNumber("offset", basemcp.Description("1-based line number to start reading from (read action).")),
 		basemcp.WithNumber("limit", basemcp.Description("Maximum lines to return (read action).")),
 		basemcp.WithNumber("max_matches", basemcp.Description("Maximum total matches (search action). Defaults to 100.")),
-	), dispatch("file", fileActions))
+	), dispatch(deps, "file", fileActions))
 
 	editActions := actions{
 		"replace": ignoringContext(editActionReplace),
@@ -46,7 +46,7 @@ func registerFileTools(srv *server.MCPServer) {
 		basemcp.WithString("content", basemcp.Description("File content as string (write action). Omit when using content_b64.")),
 		basemcp.WithString("content_b64", basemcp.Description("Base64-encoded content (write action). Use instead of content for safe transport.")),
 		basemcp.WithNumber("mode", basemcp.Description("File permission mode (write action, default 0644).")),
-	), dispatch("edit", editActions))
+	), dispatch(deps, "edit", editActions))
 }
 
 func fileActionRead(req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {

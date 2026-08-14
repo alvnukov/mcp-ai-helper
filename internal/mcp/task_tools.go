@@ -42,7 +42,7 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 		basemcp.WithBoolean("close_missing", basemcp.Description("Batch: close active tasks omitted from the batch.")),
 		basemcp.WithString("missing_status", basemcp.Description("Batch: status for omitted tasks.")),
 		basemcp.WithArray("active_statuses", basemcp.Description("Batch: statuses considered active for close_missing.")),
-	), dispatch("task", taskActions))
+	), dispatch(deps, "task", taskActions))
 }
 
 func taskActionCurrent(ctx context.Context, req basemcp.CallToolRequest, deps *Server) (*basemcp.CallToolResult, error) {
