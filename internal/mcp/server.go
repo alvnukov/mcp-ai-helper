@@ -225,9 +225,11 @@ func New(cfg *config.Config) *server.MCPServer {
 	registerFileTools(srv)
 	registerGitTools(srv, deps)
 
-	if cfg.LayerEnabled("models") {
+	if cfg.LayerEnabled("guidance") {
 		registerGuidance(srv, deps)
+	}
 
+	if cfg.LayerEnabled("models") {
 		reloadConfig := func(path string) (*config.Config, error) {
 			if strings.TrimSpace(path) == "" {
 				deps.mu.RLock()
@@ -257,18 +259,28 @@ func New(cfg *config.Config) *server.MCPServer {
 			registerFeatureTools(srv, deps)
 		}
 		registerModelTools(srv, deps)
+	}
+
+	if cfg.LayerEnabled("commands") {
 		registerCommandTools(srv, deps)
+	}
+
+	if cfg.LayerEnabled("workflows") {
 		if cfg.LayerEnabled("lake") {
 			registerLakeTools(srv, deps)
 		}
 		registerPipelineTools(srv, deps)
-		if cfg.LayerEnabled("web") {
-			registerWebTools(srv, deps)
-		}
+	}
 
-		if cfg.LayerEnabled("issues") {
-			registerIssueTools(srv, deps)
-		}
+	if cfg.LayerEnabled("web") {
+		registerWebTools(srv, deps)
+	}
+
+	if cfg.LayerEnabled("issues") {
+		registerIssueTools(srv, deps)
+	}
+
+	if cfg.LayerEnabled("tasks") {
 		registerTaskTools(srv, deps)
 		if cfg.LayerEnabled("task_advanced") {
 			registerTaskAdvancedTools(srv, deps)
