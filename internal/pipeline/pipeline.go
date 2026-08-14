@@ -679,10 +679,21 @@ func isWorkflowFileEdit(s *WorkflowStep) bool {
 func stepFilePath(s *WorkflowStep) string {
 	if isWorkflowFileEdit(s) {
 		if p, ok := s.Args["path"].(string); ok {
-			return p
+			return normalizeStepPath(p)
 		}
 	}
 	return ""
+}
+
+// normalizeStepPath keys same-file serialization, locking, and the hash
+// chain on the cleaned path, so "a.go" and "./a.go" are one file rather
+// than two concurrent writers.
+func normalizeStepPath(p string) string {
+	trimmed := strings.TrimSpace(p)
+	if trimmed == "" {
+		return ""
+	}
+	return filepath.ToSlash(filepath.Clean(trimmed))
 }
 
 func stepFilePaths(s *WorkflowStep) []string {
@@ -810,8 +821,9 @@ func (r *Runner) executeWorkflowStep(ctx context.Context, repoPath string, step 
 		if err := bindStepArgs(step.Args, &args); err != nil {
 			return WorkflowStepResult{}, err
 		}
+		path := normalizeStepPath(args.Path)
 		writeReq := args.writeRequest(repoPath)
-		if currentHash, ok := files.hash(args.Path); ok {
+		if currentHash, ok := files.hash(path); ok {
 			writeReq.ExpectedHash = currentHash
 		}
 		writeResult, err := fileops.WriteFile(writeReq)
@@ -822,7 +834,7 @@ func (r *Runner) executeWorkflowStep(ctx context.Context, repoPath string, step 
 		base.Reason = writeResult.Reason
 		base.Output = writeResult
 		if writeResult.Changed {
-			files.recordEdit(args.Path, writeResult.NewHash)
+			files.recordEdit(path, writeResult.NewHash)
 		}
 		return base, nil
 	case "guarded_replace":
@@ -830,8 +842,9 @@ func (r *Runner) executeWorkflowStep(ctx context.Context, repoPath string, step 
 		if err := bindStepArgs(step.Args, &args); err != nil {
 			return WorkflowStepResult{}, err
 		}
+		path := normalizeStepPath(args.Path)
 		replaceReq := args.replaceRequest(repoPath)
-		if currentHash, ok := files.hash(args.Path); ok {
+		if currentHash, ok := files.hash(path); ok {
 			replaceReq.ExpectedHash = currentHash
 		}
 		if replaceReq.ExpectedHash == "" {
@@ -854,7 +867,7 @@ func (r *Runner) executeWorkflowStep(ctx context.Context, repoPath string, step 
 		base.Reason = editResult.Reason
 		base.Output = editResult
 		if editResult.Changed {
-			files.recordEdit(args.Path, editResult.NewHash)
+			files.recordEdit(path, editResult.NewHash)
 		}
 		return base, nil
 	case "command":
@@ -1001,12 +1014,27 @@ func (r *Runner) transitionTasks(ctx context.Context, repoPath string, req Workf
 	for _, task := range current {
 		mutation, err := r.setTaskStatus(ctx, tasks.StatusRequest{RepoPath: repoPath, ID: task.ID, Status: to})
 		if err != nil {
-			return taskTransitionMutation{}, err
+			if rollbackErr := r.rollbackTaskTransitions(ctx, repoPath, current[:len(result.Tasks)]); rollbackErr != nil {
+				return taskTransitionMutation{}, fmt.Errorf("transition failed: %v; rollback also failed: %w", err, rollbackErr)
+			}
+			return taskTransitionMutation{}, fmt.Errorf("transition failed and was rolled back: %w", err)
 		}
 		result.Tasks = append(result.Tasks, mutation.Task)
 		result.ChangedFiles = mergeChangedFiles(result.ChangedFiles, mutation.ChangedFiles)
 	}
 	return result, nil
+}
+
+// rollbackTaskTransitions restores tasks a partially failed transition
+// already moved, so a retry passes the From guard again.
+func (r *Runner) rollbackTaskTransitions(ctx context.Context, repoPath string, applied []tasks.Task) error {
+	var problems []error
+	for i := len(applied) - 1; i >= 0; i-- {
+		if _, err := r.setTaskStatus(ctx, tasks.StatusRequest{RepoPath: repoPath, ID: applied[i].ID, Status: applied[i].Status}); err != nil {
+			problems = append(problems, fmt.Errorf("restore %s to %s: %w", applied[i].ID, applied[i].Status, err))
+		}
+	}
+	return errors.Join(problems...)
 }
 
 func (r *Runner) validateTaskGraph(ctx context.Context, repoPath string) error {
