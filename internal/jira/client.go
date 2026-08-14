@@ -15,6 +15,7 @@ import (
 	gojira "github.com/andygrunwald/go-jira"
 
 	"github.com/alvnukov/mcp-ai-helper/internal/config"
+	"github.com/alvnukov/mcp-ai-helper/internal/httpx"
 )
 
 // Client wraps the go-jira client with our domain methods.
@@ -51,6 +52,7 @@ func NewClient(cfg config.JiraConfig) (*Client, error) {
 	if httpClient.Timeout == 0 {
 		httpClient.Timeout = defaultHTTPTimeout
 	}
+	httpClient.Transport = httpx.NewTransport(httpClient.Transport)
 	jc, err := gojira.NewClient(httpClient, cfg.URL)
 	if err != nil {
 		return nil, fmt.Errorf("jira: connect to %s: %w", cfg.URL, err)

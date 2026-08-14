@@ -12,6 +12,7 @@ import (
 	goconfluence "github.com/virtomize/confluence-go-api"
 
 	"github.com/alvnukov/mcp-ai-helper/internal/fileops"
+	"github.com/alvnukov/mcp-ai-helper/internal/httpx"
 )
 
 // Config holds Confluence connection settings (package-local, converted from config.ConfluenceConfig).
@@ -65,7 +66,7 @@ func (c *Client) apiWithContext(ctx context.Context) *goconfluence.API {
 	if baseTransport == nil {
 		baseTransport = http.DefaultTransport
 	}
-	clientCopy.Transport = contextRoundTripper{ctx: ctx, base: baseTransport}
+	clientCopy.Transport = contextRoundTripper{ctx: ctx, base: httpx.NewTransport(baseTransport)}
 	api.Client = &clientCopy
 	return &api
 }
