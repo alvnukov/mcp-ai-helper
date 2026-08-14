@@ -32,6 +32,8 @@ func NewTransport(base http.RoundTripper) *Transport {
 	return &Transport{Base: base, MaxAttempts: 3, MaxBackoff: 30 * time.Second}
 }
 
+// RoundTrip sends the request through Base and retries the refusals the
+// shared policy covers, up to MaxAttempts.
 func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	base := t.Base
 	if base == nil {

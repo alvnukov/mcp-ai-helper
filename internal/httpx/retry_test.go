@@ -62,6 +62,11 @@ func TestTransportRetriesRateLimitOnAnyMethod(t *testing.T) {
 		t.Fatal(err)
 	}
 	resp, err := transport.RoundTrip(req)
+	defer func() {
+		if resp != nil {
+			_ = resp.Body.Close()
+		}
+	}()
 	if err != nil {
 		t.Fatalf("429 then 200 must succeed: %v", err)
 	}
@@ -80,7 +85,12 @@ func TestTransportGivesUpWithNamedStatus(t *testing.T) {
 	stub := &recordingTransport{statuses: []int{http.StatusTooManyRequests}}
 	transport := &Transport{Base: stub, MaxAttempts: 2, Backoff: zeroBackoff}
 	req, _ := newTestRequest(http.MethodGet, "https://api.example.com/x", "")
-	_, err := transport.RoundTrip(req)
+	resp, err := transport.RoundTrip(req)
+	defer func() {
+		if resp != nil {
+			_ = resp.Body.Close()
+		}
+	}()
 	if err == nil || !strings.Contains(err.Error(), "2 attempt") || !strings.Contains(err.Error(), "429") {
 		t.Fatalf("err = %v, want attempts and status named", err)
 	}
@@ -94,6 +104,11 @@ func TestTransportRetriesServerErrorsOnlyForIdempotentMethods(t *testing.T) {
 	transport := &Transport{Base: post, MaxAttempts: 3, Backoff: zeroBackoff}
 	req, _ := newTestRequest(http.MethodPost, "https://api.example.com/x", "")
 	resp, err := transport.RoundTrip(req)
+	defer func() {
+		if resp != nil {
+			_ = resp.Body.Close()
+		}
+	}()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,6 +120,11 @@ func TestTransportRetriesServerErrorsOnlyForIdempotentMethods(t *testing.T) {
 	transport = &Transport{Base: get, MaxAttempts: 3, Backoff: zeroBackoff}
 	req, _ = newTestRequest(http.MethodGet, "https://api.example.com/x", "")
 	resp, err = transport.RoundTrip(req)
+	defer func() {
+		if resp != nil {
+			_ = resp.Body.Close()
+		}
+	}()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,6 +141,11 @@ func TestTransportDoesNotRetryUnreplayableBody(t *testing.T) {
 		t.Fatal(err)
 	}
 	resp, err := transport.RoundTrip(req)
+	defer func() {
+		if resp != nil {
+			_ = resp.Body.Close()
+		}
+	}()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,8 +178,16 @@ func TestTransportCapsBackoff(t *testing.T) {
 	req, _ := newTestRequest(http.MethodGet, "https://api.example.com/x", "")
 	start := time.Now()
 	resp, err := transport.RoundTrip(req)
-	if err != nil || resp.StatusCode != http.StatusOK {
-		t.Fatalf("err = %v, status = %d", err, resp.StatusCode)
+	defer func() {
+		if resp != nil {
+			_ = resp.Body.Close()
+		}
+	}()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
 	if waited := time.Since(start); waited > time.Second {
 		t.Fatalf("MaxBackoff ignored: waited %v", waited)
@@ -170,7 +203,13 @@ func TestTransportCancelsWaitWithContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	cancel()
-	if _, err := transport.RoundTrip(req); err == nil {
+	resp, err := transport.RoundTrip(req)
+	defer func() {
+		if resp != nil {
+			_ = resp.Body.Close()
+		}
+	}()
+	if err == nil {
 		t.Fatal("canceled context must end the wait")
 	}
 }

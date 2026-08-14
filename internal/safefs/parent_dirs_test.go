@@ -28,7 +28,7 @@ func TestWritesCreateMissingParents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 
 	for _, write := range parentDirWriters() {
 		t.Run(write.name, func(t *testing.T) {
@@ -53,7 +53,7 @@ func TestWritesRefuseParentSymlinkEscape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 
 	if err := os.Symlink(outside, filepath.Join(base, "link")); err != nil {
 		t.Fatal(err)
