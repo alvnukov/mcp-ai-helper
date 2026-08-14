@@ -19,6 +19,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/alvnukov/mcp-ai-helper/internal/config"
 	"github.com/alvnukov/mcp-ai-helper/internal/evidence"
@@ -790,7 +791,7 @@ func (b *limitBuffer) Write(p []byte) (int, error) {
 	b.truncated = true
 	remaining := b.maxBytes - b.buf.Len()
 	if remaining > 0 {
-		_, _ = b.buf.Write(p[:remaining])
+		_, _ = b.buf.Write(p[:runeSafeCut(p, remaining)])
 	}
 	return len(p), nil
 }
@@ -801,6 +802,32 @@ func (b *limitBuffer) String() string {
 
 func (b *limitBuffer) Truncated() bool {
 	return b.truncated
+}
+
+// runeSafeCut returns the largest cut <= max that does not split a UTF-8
+// rune at the end of b.
+func runeSafeCut(b []byte, max int) int {
+	cut := max
+	for cut > 0 && cut < len(b) && !utf8.RuneStart(b[cut]) {
+		cut--
+	}
+	return cut
+}
+
+// TruncateUTF8 cuts s to at most max bytes without splitting a UTF-8 rune,
+// so a truncated tail survives JSON encoding as text instead of U+FFFD.
+func TruncateUTF8(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	if len(s) <= max {
+		return s
+	}
+	cut := max
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
 }
 
 var secretPatterns = []*regexp.Regexp{

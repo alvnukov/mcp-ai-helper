@@ -1550,7 +1550,7 @@ func composeHandoff(status string, result command.Result, summary evidence.Summa
 	}
 	out := b.String()
 	if maxChars > 0 && len(out) > maxChars {
-		return out[:maxChars] + "\n[truncated]"
+		return command.TruncateUTF8(out, maxChars) + "\n[truncated]"
 	}
 	return out
 }
