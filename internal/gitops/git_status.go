@@ -108,7 +108,11 @@ func Status(ctx context.Context, req StatusRequest) (StatusResult, error) {
 		case 'u':
 			parts := strings.Fields(line)
 			if len(parts) >= 11 {
-				result.Modified = append(result.Modified, FileStatus{Path: parts[10], XY: parts[1], Status: "conflict"})
+				path := strings.Join(parts[10:], " ")
+				if tabIdx := strings.IndexByte(line, '\t'); tabIdx >= 0 {
+					path = line[tabIdx+1:]
+				}
+				result.Modified = append(result.Modified, FileStatus{Path: path, XY: parts[1], Status: "conflict"})
 				result.IsClean = false
 			}
 		}

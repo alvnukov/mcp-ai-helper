@@ -48,7 +48,7 @@ func Log(ctx context.Context, req LogRequest) (LogResult, error) {
 		return LogResult{}, err
 	}
 
-	args := []string{"log", "--format=%H|%h|%an|%ai|%s", "--no-color"}
+	args := []string{"log", "--format=%H%x1f%h%x1f%an%x1f%ai%x1f%s", "--no-color"}
 	if req.Limit > 0 {
 		args = append(args, fmt.Sprintf("-%d", req.Limit))
 	} else {
@@ -77,7 +77,7 @@ func Log(ctx context.Context, req LogRequest) (LogResult, error) {
 
 	result := LogResult{}
 	for _, line := range splitLines(raw) {
-		parts := strings.SplitN(line, "|", 5)
+		parts := strings.SplitN(line, "\x1f", 5)
 		if len(parts) < 5 {
 			continue
 		}
