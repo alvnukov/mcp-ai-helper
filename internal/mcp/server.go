@@ -30,20 +30,21 @@ type Server struct {
 	taskBackend         taskBackend
 	secretMask          *security.Mask
 	jiraClient          *jira.Client
+	jiraClientErr       error
 	confluenceClient    *confluence.Client
 	confluenceClientErr error
 	taskUI              *taskUIServer
 }
 
-func buildJiraClient(cfg *config.Config) *jira.Client {
+func buildJiraClient(cfg *config.Config) (*jira.Client, error) {
 	if cfg.Integrations.Jira == nil || !cfg.Integrations.Jira.IsEnabled() {
-		return nil
+		return nil, nil
 	}
 	jc, err := jira.NewClient(*cfg.Integrations.Jira)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	return jc
+	return jc, nil
 }
 
 func buildConfluenceClient(cfg *config.Config) (*confluence.Client, error) {
@@ -78,7 +79,10 @@ func (s *Server) getJiraClient() (*jira.Client, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.jiraClient == nil {
-		return nil, fmt.Errorf("jira: not configured or connection failed")
+		if s.jiraClientErr != nil {
+			return nil, s.jiraClientErr
+		}
+		return nil, fmt.Errorf("jira: not configured")
 	}
 	return s.jiraClient, nil
 }
@@ -190,7 +194,8 @@ func New(cfg *config.Config) *server.MCPServer {
 		server.WithPromptCapabilities(false),
 	)
 
-	deps := &Server{cfg: cfg, secretMask: buildSecretMask(cfg), jiraClient: buildJiraClient(cfg)}
+	deps := &Server{cfg: cfg, secretMask: buildSecretMask(cfg)}
+	deps.jiraClient, deps.jiraClientErr = buildJiraClient(cfg)
 	// The confluence client belongs to process start, not just to reload:
 	// the conf_* tools are registered from this same config, and without a
 	// client here they answer "not configured" until a reload builds one.
@@ -223,7 +228,7 @@ func New(cfg *config.Config) *server.MCPServer {
 			deps.taskStore = store
 			deps.taskBackend = backend
 			deps.secretMask = buildSecretMask(next)
-			deps.jiraClient = buildJiraClient(next)
+			deps.jiraClient, deps.jiraClientErr = buildJiraClient(next)
 			deps.confluenceClient, deps.confluenceClientErr = buildConfluenceClient(next)
 			deps.mu.Unlock()
 			return next, nil
