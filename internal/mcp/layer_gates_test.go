@@ -58,3 +58,29 @@ func TestLayerGatesMatchDocumentedSurface(t *testing.T) {
 		}
 	})
 }
+
+// Config tools follow the integrations too: with models off but Jira or
+// Confluence on, a reload is the only way to fix their credentials
+// mid-session, so hiding config_reload behind the models layer alone left
+// those tools unreachable.
+func TestConfigToolsFollowIntegrations(t *testing.T) {
+	off := false
+	cfg := &config.Config{}
+	cfg.Layers.Models = config.LayerConfig{Enabled: &off}
+	if _, ok := New(cfg).ListTools()["config_read"]; ok {
+		t.Fatal("config tools registered with models off and no integrations")
+	}
+
+	cfg = &config.Config{}
+	cfg.Layers.Models = config.LayerConfig{Enabled: &off}
+	cfg.Integrations.Jira = &config.JiraConfig{}
+	srv := New(cfg)
+	for _, tool := range []string{"config_read", "config_reload", "jira_search"} {
+		if _, ok := srv.ListTools()[tool]; !ok {
+			t.Errorf("%s missing with models=false and jira enabled", tool)
+		}
+	}
+	if _, ok := srv.ListTools()["list_models"]; ok {
+		t.Error("list_models registered despite layers.models=false")
+	}
+}

@@ -261,7 +261,13 @@ func New(cfg *config.Config) *server.MCPServer {
 		registerGuidance(srv, deps)
 	}
 
-	if cfg.LayerEnabled("models") {
+	// Config tools follow their consumers. The models layer is one; the
+	// integrations are the other, because with models off and Jira or
+	// Confluence on, a config reload is the only way to fix their
+	// credentials mid-session. Confluence is checked directly because
+	// LayerEnabled has no case for it and defaults to true.
+	confluenceOn := cfg.Integrations.Confluence != nil && cfg.Integrations.Confluence.IsEnabled()
+	if cfg.LayerEnabled("models") || cfg.LayerEnabled("jira") || confluenceOn {
 		reloadConfig := func(path string) (*config.Config, error) {
 			if strings.TrimSpace(path) == "" {
 				deps.mu.RLock()
@@ -287,6 +293,9 @@ func New(cfg *config.Config) *server.MCPServer {
 			return next, nil
 		}
 		registerConfigTools(srv, deps, reloadConfig)
+	}
+
+	if cfg.LayerEnabled("models") {
 		if cfg.LayerEnabled("config_advanced") {
 			registerFeatureTools(srv, deps)
 		}
