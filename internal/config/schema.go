@@ -95,6 +95,7 @@ func Schema() map[string]any {
 			{Path: "features.overrides.<id>.enabled", Type: "bool", Description: "Feature override value. Global overrides live in helper-owned feature state; repo-local overrides live in .mcp-ai-helper.yaml and take precedence over global overrides."},
 			{Path: "features.audit", Type: "[]record", Description: "Compact helper-owned audit trail for feature changes: scope, previous value/source, new value/source, timestamp, and optional reason."},
 			{Path: "permissions.tools.deny", Type: "[]string", Description: "Repo-local only (.mcp-ai-helper.yaml). MCP tool names denied for LLM in this repo. User-editable; no helper tool writes repo configs."},
+			{Path: "task_registry.backend", Type: "string", Default: "lean", Description: "Task registry backend selection. Empty or lean keeps the Lean/Lake registry; obsidian switches to markdown files under task_registry.obsidian.path. Any other value fails at startup.", Examples: []string{"lean", "obsidian"}},
 			{Path: "task_registry.obsidian.path", Type: "string", Description: "Obsidian task registry directory. In repo-local config this should be repo-relative; runtime resolves it against repo_path without exposing the absolute path in config_read."},
 			{Path: "repo_config", Type: "file", Default: ".mcp-ai-helper.yaml (optional)", Description: "Per-repository config merged on top of global config. Feature tools may create/update only the features section and ensure this file is gitignored; no helper tool writes the rest of a repo config."},
 		},
