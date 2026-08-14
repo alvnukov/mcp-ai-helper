@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	goconfluence "github.com/virtomize/confluence-go-api"
 
@@ -46,6 +47,10 @@ func (rt contextRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 	return rt.base.RoundTrip(req.Clone(rt.ctx))
 }
 
+// defaultHTTPTimeout bounds every request when the caller's context has no
+// deadline of its own; a hung host must not pin a tool call.
+var defaultHTTPTimeout = 120 * time.Second
+
 func (c *Client) apiWithContext(ctx context.Context) *goconfluence.API {
 	api := *c.api
 	httpClient := c.api.Client
@@ -53,6 +58,9 @@ func (c *Client) apiWithContext(ctx context.Context) *goconfluence.API {
 		httpClient = http.DefaultClient
 	}
 	clientCopy := *httpClient
+	if clientCopy.Timeout == 0 {
+		clientCopy.Timeout = defaultHTTPTimeout
+	}
 	baseTransport := clientCopy.Transport
 	if baseTransport == nil {
 		baseTransport = http.DefaultTransport

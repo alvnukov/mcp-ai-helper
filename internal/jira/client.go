@@ -22,6 +22,10 @@ type Client struct {
 	jc *gojira.Client
 }
 
+// defaultHTTPTimeout bounds every request when the caller's context has no
+// deadline of its own; a hung host must not pin a tool call.
+var defaultHTTPTimeout = 120 * time.Second
+
 // NewClient creates a Jira client from config.
 func NewClient(cfg config.JiraConfig) (*Client, error) {
 	if cfg.URL == "" {
@@ -43,6 +47,9 @@ func NewClient(cfg config.JiraConfig) (*Client, error) {
 			Token: apiKey,
 		}
 		httpClient = tp.Client()
+	}
+	if httpClient.Timeout == 0 {
+		httpClient.Timeout = defaultHTTPTimeout
 	}
 	jc, err := gojira.NewClient(httpClient, cfg.URL)
 	if err != nil {
