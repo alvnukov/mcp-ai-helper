@@ -31,7 +31,7 @@ jobs:
             echo "release tag must be vMAJOR.MINOR.PATCH" >&2
             exit 1
           fi
-          CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o "${RUNNER_TEMP}/mcp-ai-helper" ./cmd/mcp-ai-helper
+          CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=${VERSION} -X github.com/alvnukov/mcp-ai-helper/internal/mcp.buildVersion=${VERSION}" -o "${RUNNER_TEMP}/mcp-ai-helper" ./cmd/mcp-ai-helper
           test "$("${RUNNER_TEMP}/mcp-ai-helper" --version)" = "mcp-ai-helper ${VERSION}"
       - name: Run quality gate
         run: make quality
@@ -76,7 +76,7 @@ jobs:
           STAGE="${RUNNER_TEMP}/mcp-ai-helper-${GOOS}-${GOARCH}"
           mkdir -p "${STAGE}" dist
           BINARY="${STAGE}/mcp-ai-helper${{ matrix.extension }}"
-          go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o "${BINARY}" ./cmd/mcp-ai-helper
+          go build -trimpath -ldflags="-s -w -X main.version=${VERSION} -X github.com/alvnukov/mcp-ai-helper/internal/mcp.buildVersion=${VERSION}" -o "${BINARY}" ./cmd/mcp-ai-helper
           go version -m "${BINARY}"
           if [[ "${GOOS}" == "windows" ]]; then
             (cd "${STAGE}" && zip -q "${GITHUB_WORKSPACE}/dist/${{ matrix.asset }}" "mcp-ai-helper${{ matrix.extension }}")

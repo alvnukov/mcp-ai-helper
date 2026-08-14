@@ -12,9 +12,9 @@ import (
 func registerModelTools(srv *server.MCPServer, deps *Server) {
 	srv.AddTool(basemcp.NewTool("health",
 		readsLocal,
-		basemcp.WithDescription("Return server health status."),
+		basemcp.WithDescription("Return server health status and build version."),
 	), func(_ context.Context, _ basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
-		return structured(map[string]string{"status": "ok"})
+		return structured(map[string]any{"status": "ok", "version": serverVersion()})
 	})
 
 	srv.AddTool(basemcp.NewTool("list_models",

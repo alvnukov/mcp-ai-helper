@@ -19,7 +19,7 @@ GitHub Release assets without credentials.
 1. Release from `main` after `make quality`, `make lint`, and actionlint pass.
 2. Use an annotated tag named `vMAJOR.MINOR.PATCH`.
 3. The workflow strips the leading `v` and injects that exact version into
-   `mcp-ai-helper --version`.
+   `mcp-ai-helper --version` and the MCP server handshake and `health` version.
 4. The release is complete only when the GitHub Release contains all platform
    archives plus `checksums.txt`, and `Formula/mcp-ai-helper.rb` in the tap
    references the same version and archive hashes.

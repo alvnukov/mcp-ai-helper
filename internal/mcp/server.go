@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime/debug"
 	"strings"
 	"sync"
 
@@ -203,11 +204,34 @@ func (s *Server) pipelineRunnerForRepo(repoPath string, toolName string) (*pipel
 	return pipeline.NewRunnerWithTaskBackend(merged, chat, workflowTaskBackend{backend: backend}), nil
 }
 
+// buildVersion is set from an immutable release tag through -ldflags.
+var buildVersion string
+
+// serverVersion reports the version the running binary was built as: the
+// release tag when ldflags set it, the VCS revision build info carries for a
+// plain go build, and "dev" when neither is present, as under go run.
+func serverVersion() string {
+	if buildVersion != "" {
+		return buildVersion
+	}
+	if info, ok := debug.ReadBuildInfo(); ok {
+		if v := info.Main.Version; v != "" && v != "(devel)" {
+			return strings.TrimPrefix(v, "v")
+		}
+		for _, s := range info.Settings {
+			if s.Key == "vcs.revision" && len(s.Value) >= 12 {
+				return "dev-" + s.Value[:12]
+			}
+		}
+	}
+	return "dev"
+}
+
 // New constructs an MCP server with all configured helper tools.
 func New(cfg *config.Config) *server.MCPServer {
 	srv := server.NewMCPServer(
 		"mcp-ai-helper",
-		"0.1.0",
+		serverVersion(),
 		server.WithToolCapabilities(false),
 		server.WithResourceCapabilities(false, false),
 		server.WithPromptCapabilities(false),
