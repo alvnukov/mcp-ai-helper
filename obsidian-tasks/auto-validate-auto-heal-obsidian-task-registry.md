@@ -22,7 +22,7 @@ verification_plan:
     - Run focused task MCP/tool tests for changed_files/count metadata compatibility.
     - Run targeted internal/config, internal/tasks and internal/mcp Go tests.
 created_at: "2026-06-26T14:42:19.223594Z"
-updated_at: "2026-06-26T16:13:51.12989Z"
+updated_at: "2026-06-26T16:13:51.365889Z"
 ---
 
 ## Body
