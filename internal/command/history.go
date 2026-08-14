@@ -2,10 +2,12 @@ package command
 
 import (
 	"bufio"
+	"bytes"
 	"compress/gzip"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -484,10 +486,11 @@ func (h *History) List(req ListRequest) (ListResult, error) {
 		sort.Slice(entries, func(i, j int) bool {
 			return entries[i].CreatedAt.After(entries[j].CreatedAt)
 		})
+		total := len(entries)
 		if len(entries) > req.Limit {
 			entries = entries[:req.Limit]
 		}
-		return ListResult{Entries: entries, Total: len(entries)}, nil
+		return ListResult{Entries: entries, Total: total}, nil
 	}
 	// Persistent history: read index entries, collapsed to one row per command
 	// so a finished command is listed once, by how it finished, instead of twice
@@ -650,18 +653,31 @@ func readEntriesFile(indexPath string) ([]indexEntry, error) {
 		_ = file.Close()
 	}()
 	var entries []indexEntry
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		var entry indexEntry
-		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
-			return nil, fmt.Errorf("decode command log index: %w", err)
+	// Put embeds the full command string in each line, so lines have no
+	// size ceiling; bufio.Reader grows past the Scanner's 64KB token limit.
+	reader := bufio.NewReader(file)
+	for {
+		line, readErr := reader.ReadBytes('\n')
+		if len(line) > 0 {
+			if idx := bytes.LastIndexByte(line, '\n'); idx >= 0 {
+				line = line[:idx]
+			}
+			if len(line) > 0 {
+				var entry indexEntry
+				if err := json.Unmarshal(line, &entry); err != nil {
+					return nil, fmt.Errorf("decode command log index: %w", err)
+				}
+				entry.IndexPath = indexPath
+				entry.File = normalizeRecordPath(indexPath, entry.File)
+				entries = append(entries, entry)
+			}
 		}
-		entry.IndexPath = indexPath
-		entry.File = normalizeRecordPath(indexPath, entry.File)
-		entries = append(entries, entry)
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("scan command log index: %w", err)
+		if readErr != nil {
+			if errors.Is(readErr, io.EOF) {
+				break
+			}
+			return nil, fmt.Errorf("scan command log index: %w", readErr)
+		}
 	}
 	return entries, nil
 }

@@ -146,6 +146,7 @@ func NewRunnerWithMask(policy config.CommandPolicy, mask *security.Mask) *Runner
 	}
 	history, err := NewHistory(HistoryPolicy{Dir: policy.LogDir, RetentionDays: policy.LogRetentionDays, MaxRecords: policy.LogMaxRecords, Compress: policy.LogCompress})
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "mcp-ai-helper: command history from %q: %v; falling back to in-memory\n", policy.LogDir, err)
 		history = NewInMemoryHistory()
 	}
 	return &Runner{policy: policy, history: history, baseMask: mask}
