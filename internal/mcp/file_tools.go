@@ -22,7 +22,7 @@ func registerFileTools(srv *server.MCPServer) {
 		basemcp.WithString("action", basemcp.Required(), actionEnum(fileActions)),
 		basemcp.WithString("path", basemcp.Description("Repo-relative file or directory path. Required for read/snapshot; optional dir for list/search (defaults to repo root).")),
 		basemcp.WithArray("paths", basemcp.Description("Repo-relative file paths to read (max 8). Required for read_many."), basemcp.WithStringItems(), basemcp.MinItems(1), basemcp.MaxItems(8)),
-		basemcp.WithString("pattern", basemcp.Description("Search pattern. Required for search.")),
+		basemcp.WithString("pattern", basemcp.Description("Search pattern, a literal substring (not a regular expression). Required for search.")),
 		basemcp.WithNumber("offset", basemcp.Description("1-based line number to start reading from (read action).")),
 		basemcp.WithNumber("limit", basemcp.Description("Maximum lines to return (read action).")),
 		basemcp.WithNumber("max_matches", basemcp.Description("Maximum total matches (search action). Defaults to 100.")),

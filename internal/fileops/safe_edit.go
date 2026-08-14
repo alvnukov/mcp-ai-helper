@@ -468,8 +468,13 @@ func searchFilesAtRoot(displayPath string, root *safefs.Root, walkRoot string, p
 			".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".pdf", ".class", ".pyc", ".pyo":
 			return nil
 		}
-		if relative == "." || isProtectedLeanPath(entryPath) {
+		if isProtectedLeanPath(entryPath) {
 			return nil
+		}
+		if relative == "." {
+			// The walk names its root "."; for a search scoped to a single
+			// file that root is the target, not something to skip.
+			relative = path.Base(entryPath)
 		}
 		data, readErr := root.ReadFile(filepath.FromSlash(entryPath))
 		if readErr != nil || len(data) > 1<<20 {
