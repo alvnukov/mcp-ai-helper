@@ -182,6 +182,10 @@ func New(cfg *config.Config) *server.MCPServer {
 	)
 
 	deps := &Server{cfg: cfg, secretMask: buildSecretMask(cfg), jiraClient: buildJiraClient(cfg)}
+	// The confluence client belongs to process start, not just to reload:
+	// the conf_* tools are registered from this same config, and without a
+	// client here they answer "not configured" until a reload builds one.
+	deps.confluenceClient, deps.confluenceClientErr = buildConfluenceClient(cfg)
 	deps.chat, deps.commands, deps.pipelines, deps.taskStore, deps.taskBackend = buildDeps(cfg)
 
 	registerLanguageTools(srv)
