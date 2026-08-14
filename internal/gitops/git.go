@@ -83,6 +83,17 @@ func PrepareTaskWorktree(ctx context.Context, req PrepareTaskWorktreeRequest) (P
 		if strings.TrimSpace(current) != branch {
 			return PrepareTaskWorktreeResult{Status: "conflict", Branch: branch, WorktreePath: worktreePath, CodePath: codePath, Reason: "worktree path is on branch " + strings.TrimSpace(current)}, nil
 		}
+		statusOut, err := runGit(ctx, codePath, "status", "--porcelain")
+		if err != nil {
+			return PrepareTaskWorktreeResult{Status: "conflict", Branch: branch, WorktreePath: worktreePath, CodePath: codePath, Reason: "worktree status cannot be verified"}, nil
+		}
+		if strings.TrimSpace(statusOut) != "" {
+			return PrepareTaskWorktreeResult{Status: "conflict", Branch: branch, WorktreePath: worktreePath, CodePath: codePath, Reason: "worktree has uncommitted changes"}, nil
+		}
+		commonDir, err := runGit(ctx, codePath, "rev-parse", "--path-format=absolute", "--git-common-dir")
+		if err != nil || strings.TrimSpace(commonDir) != filepath.Join(repo, ".git") {
+			return PrepareTaskWorktreeResult{Status: "conflict", Branch: branch, WorktreePath: worktreePath, CodePath: codePath, Reason: "worktree does not belong to this repository"}, nil
+		}
 		return PrepareTaskWorktreeResult{Status: "ok", Branch: branch, WorktreePath: worktreePath, CodePath: codePath, Created: false, Reason: "worktree already exists"}, nil
 	} else if !errors.Is(statErr, os.ErrNotExist) {
 		return PrepareTaskWorktreeResult{}, statErr
