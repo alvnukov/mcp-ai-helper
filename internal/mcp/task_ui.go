@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -221,6 +222,19 @@ func upsertRequestFromUI(req taskUpsertRequest) tasks.AddRequest {
 }
 
 func decodeTaskUIJSON(r *http.Request, target any) error {
+	// Browsers send cross-origin form posts as simple requests with no
+	// preflight, so a malicious page can drive this loopback API with a
+	// text/plain body. Writes must be JSON and, when the browser supplies
+	// an Origin, it has to match the host being addressed.
+	if contentType := r.Header.Get("Content-Type"); !strings.HasPrefix(strings.ToLower(strings.TrimSpace(contentType)), "application/json") {
+		return errors.New("content-type must be application/json")
+	}
+	if origin := strings.TrimSpace(r.Header.Get("Origin")); origin != "" {
+		parsed, err := url.Parse(origin)
+		if err != nil || parsed.Host != r.Host {
+			return fmt.Errorf("cross-origin write rejected: origin %q does not match host %q", origin, r.Host)
+		}
+	}
 	dec := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 1<<20))
 	dec.DisallowUnknownFields()
 	return dec.Decode(target)
