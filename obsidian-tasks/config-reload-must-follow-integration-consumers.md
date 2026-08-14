@@ -18,7 +18,7 @@ acceptance_criteria:
     - list_models/query_model остаются строго за слоем models
     - Расширенный layer-gates тест фиксирует обе стороны
 created_at: "2026-08-14T22:25:49.140685Z"
-updated_at: "2026-08-14T22:30:38.977826Z"
+updated_at: "2026-08-14T22:30:39.177982Z"
 ---
 
 ## Body

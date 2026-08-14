@@ -14,7 +14,7 @@ acceptance_criteria:
     - server.New не хардкодит 0.1.0, версия приходит из runtime/debug BuildInfo (fallback при go run)
     - в README/RELEASE нет противоречий
 created_at: "2026-08-14T21:18:50.512331Z"
-updated_at: "2026-08-14T22:27:50.721406Z"
+updated_at: "2026-08-14T22:27:51.003388Z"
 ---
 
 ## Body
