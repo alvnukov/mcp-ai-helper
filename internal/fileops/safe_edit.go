@@ -798,6 +798,9 @@ func DeleteExactBlock(req DeleteExactBlockRequest) (ReplaceResult, error) {
 		return ReplaceResult{Status: "conflict", Path: clean, OldHash: oldHash, Reason: "block is not unique"}, nil
 	}
 	removedAt := strings.Index(text, block)
+	if removedAt < 0 {
+		return ReplaceResult{Status: "ok", Path: clean, Changed: false, OldHash: oldHash, NewHash: oldHash, Reason: "block not found (already absent)"}, nil
+	}
 	left := text[:removedAt]
 	right := text[removedAt+len(block):]
 	// Collapse the extra newline the deletion itself can leave at the

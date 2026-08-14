@@ -805,26 +805,27 @@ func (b *limitBuffer) Truncated() bool {
 	return b.truncated
 }
 
-// runeSafeCut returns the largest cut <= max that does not split a UTF-8
-// rune at the end of b.
-func runeSafeCut(b []byte, max int) int {
-	cut := max
+// runeSafeCut returns the largest cut <= limit that does not split a
+// UTF-8 rune at the end of b.
+func runeSafeCut(b []byte, limit int) int {
+	cut := limit
 	for cut > 0 && cut < len(b) && !utf8.RuneStart(b[cut]) {
 		cut--
 	}
 	return cut
 }
 
-// TruncateUTF8 cuts s to at most max bytes without splitting a UTF-8 rune,
-// so a truncated tail survives JSON encoding as text instead of U+FFFD.
-func TruncateUTF8(s string, max int) string {
-	if max <= 0 {
+// TruncateUTF8 cuts s to at most limit bytes without splitting a UTF-8
+// rune, so a truncated tail survives JSON encoding as text instead of
+// U+FFFD.
+func TruncateUTF8(s string, limit int) string {
+	if limit <= 0 {
 		return ""
 	}
-	if len(s) <= max {
+	if len(s) <= limit {
 		return s
 	}
-	cut := max
+	cut := limit
 	for cut > 0 && !utf8.RuneStart(s[cut]) {
 		cut--
 	}

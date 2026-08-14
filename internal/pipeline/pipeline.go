@@ -1015,7 +1015,7 @@ func (r *Runner) transitionTasks(ctx context.Context, repoPath string, req Workf
 		mutation, err := r.setTaskStatus(ctx, tasks.StatusRequest{RepoPath: repoPath, ID: task.ID, Status: to})
 		if err != nil {
 			if rollbackErr := r.rollbackTaskTransitions(ctx, repoPath, current[:len(result.Tasks)]); rollbackErr != nil {
-				return taskTransitionMutation{}, fmt.Errorf("transition failed: %v; rollback also failed: %w", err, rollbackErr)
+				return taskTransitionMutation{}, fmt.Errorf("transition failed: %w; rollback also failed: %w", err, rollbackErr)
 			}
 			return taskTransitionMutation{}, fmt.Errorf("transition failed and was rolled back: %w", err)
 		}

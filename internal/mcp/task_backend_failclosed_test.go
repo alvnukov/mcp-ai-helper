@@ -21,7 +21,7 @@ func TestBuildTaskBackendFailsClosed(t *testing.T) {
 	if _, err := buildTaskBackend(&config.Config{TaskRegistry: config.TaskRegistryConfig{Backend: "obsidian"}}, nil, nil); err == nil || !strings.Contains(err.Error(), "path is required") {
 		t.Fatalf("obsidian without a path: err = %v, want a path-required error", err)
 	}
-	if _, err := buildTaskBackend(&config.Config{TaskRegistry: config.TaskRegistryConfig{Backend: "obsidain"}}, nil, nil); err == nil || !strings.Contains(err.Error(), "unsupported task_registry.backend") {
+	if _, err := buildTaskBackend(&config.Config{TaskRegistry: config.TaskRegistryConfig{Backend: "obsidain"}}, nil, nil); err == nil || !strings.Contains(err.Error(), "unsupported task_registry.backend") { //nolint:misspell // the misspelling is the point
 		t.Fatalf("typo backend: err = %v, want an unsupported-backend error", err)
 	}
 }
