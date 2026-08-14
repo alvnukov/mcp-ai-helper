@@ -79,6 +79,41 @@ type workflowTaskBackend struct {
 	backend taskBackend
 }
 
+// failingTaskBackend answers every operation with the registry-selection
+// error, so a mis-selected backend fails closed instead of silently
+// writing to Lean.
+type failingTaskBackend struct {
+	err error
+}
+
+func (f failingTaskBackend) ListCurrent(context.Context, string) ([]tasks.Task, string, error) {
+	return nil, "", f.err
+}
+
+func (f failingTaskBackend) ListAll(context.Context, string) ([]tasks.Task, string, error) {
+	return nil, "", f.err
+}
+
+func (f failingTaskBackend) Get(context.Context, string, string) (tasks.Task, string, error) {
+	return tasks.Task{}, "", f.err
+}
+
+func (f failingTaskBackend) Upsert(context.Context, tasks.AddRequest) (taskMutationResult, error) {
+	return taskMutationResult{}, f.err
+}
+
+func (f failingTaskBackend) SetStatus(context.Context, tasks.StatusRequest) (taskMutationResult, error) {
+	return taskMutationResult{}, f.err
+}
+
+func (f failingTaskBackend) BatchUpsert(context.Context, tasks.BatchUpsertRequest) (taskBatchMutationResult, error) {
+	return taskBatchMutationResult{}, f.err
+}
+
+func (f failingTaskBackend) Delete(context.Context, tasks.DeleteRequest) (taskMutationResult, error) {
+	return taskMutationResult{}, f.err
+}
+
 func (b workflowTaskBackend) Get(ctx context.Context, repoPath string, id string) (tasks.Task, error) {
 	task, _, err := b.backend.Get(ctx, repoPath, id)
 	return task, err

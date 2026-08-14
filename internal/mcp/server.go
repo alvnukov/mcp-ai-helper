@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -112,19 +113,28 @@ func (s *Server) loadTaskBackendForRepo(repoPath string) (taskBackend, error) {
 	if err != nil {
 		return nil, err
 	}
-	return buildTaskBackend(merged, cmds, store), nil
+	backend, err := buildTaskBackend(merged, cmds, store)
+	if err != nil {
+		return nil, err
+	}
+	return backend, nil
 }
 
-func buildTaskBackend(cfg *config.Config, cmds *command.Runner, store *tasks.Store) taskBackend {
+func buildTaskBackend(cfg *config.Config, cmds *command.Runner, store *tasks.Store) (taskBackend, error) {
 	switch cfg.TaskRegistry.Backend {
+	case "", "lean":
+		return newLakeTaskBackend(cmds, store), nil
 	case "obsidian":
 		path := cfg.TaskRegistry.Obsidian.ResolvedPath
 		if path == "" {
 			path = cfg.TaskRegistry.Obsidian.Path
 		}
-		return newObsidianTaskBackend(path)
+		if strings.TrimSpace(path) == "" {
+			return nil, errors.New("task_registry.obsidian.path is required")
+		}
+		return newObsidianTaskBackend(path), nil
 	default:
-		return newLakeTaskBackend(cmds, store)
+		return nil, fmt.Errorf("unsupported task_registry.backend: %s", cfg.TaskRegistry.Backend)
 	}
 }
 
@@ -139,7 +149,13 @@ func buildDeps(cfg *config.Config) (provider.ChatClient, *command.Runner, *pipel
 		projectStore, _ = project.NewStore(".mcp-ai-helper")
 	}
 	store := tasks.NewStore(projectStore)
-	backend := buildTaskBackend(cfg, cmds, store)
+	backend, err := buildTaskBackend(cfg, cmds, store)
+	if err != nil {
+		// config.Load and MergeRepoConfig already reject these values; this
+		// seam refuses to silently substitute Lean if one ever slips through.
+		fmt.Fprintf(os.Stderr, "mcp-ai-helper: task registry: %v; task tools will fail closed\n", err)
+		backend = failingTaskBackend{err: err}
+	}
 	pipes := pipeline.NewRunnerWithTaskBackend(cfg, chat, workflowTaskBackend{backend: backend})
 	return chat, cmds, pipes, store, backend
 }
@@ -180,7 +196,10 @@ func (s *Server) pipelineRunnerForRepo(repoPath string, toolName string) (*pipel
 		return nil, err
 	}
 	cmds := command.NewRunnerWithMask(merged.CommandPolicy, merged.SecretMask())
-	backend := buildTaskBackend(merged, cmds, store)
+	backend, err := buildTaskBackend(merged, cmds, store)
+	if err != nil {
+		return nil, err
+	}
 	return pipeline.NewRunnerWithTaskBackend(merged, chat, workflowTaskBackend{backend: backend}), nil
 }
 
