@@ -121,9 +121,11 @@ func CommitOwned(ctx context.Context, req CommitRequest) (CommitResult, error) {
 	if err != nil {
 		return CommitResult{}, err
 	}
-	if _, err := runGit(ctx, repo, "rev-parse", "--show-toplevel"); err != nil {
+	top, err := runGit(ctx, repo, "rev-parse", "--show-toplevel")
+	if err != nil {
 		return CommitResult{}, fmt.Errorf("not a git repo: %w", err)
 	}
+	repo = strings.TrimSpace(top)
 
 	owned, err := normalizeOwnedFiles(req.Files)
 	if err != nil {
