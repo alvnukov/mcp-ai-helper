@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/alvnukov/mcp-ai-helper/internal/config"
@@ -72,7 +73,8 @@ func NewClient(policy config.WebPolicy) *Client {
 }
 
 func httpClient(policy config.WebPolicy) *http.Client {
-	client := &http.Client{Timeout: time.Duration(policy.TimeoutSeconds) * time.Second}
+	dialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second, Control: webDialGuard(policy)}
+	client := &http.Client{Timeout: time.Duration(policy.TimeoutSeconds) * time.Second, Transport: &http.Transport{DialContext: dialer.DialContext}}
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		if len(via) >= policy.MaxRedirects {
 			return fmt.Errorf("too many redirects: max %d", policy.MaxRedirects)
@@ -80,6 +82,27 @@ func httpClient(policy config.WebPolicy) *http.Client {
 		return validateURL(req.URL, policy)
 	}
 	return client
+}
+
+// webDialGuard re-checks publicness on the address the resolver actually
+// produced: the URL policy judges hostname strings, but a DNS name can
+// rebind inward between validation and dial. allowed_hosts stays explicit
+// user trust and bypasses the check.
+func webDialGuard(policy config.WebPolicy) func(network, address string, _ syscall.RawConn) error {
+	return func(_, address string, _ syscall.RawConn) error {
+		if len(policy.AllowedHosts) > 0 {
+			return nil
+		}
+		host, _, err := net.SplitHostPort(address)
+		if err != nil {
+			return err
+		}
+		ip := net.ParseIP(host)
+		if ip == nil || !publicIP(ip) {
+			return fmt.Errorf("webfetch: resolved address %s is not a public IP", address)
+		}
+		return nil
+	}
 }
 
 func normalizePolicy(policy config.WebPolicy) config.WebPolicy {
