@@ -1,7 +1,6 @@
 package mcp
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"runtime/debug"
@@ -131,12 +130,21 @@ func buildTaskBackend(cfg *config.Config, cmds *command.Runner, store *tasks.Sto
 			path = cfg.TaskRegistry.Obsidian.Path
 		}
 		if strings.TrimSpace(path) == "" {
-			return nil, errors.New("task_registry.obsidian.path is required")
+			return nil, fmt.Errorf("task_registry.obsidian.path is required; set it in %s", configOrigin(cfg))
 		}
 		return newObsidianTaskBackend(path), nil
 	default:
-		return nil, fmt.Errorf("unsupported task_registry.backend: %s", cfg.TaskRegistry.Backend)
+		return nil, fmt.Errorf("unsupported task_registry.backend %q; supported: lean, obsidian; set task_registry.backend in %s", cfg.TaskRegistry.Backend, configOrigin(cfg))
 	}
+}
+
+// configOrigin names the file a task-registry error tells the model to fix.
+// The fail-closed backend surfaces this text through every task tool.
+func configOrigin(cfg *config.Config) string {
+	if cfg != nil && cfg.SourcePath != "" {
+		return cfg.SourcePath
+	}
+	return "the active config file"
 }
 
 func buildDeps(cfg *config.Config) (provider.ChatClient, *command.Runner, *pipeline.Runner, *tasks.Store, taskBackend) {

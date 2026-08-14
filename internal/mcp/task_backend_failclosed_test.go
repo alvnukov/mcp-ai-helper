@@ -25,3 +25,19 @@ func TestBuildTaskBackendFailsClosed(t *testing.T) {
 		t.Fatalf("typo backend: err = %v, want an unsupported-backend error", err)
 	}
 }
+
+// The fail-closed error reaches the model through every task tool; it has to
+// name where to fix the config, not only that something is wrong.
+func TestBuildTaskBackendErrorNamesTheConfig(t *testing.T) {
+	cfg := &config.Config{SourcePath: "/tmp/helper-config.yaml", TaskRegistry: config.TaskRegistryConfig{Backend: "obsidian"}}
+	_, err := buildTaskBackend(cfg, nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "/tmp/helper-config.yaml") {
+		t.Fatalf("obsidian without a path: err = %v, want the config file named", err)
+	}
+
+	cfg.TaskRegistry.Backend = "sqlite"
+	_, err = buildTaskBackend(cfg, nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "/tmp/helper-config.yaml") || !strings.Contains(err.Error(), "lean, obsidian") {
+		t.Fatalf("unsupported backend: err = %v, want the config file and supported values named", err)
+	}
+}
