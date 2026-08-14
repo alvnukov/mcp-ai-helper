@@ -113,10 +113,14 @@ func (r *Root) ReadFile(name string) ([]byte, error) {
 	return r.root.ReadFile(clean)
 }
 
-// WriteFile writes a file without allowing symlink traversal outside the root.
+// WriteFile writes a file without allowing symlink traversal outside the
+// root, creating missing parent directories beneath it.
 func (r *Root) WriteFile(name string, data []byte, perm fs.FileMode) error {
 	clean, err := cleanRelative(name, false)
 	if err != nil {
+		return err
+	}
+	if err := r.ensureParent(clean); err != nil {
 		return err
 	}
 	return r.root.WriteFile(clean, data, perm)
@@ -128,6 +132,9 @@ func (r *Root) WriteFile(name string, data []byte, perm fs.FileMode) error {
 func (r *Root) WriteFileAtomic(name string, data []byte, perm fs.FileMode) error {
 	clean, err := cleanRelative(name, false)
 	if err != nil {
+		return err
+	}
+	if err := r.ensureParent(clean); err != nil {
 		return err
 	}
 	if info, statErr := r.root.Stat(clean); statErr == nil {
@@ -218,6 +225,9 @@ func (r *Root) CreateExclusive(name string, data []byte, perm fs.FileMode) error
 	if err != nil {
 		return err
 	}
+	if err := r.ensureParent(clean); err != nil {
+		return err
+	}
 	file, err := r.root.OpenFile(clean, os.O_CREATE|os.O_EXCL|os.O_WRONLY, perm)
 	if err != nil {
 		return err
@@ -227,6 +237,25 @@ func (r *Root) CreateExclusive(name string, data []byte, perm fs.FileMode) error
 		return err
 	}
 	return file.Close()
+}
+
+// ensureParent creates the directory a write is about to land in when it
+// does not exist yet. MkdirAll beneath os.Root keeps confinement: a symlink
+// in the way that resolves outside the root is refused, not followed.
+func (r *Root) ensureParent(clean string) error {
+	dir := filepath.Dir(clean)
+	if dir == "." {
+		return nil
+	}
+	if _, err := r.root.Stat(dir); err == nil {
+		return nil
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	if err := r.root.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create parent directory %q beneath root: %w", dir, err)
+	}
+	return nil
 }
 
 // Stat returns file information without allowing traversal outside the root.
