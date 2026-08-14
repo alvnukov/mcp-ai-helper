@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -127,7 +128,7 @@ func (c *Client) SetIssueProperty(issueKey, propertyKey string, value interface{
 
 // SetIssuePropertyContext sets an entity property and propagates cancellation to Jira.
 func (c *Client) SetIssuePropertyContext(ctx context.Context, issueKey, propertyKey string, value interface{}) error {
-	path := fmt.Sprintf("rest/api/2/issue/%s/properties/%s", issueKey, propertyKey)
+	path := fmt.Sprintf("rest/api/2/issue/%s/properties/%s", url.PathEscape(issueKey), url.PathEscape(propertyKey))
 	req, err := c.jc.NewRequestWithContext(ctx, http.MethodPut, path, value)
 	if err != nil {
 		return fmt.Errorf("jira set property %s %s: %w", issueKey, propertyKey, err)
@@ -155,7 +156,7 @@ func (c *Client) GetIssueProperty(issueKey, propertyKey string, v interface{}) e
 
 // GetIssuePropertyContext reads an entity property and propagates cancellation to Jira.
 func (c *Client) GetIssuePropertyContext(ctx context.Context, issueKey, propertyKey string, v interface{}) error {
-	path := fmt.Sprintf("rest/api/2/issue/%s/properties/%s", issueKey, propertyKey)
+	path := fmt.Sprintf("rest/api/2/issue/%s/properties/%s", url.PathEscape(issueKey), url.PathEscape(propertyKey))
 	req, err := c.jc.NewRequestWithContext(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return fmt.Errorf("jira get property %s %s: %w", issueKey, propertyKey, err)
