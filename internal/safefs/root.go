@@ -120,6 +120,25 @@ func (r *Root) WriteFile(name string, data []byte, perm fs.FileMode) error {
 	return r.root.WriteFile(clean, data, perm)
 }
 
+// CreateExclusive creates a file with data only if it does not exist yet,
+// without allowing symlink traversal outside the root. It reports an error
+// wrapping os.ErrExist when the name is already taken.
+func (r *Root) CreateExclusive(name string, data []byte, perm fs.FileMode) error {
+	clean, err := cleanRelative(name, false)
+	if err != nil {
+		return err
+	}
+	file, err := r.root.OpenFile(clean, os.O_CREATE|os.O_EXCL|os.O_WRONLY, perm)
+	if err != nil {
+		return err
+	}
+	if _, err := file.Write(data); err != nil {
+		_ = file.Close()
+		return err
+	}
+	return file.Close()
+}
+
 // Stat returns file information without allowing traversal outside the root.
 func (r *Root) Stat(name string) (fs.FileInfo, error) {
 	clean, err := cleanRelative(name, true)

@@ -646,7 +646,10 @@ func CreateIfAbsent(req CreateIfAbsentRequest) (ReplaceResult, error) {
 	} else if !errors.Is(statErr, os.ErrNotExist) {
 		return ReplaceResult{}, statErr
 	}
-	if err := scoped.root.WriteFile(scoped.name, []byte(content), mode); err != nil {
+	if err := scoped.root.CreateExclusive(scoped.name, []byte(content), mode); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return ReplaceResult{Status: "already_present", Path: scoped.display, Changed: false, Reason: "file already exists"}, nil
+		}
 		return ReplaceResult{}, err
 	}
 	newHash := Hash([]byte(content))
