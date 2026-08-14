@@ -90,6 +90,11 @@ func runActionWorkflow(ctx context.Context, req basemcp.CallToolRequest, deps *S
 		args.Commit.Message = args.CommitMessage
 		args.Commit.Enabled = true
 	}
+	pipes, err := deps.pipelineRunnerForRepo(args.RepoPath, "run action=workflow")
+	if err != nil {
+		return basemcp.NewToolResultError(err.Error()), nil
+	}
+
 	if args.Preview {
 		preview := map[string]any{"preview": true, "repo_path": args.RepoPath}
 		if len(args.Steps) > 0 {
@@ -121,10 +126,6 @@ func runActionWorkflow(ctx context.Context, req basemcp.CallToolRequest, deps *S
 			preview["commit"] = map[string]any{"files": args.Commit.Files, "message": args.Commit.Message}
 		}
 		return structured(preview)
-	}
-	pipes, err := deps.pipelineRunnerForRepo(args.RepoPath, "run action=workflow")
-	if err != nil {
-		return basemcp.NewToolResultError(err.Error()), nil
 	}
 	result, err := pipes.RunWorkflow(ctx, args.WorkflowRequest)
 	if err != nil {
