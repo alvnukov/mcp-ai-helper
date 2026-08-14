@@ -283,6 +283,13 @@ func ApplyGuardedReplace(req ReplaceRequest) (ReplaceResult, error) {
 	if oldHash != req.ExpectedHash {
 		return ReplaceResult{Status: "conflict", Path: clean, OldHash: oldHash, Reason: "file hash changed after snapshot"}, nil
 	}
+	// The read tool displays LF-normalized lines, so a caller copying what
+	// it saw sends LF even for a CRLF file; match and write in the file's
+	// own line-ending style.
+	if fileUsesCRLF(data) && !strings.Contains(oldText, "\r\n") {
+		oldText = strings.ReplaceAll(oldText, "\n", "\r\n")
+		newText = strings.ReplaceAll(newText, "\n", "\r\n")
+	}
 	edit := ReplaceUniqueSpan(string(data), oldText, newText)
 	if edit.Status != "ok" {
 		return ReplaceResult{Status: edit.Status, Path: clean, OldHash: oldHash, Reason: edit.Reason}, nil
@@ -295,6 +302,13 @@ func ApplyGuardedReplace(req ReplaceRequest) (ReplaceResult, error) {
 		return ReplaceResult{}, err
 	}
 	return ReplaceResult{Status: "ok", Path: clean, Changed: true, OldHash: oldHash, NewHash: newHash}, nil
+}
+
+// fileUsesCRLF reports whether the file carries CRLF line endings; the
+// read tool normalizes them away, so edits copied from displayed lines
+// arrive LF regardless of the file's actual style.
+func fileUsesCRLF(data []byte) bool {
+	return strings.Contains(string(data), "\r\n")
 }
 
 // FileLine is one numbered line of file content.
@@ -778,9 +792,15 @@ func DeleteExactBlock(req DeleteExactBlockRequest) (ReplaceResult, error) {
 	if count > 1 {
 		return ReplaceResult{Status: "conflict", Path: clean, OldHash: oldHash, Reason: "block is not unique"}, nil
 	}
-	next := strings.Replace(text, block, "", 1)
-	// Collapse triple blank lines that may result from deletion.
-	next = strings.ReplaceAll(next, "\n\n\n", "\n\n")
+	removedAt := strings.Index(text, block)
+	left := text[:removedAt]
+	right := text[removedAt+len(block):]
+	// Collapse the extra newline the deletion itself can leave at the
+	// seam; runs elsewhere in the file are content, not debris.
+	for strings.HasSuffix(left, "\n\n") && strings.HasPrefix(right, "\n") {
+		right = strings.TrimPrefix(right, "\n")
+	}
+	next := left + right
 	newHash := Hash([]byte(next))
 	if err := scoped.root.WriteFile(scoped.name, []byte(next), 0o600); err != nil {
 		return ReplaceResult{}, err
