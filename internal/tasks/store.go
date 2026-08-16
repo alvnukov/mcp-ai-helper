@@ -154,9 +154,14 @@ func (s *Store) Get(GetRequest) (Task, error) { return Task{}, ErrLegacyTaskStor
 // Delete reports that persistence through the legacy store is disabled.
 func (s *Store) Delete(DeleteRequest) error { return ErrLegacyTaskStoreDisabled }
 
+// NormalizeID returns the canonical filesystem-safe form of a task ID.
+func NormalizeID(id string) string {
+	return cleanTaskID(id)
+}
+
 // WorktreePathForID returns the canonical repository-relative worktree path for a task ID.
 func WorktreePathForID(id string) string {
-	id = cleanTaskID(id)
+	id = NormalizeID(id)
 	if id == "" {
 		return ""
 	}

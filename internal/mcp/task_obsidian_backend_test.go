@@ -148,6 +148,64 @@ Implement the minimal backend abstraction.
 	}
 }
 
+func TestObsidianPartialUpsertPreservesOmittedFields(t *testing.T) {
+	dir := t.TempDir()
+	backend := newObsidianTaskBackend(dir)
+
+	if _, err := backend.Upsert(t.Context(), tasks.AddRequest{
+		ID: "partial-update", Title: "Original title", Status: "in_progress",
+		Priority: "critical", ModelLevel: "high", TaskType: "feature",
+		ParentID: "parent-task", Tags: []string{"tasks", "safety"},
+		Branch: "feature/partial-update", WorktreePath: ".worktrees/partial-update",
+		AcceptanceCriteria: []string{"preserve fields"},
+		VerificationPlan:   []string{"read back"},
+		Body:               "original body",
+	}); err != nil {
+		t.Fatalf("seed Upsert: %v", err)
+	}
+
+	result, err := backend.Upsert(t.Context(), tasks.AddRequest{
+		ID: "partial-update", Title: "Updated title",
+	})
+	if err != nil {
+		t.Fatalf("partial Upsert: %v", err)
+	}
+	got := result.Task
+	if got.Title != "Updated title" {
+		t.Fatalf("title = %q, want Updated title", got.Title)
+	}
+	if got.Status != "in_progress" || got.Priority != "critical" || got.ModelLevel != "high" {
+		t.Fatalf("enums were not preserved: status=%q priority=%q model_level=%q", got.Status, got.Priority, got.ModelLevel)
+	}
+	if got.TaskType != "feature" || got.ParentID != "parent-task" || got.Branch != "feature/partial-update" || got.WorktreePath != ".worktrees/partial-update" {
+		t.Fatalf("worktree fields were not preserved: %#v", got)
+	}
+	if got.Body != "original body" || len(got.Tags) != 2 || len(got.AcceptanceCriteria) != 1 || len(got.VerificationPlan) != 1 {
+		t.Fatalf("content fields were not preserved: %#v", got)
+	}
+}
+
+func TestObsidianUpsertGeneratesSafeIDFromTitle(t *testing.T) {
+	dir := t.TempDir()
+	backend := newObsidianTaskBackend(dir)
+
+	result, err := backend.Upsert(t.Context(), tasks.AddRequest{
+		Title: "Diagnostic auto-id probe",
+	})
+	if err != nil {
+		t.Fatalf("Upsert without id: %v", err)
+	}
+	if result.Task.ID != "diagnostic-auto-id-probe" {
+		t.Fatalf("generated id = %q, want diagnostic-auto-id-probe", result.Task.ID)
+	}
+	if !stringSliceContains(result.ChangedFiles, "diagnostic-auto-id-probe.md") {
+		t.Fatalf("changed files = %#v", result.ChangedFiles)
+	}
+	if _, _, err := backend.Get(t.Context(), "", result.Task.ID); err != nil {
+		t.Fatalf("Get generated task: %v", err)
+	}
+}
+
 func TestObsidianRoundTrip(t *testing.T) {
 	repo := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(repo, ".worktrees", "test-task"), 0o700); err != nil {

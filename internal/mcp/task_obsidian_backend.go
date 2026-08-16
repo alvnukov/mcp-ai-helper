@@ -196,13 +196,56 @@ func (b *obsidianTaskBackend) Upsert(_ context.Context, req tasks.AddRequest) (t
 	}
 	id := req.ID
 	if id == "" {
-		id = tasks.WorktreePathForID(req.Title)
+		id = tasks.NormalizeID(req.Title)
 	}
 	if !safeObsidianTaskID(id) {
 		return taskMutationResult{}, fmt.Errorf("task id %q is not safe for an Obsidian task filename", id)
 	}
 	now := time.Now().UTC()
 	existing, exists := b.tryRead(id)
+	taskType := req.TaskType
+	parentID := req.ParentID
+	tags := req.Tags
+	branch := req.Branch
+	worktreePath := req.WorktreePath
+	acceptanceCriteria := req.AcceptanceCriteria
+	verificationPlan := req.VerificationPlan
+	body := req.Body
+	if exists {
+		if strings.TrimSpace(req.Status) == "" {
+			status = existing.Status
+		}
+		if strings.TrimSpace(req.Priority) == "" {
+			priority = existing.Priority
+		}
+		if strings.TrimSpace(req.ModelLevel) == "" {
+			modelLevel = existing.ModelLevel
+		}
+		if strings.TrimSpace(req.TaskType) == "" {
+			taskType = existing.TaskType
+		}
+		if strings.TrimSpace(req.ParentID) == "" {
+			parentID = existing.ParentID
+		}
+		if req.Tags == nil {
+			tags = append([]string(nil), existing.Tags...)
+		}
+		if strings.TrimSpace(req.Branch) == "" {
+			branch = existing.Branch
+		}
+		if strings.TrimSpace(req.WorktreePath) == "" {
+			worktreePath = existing.WorktreePath
+		}
+		if req.AcceptanceCriteria == nil {
+			acceptanceCriteria = append([]string(nil), existing.AcceptanceCriteria...)
+		}
+		if req.VerificationPlan == nil {
+			verificationPlan = append([]string(nil), existing.VerificationPlan...)
+		}
+		if req.Body == "" {
+			body = existing.Body
+		}
+	}
 	createdAt := now
 	updatedAt := now
 	if req.PreserveTimestamps {
@@ -222,13 +265,13 @@ func (b *obsidianTaskBackend) Upsert(_ context.Context, req tasks.AddRequest) (t
 	note := taskNote{
 		ID: id, Title: req.Title, Status: status,
 		Priority: priority, ModelLevel: modelLevel,
-		TaskType: req.TaskType, ParentID: req.ParentID,
-		Tags: nonNilTags(req.Tags), Branch: req.Branch,
-		WorktreePath:       req.WorktreePath,
-		AcceptanceCriteria: yamlStringList(req.AcceptanceCriteria),
-		VerificationPlan:   yamlStringList(req.VerificationPlan),
+		TaskType: taskType, ParentID: parentID,
+		Tags: nonNilTags(tags), Branch: branch,
+		WorktreePath:       worktreePath,
+		AcceptanceCriteria: yamlStringList(acceptanceCriteria),
+		VerificationPlan:   yamlStringList(verificationPlan),
 		CreatedAt:          createdAt.Format(time.RFC3339Nano), UpdatedAt: updatedAt.Format(time.RFC3339Nano),
-		Body: req.Body,
+		Body: body,
 	}
 	if err := b.writeNote(note); err != nil {
 		return taskMutationResult{}, err

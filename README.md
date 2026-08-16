@@ -195,6 +195,8 @@ hardcoded list in a prompt goes stale, this one does not.
 
 The server is intentionally policy-first. Local tools require `repo_path` from the caller; command `cwd` and file `path` are interpreted as repo-relative where applicable. It refuses unsafe command working directories, hash-mismatched file edits, repo path escapes, and broad git staging.
 
+`task action=upsert` requires a title and accepts an optional ID. When ID is omitted, the backend derives a normalized filesystem-safe ID from the title. For an existing task, omitted optional fields preserve their stored values; an explicit empty array clears a list field. Empty scalar strings are treated as omitted, so scalar clearing needs a dedicated mutation rather than a partial upsert.
+
 On discovery, clients should read `assistant_guidance`, the `mcp-ai-helper://guidance` resource, or the `mcp-ai-helper-guidance` prompt. They publish the workflow-first operating rules from `~/.mcp-ai-helper/config.yaml`. Use `server_setup_guidance` to learn how to configure the server.
 
 When `layers.issues.enabled` is changed from false to true via `config_option_set`, runtime config is reloaded immediately, but newly visible MCP tools such as `issue_add` require MCP client rediscovery or restart if they were hidden at process startup. Keep issues enabled in dev config when feedback intake is expected.
@@ -334,27 +336,19 @@ Three fields exist to keep a caller from spending turns on work it has already d
 
 Writing repository source through a shell command — `apply_patch`, a redirect or `tee` into a source file, `sed -i` — is refused, because it bypasses the snapshot and `expected_hash` that make an edit safe to retry. Use `file action=snapshot` with `edit action=replace`, or `edit action=write` for a new file.
 
-For this repository, project task state is canonical in the Lean/Lake registry under `MCPAIHelperProject/`. The task read and mutation tools require the Lean exporter and expose `source`/`projection_source` diagnostics. Legacy `tasks/*.lean` JSON-comment files are not fallback storage and must not be treated as active state.
+Task state is scoped by the caller's `repo_path`. The helper merges the global config with that repository's `.mcp-ai-helper.yaml`, then opens the configured canonical backend. This checkout uses the Obsidian backend at `obsidian-tasks/`; another repository may select its own supported backend and path. Backend diagnostics are returned as `source`/`projection_source` metadata and must not be bypassed with direct file edits.
 
-For local development in this repository, point MCP clients at the stable wrapper instead of the raw server:
-
-```sh
-bin/mcp-ai-helper-dev --repo /path/to/mcp-ai-helper --config ~/.mcp-ai-helper/config.yaml
-```
-
-The wrapper keeps stdio alive while it rebuilds or restarts the child server through `dev_rebuild_server` and `dev_restart_server`.
-
-## Lean-backed task workflow
-
-For this repository, the canonical task state is the Lean/Lake registry in `MCPAIHelperProject/`. A new contributor should verify the task layer before changing backlog state:
+For local development, point MCP clients at the stable wrapper instead of the raw server:
 
 ```sh
-lake build
-lake exe task_registry_export --list-active
-lake exe task_registry_export --get task-042
+bin/mcp-ai-helper-dev --repo /path/to/default/repository --config ~/.mcp-ai-helper/config.yaml
 ```
 
-MCP callers should inspect work with `task action=current` and `task action=get`, update it with `task action=set_status`, `task action=upsert`, `task action=batch_upsert` or `task action=delete`, then rerun `lake build`. These tools use the Lean registry and expose `source`/`projection_source` diagnostics. Exporter or validation failures are blockers, not permission to read stale legacy task files.
+The wrapper keeps stdio alive while it rebuilds or restarts the child server through `dev_rebuild_server` and `dev_restart_server`. The startup `--repo` value is only the default working repository; every repository-scoped tool call still uses its explicit `repo_path`.
+
+## Repository-scoped task workflow
+
+Initialize a repository once with `task_registry_init` when it has no configured registry. Thereafter, MCP callers inspect work with `task action=current` and `task action=get`, and mutate it with `task action=set_status`, `task action=upsert`, `task action=batch_upsert`, or `task action=delete`. Read and mutation calls always resolve the registry from the supplied `repo_path`; missing or invalid registry configuration is a blocker, not permission to fall back to stale task files.
 
 ## Production usage
 
