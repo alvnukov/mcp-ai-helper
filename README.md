@@ -344,7 +344,7 @@ For local development, point MCP clients at the stable wrapper instead of the ra
 bin/mcp-ai-helper-dev --repo /path/to/default/repository --config ~/.mcp-ai-helper/config.yaml
 ```
 
-The wrapper keeps stdio alive while it rebuilds or restarts the child server through `dev_rebuild_server` and `dev_restart_server`. The startup `--repo` value is only the default working repository; every repository-scoped tool call still uses its explicit `repo_path`.
+The wrapper keeps stdio alive while it rebuilds or restarts the child server through `dev_rebuild_server` and `dev_restart_server`. Rebuild resolves the module's versioned SDK first, then the wrapper runtime's `GOROOT`, then inherited `PATH`, so MCP clients may launch it with a minimal environment. The startup `--repo` value is only the default working repository; every repository-scoped tool call still uses its explicit `repo_path`.
 
 ## Repository-scoped task workflow
 

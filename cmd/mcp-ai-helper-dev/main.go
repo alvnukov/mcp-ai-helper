@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -172,24 +173,31 @@ func (m *childManager) build() error {
 func resolveGoBinary(repoRoot string) string {
 	modPath := filepath.Join(repoRoot, "go.mod")
 	// #nosec G304 -- modPath is repo-relative, reading go.mod is the intended behavior
-	data, err := os.ReadFile(modPath)
-	if err != nil {
-		return "go"
-	}
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "go ") {
-			version := strings.TrimSpace(strings.TrimPrefix(line, "go "))
-			home, err := os.UserHomeDir()
-			if err == nil {
-				sdkPath := filepath.Join(home, "sdk", "go"+version, "bin", "go")
-				// #nosec G703 -- sdkPath is built from go version parsed from go.mod, not unsanitized user input
-				if _, err := os.Stat(sdkPath); err == nil {
-					return sdkPath
+	if data, err := os.ReadFile(modPath); err == nil {
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "go ") {
+				version := strings.TrimSpace(strings.TrimPrefix(line, "go "))
+				home, err := os.UserHomeDir()
+				if err == nil {
+					sdkPath := filepath.Join(home, "sdk", "go"+version, "bin", "go")
+					// #nosec G703 -- sdkPath is built from go version parsed from go.mod, not unsanitized user input
+					if info, err := os.Stat(sdkPath); err == nil && !info.IsDir() {
+						return sdkPath
+					}
 				}
+				break
 			}
-			break
 		}
+	}
+	if goRoot := runtime.GOROOT(); goRoot != "" {
+		goBinary := filepath.Join(goRoot, "bin", "go")
+		if info, err := os.Stat(goBinary); err == nil && !info.IsDir() {
+			return goBinary
+		}
+	}
+	if goBinary, err := exec.LookPath("go"); err == nil {
+		return goBinary
 	}
 	return "go"
 }
