@@ -20,7 +20,7 @@ verification_plan:
     - Run focused read-purity tests using mismatched and missing registry fixtures.
     - Run registry init/repair integration tests.
 created_at: "2026-08-01T11:19:08.034356Z"
-updated_at: "2026-08-01T11:19:08.034356Z"
+updated_at: "2026-08-16T11:30:04.408651Z"
 ---
 
 ## Body

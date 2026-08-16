@@ -20,7 +20,7 @@ verification_plan:
     - Run focused cmd/mcp-ai-helper-dev tests.
     - Run make quality and invoke dev_rebuild_server through the wrapper.
 created_at: "2026-08-16T11:19:30.535584Z"
-updated_at: "2026-08-16T11:28:30.153534Z"
+updated_at: "2026-08-16T11:28:30.720627Z"
 ---
 
 ## Body

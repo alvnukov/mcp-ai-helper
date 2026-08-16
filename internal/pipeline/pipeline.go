@@ -328,6 +328,10 @@ func (r *Runner) RunWorkflow(ctx context.Context, req WorkflowRequest) (result W
 		return WorkflowResult{}, err
 	}
 	defer func() {
+		if workflowExplicitlyTransitionedCurrentTask(result, req.CurrentTaskID) {
+			result.ChangedFiles = mergeChangedFiles(result.ChangedFiles, lifecycleChangedFiles)
+			return
+		}
 		finalStatus := taskStatusOrDefault(req.TaskOnSuccess, "done")
 		if result.Status == "running" {
 			finalStatus = taskStatusOrDefault(req.TaskOnStart, "in_progress")
@@ -1390,6 +1394,27 @@ func taskStatusOrDefault(configured string, fallback string) string {
 
 func pipelineTaskCloseoutSucceeded(result Result, err error) bool {
 	return err == nil && result.Status == "ok" && result.Command.ExitCode == 0 && result.Validation.Valid
+}
+
+func workflowExplicitlyTransitionedCurrentTask(result WorkflowResult, currentTaskID string) bool {
+	if strings.TrimSpace(currentTaskID) == "" {
+		return false
+	}
+	for _, step := range result.StepResults {
+		if step.Tool != "task_transition" || step.Status != "ok" {
+			continue
+		}
+		transitioned, ok := step.Output.([]tasks.Task)
+		if !ok {
+			continue
+		}
+		for _, task := range transitioned {
+			if task.ID == currentTaskID {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func workflowTaskCloseoutSucceeded(req WorkflowRequest, result WorkflowResult, err error) bool {

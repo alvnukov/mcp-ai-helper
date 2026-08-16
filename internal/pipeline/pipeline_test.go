@@ -15,7 +15,8 @@ import (
 )
 
 type memoryTaskBackend struct {
-	items map[string]tasks.Task
+	items         map[string]tasks.Task
+	statusUpdates []tasks.StatusRequest
 }
 
 func newMemoryTaskBackend() *memoryTaskBackend {
@@ -66,6 +67,7 @@ func (b *memoryTaskBackend) setStatus(_ context.Context, req tasks.StatusRequest
 	}
 	item.Status = req.Status
 	b.items[req.ID] = item
+	b.statusUpdates = append(b.statusUpdates, req)
 	return item, nil
 }
 
@@ -1027,6 +1029,48 @@ func TestRunPipelineBlocksTaskStatusWhenEvidenceInvalid(t *testing.T) {
 	}
 	if got.Status != "blocked" {
 		t.Fatalf("status = %q, want blocked", got.Status)
+	}
+}
+
+func TestRunWorkflowDoesNotAutoCloseCurrentTaskAfterExplicitTransition(t *testing.T) {
+	t.Parallel()
+
+	repoPath := t.TempDir()
+	runner, backend := newTaskTestRunner(testConfig(repoPath))
+	created, err := backend.Add(tasks.AddRequest{
+		RepoPath: repoPath,
+		ID:       "task-workflow-explicit-transition",
+		Title:    "workflow explicit transition",
+		Status:   "todo",
+	})
+	if err != nil {
+		t.Fatalf("add task: %v", err)
+	}
+
+	result, err := runner.RunWorkflow(t.Context(), WorkflowRequest{
+		RepoPath:      repoPath,
+		CurrentTaskID: created.ID,
+		Steps: []WorkflowStep{{
+			ID:   "done",
+			Tool: "task_transition",
+			Args: map[string]any{
+				"task_ids": []string{created.ID},
+				"from":     "in_progress",
+				"to":       "done",
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("run workflow: %v", err)
+	}
+	if result.Status != "ok" {
+		t.Fatalf("workflow status = %q, want ok", result.Status)
+	}
+	if len(backend.statusUpdates) != 2 {
+		t.Fatalf("status updates = %#v, want exactly start and explicit transition", backend.statusUpdates)
+	}
+	if backend.statusUpdates[0].Status != "in_progress" || backend.statusUpdates[1].Status != "done" {
+		t.Fatalf("status update sequence = %#v", backend.statusUpdates)
 	}
 }
 

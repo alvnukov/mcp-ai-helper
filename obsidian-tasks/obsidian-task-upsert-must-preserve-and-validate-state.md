@@ -21,7 +21,7 @@ verification_plan:
     - Run focused Obsidian upsert/read roundtrip tests.
     - Run task MCP handler contract tests.
 created_at: "2026-08-01T11:19:08.031831Z"
-updated_at: "2026-08-16T11:19:02.04238Z"
+updated_at: "2026-08-16T11:19:03.086914Z"
 ---
 
 ## Body
