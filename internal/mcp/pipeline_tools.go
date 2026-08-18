@@ -21,13 +21,13 @@ func registerPipelineTools(srv *server.MCPServer, deps *Server) {
 	}
 	srv.AddTool(basemcp.NewTool("run",
 		runsCommands,
-		basemcp.WithDescription("Run pipelines and workflows. Required: action, repo_path (except schema). Actions: pipeline (command, repo_path, cwd?, timeout_seconds?, mcp_wait_seconds?, current_task_id?, task_on_start?, task_on_success?, task_on_failure?, compact_output?, secret_handles?) — run command with evidence extraction; workflow (repo_path, steps[], owned_files?, commit_message?, mcp_wait_seconds?, current_task_id?, task_on_start?, task_on_success?, task_on_failure?, secret_handles?, preview?) — run guarded edits, checks, and optional commit; execution is detached from this call: it waits up to mcp_wait_seconds (default 10, max 25), then answers running + workflow_id while the workflow keeps going server-side; workflow_status (workflow_id, wait_seconds?) — durable status and final result of a workflow run, blocking up to wait_seconds (max 120) instead of rerunning it; schema () — return valid workflow step types and parameters."),
+		basemcp.WithDescription("Run pipelines and workflows. Required: action, repo_path (except schema). Actions: pipeline (command, repo_path, cwd?, timeout_seconds?, mcp_wait_seconds?, current_task_id?, task_on_start?, task_on_success?, task_on_failure?, compact_output?, secret_handles?) — run command with evidence extraction; workflow (repo_path, steps[], owned_files?, commit_message?, mcp_wait_seconds?, current_task_id?, task_on_start?, task_on_success?, task_on_failure?, secret_handles?, preview?) — run guarded edits, checks, and optional commit; execution is detached from this call: it waits up to mcp_wait_seconds (default and max 600), then answers running + workflow_id while the workflow keeps going server-side; workflow_status (workflow_id, wait_seconds?) — durable status and final result of a workflow run, blocking up to wait_seconds (max 600) instead of rerunning it; schema () — return valid workflow step types and parameters."),
 		basemcp.WithString("action", basemcp.Required(), actionEnum(runActions)),
 		basemcp.WithString("repo_path", basemcp.Required()),
 		basemcp.WithString("command", basemcp.Description("Shell command (pipeline action).")),
 		basemcp.WithString("cwd", basemcp.Description("Optional repo-relative working directory.")),
 		basemcp.WithNumber("timeout_seconds", basemcp.Description("Optional command timeout in seconds (pipeline action).")),
-		basemcp.WithNumber("mcp_wait_seconds", basemcp.Description("Optional MCP wait budget before returning running + command_id (pipeline) or running + workflow_id (workflow; default 10, max 25).")),
+		basemcp.WithNumber("mcp_wait_seconds", basemcp.Description("Optional MCP wait budget before returning running + command_id (pipeline) or running + workflow_id (workflow; default and max 600).")),
 		basemcp.WithString("current_task_id", basemcp.Description("Optional task id to update during execution.")),
 		basemcp.WithString("task_on_start", basemcp.Description("Optional status for current_task_id before executing; defaults to in_progress.")),
 		basemcp.WithString("task_on_success", basemcp.Description("Optional status for current_task_id after success; defaults to done.")),
@@ -35,7 +35,7 @@ func registerPipelineTools(srv *server.MCPServer, deps *Server) {
 		basemcp.WithBoolean("compact_output", basemcp.Description("Collapse successful command output (pipeline action). Defaults to true.")),
 		basemcp.WithArray("secret_handles", basemcp.Description("Optional server-config secret handles to inject as HELPER_SECRET_<HANDLE>."), basemcp.WithStringItems()),
 		basemcp.WithString("workflow_id", basemcp.Description("Workflow run id from a workflow reply (workflow_status action).")),
-		basemcp.WithNumber("wait_seconds", basemcp.Description("Optional block-until-finished budget for workflow_status, 0 to 120; defaults to an immediate snapshot.")),
+		basemcp.WithNumber("wait_seconds", basemcp.Description("Optional block-until-finished budget for workflow_status, 0 to 600; defaults to an immediate snapshot.")),
 		basemcp.WithArray("steps",
 			basemcp.Description("Workflow steps: command, guarded_replace, write_file, task_batch_upsert, task_transition, git_commit_owned, git_prepare_task_worktree."),
 			basemcp.Items(map[string]any{
@@ -171,8 +171,8 @@ func runActionWorkflowStatus(_ context.Context, req basemcp.CallToolRequest, _ *
 	if args.WaitSeconds < 0 {
 		args.WaitSeconds = 0
 	}
-	if args.WaitSeconds > 120 {
-		args.WaitSeconds = 120
+	if args.WaitSeconds > 600 {
+		args.WaitSeconds = 600
 	}
 	run, ok := pipeline.DefaultWorkflowRegistry().WaitFor(args.WorkflowID, time.Duration(args.WaitSeconds)*time.Second)
 	if !ok {

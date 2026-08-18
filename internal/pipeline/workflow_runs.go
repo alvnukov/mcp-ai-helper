@@ -27,12 +27,14 @@ type WorkflowRun struct {
 	Error      string          `json:"error,omitempty"`
 }
 
-// The wait budget must stay well under MCP client timeouts — common harnesses
-// cut a call at ~30s — so the workflow action blocks for at most 25s and
-// answers running + workflow_id past that.
+// Workflow execution is detached, so a long wait is safe: even when the client
+// cancels the call, the run keeps going and stays retrievable by workflow_id.
+// The budget therefore only bounds how long the call blocks — ten minutes by
+// default and cap; a caller on a harness that cuts calls early passes a
+// smaller mcp_wait_seconds and gets running + workflow_id back sooner.
 const (
-	defaultWorkflowWaitSeconds = 10
-	maxWorkflowWaitSeconds     = 25
+	defaultWorkflowWaitSeconds = 600
+	maxWorkflowWaitSeconds     = 600
 	workflowRegistryCapacity   = 128
 )
 

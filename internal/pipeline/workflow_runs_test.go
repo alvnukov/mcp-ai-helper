@@ -59,11 +59,11 @@ func TestWorkflowRegistryReturnsFinalResultAfterWaitBudgetExceeded(t *testing.T)
 }
 
 func TestWorkflowWaitBudgetClamp(t *testing.T) {
-	if got := WorkflowWaitBudget(0); got != 10*time.Second {
-		t.Fatalf("default budget = %s, want 10s", got)
+	if got := WorkflowWaitBudget(0); got != 10*time.Minute {
+		t.Fatalf("default budget = %s, want 10m", got)
 	}
-	if got := WorkflowWaitBudget(600); got != 25*time.Second {
-		t.Fatalf("budget cap = %s, want 25s", got)
+	if got := WorkflowWaitBudget(3600); got != 10*time.Minute {
+		t.Fatalf("budget cap = %s, want 10m", got)
 	}
 	if got := WorkflowWaitBudget(3); got != 3*time.Second {
 		t.Fatalf("budget = %s, want the requested 3s", got)
