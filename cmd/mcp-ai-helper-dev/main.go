@@ -190,7 +190,7 @@ func resolveGoBinary(repoRoot string) string {
 			}
 		}
 	}
-	if goRoot := runtime.GOROOT(); goRoot != "" {
+	if goRoot := runtime.GOROOT(); goRoot != "" { //nolint:staticcheck // SA1019: the wrapper is rebuilt in place, so its build-time GOROOT is exactly the toolchain to prefer.
 		goBinary := filepath.Join(goRoot, "bin", "go")
 		if info, err := os.Stat(goBinary); err == nil && !info.IsDir() {
 			return goBinary
