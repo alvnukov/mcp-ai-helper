@@ -100,7 +100,7 @@ func TestEveryRegisteredToolPublishesAllFourAnnotations(t *testing.T) {
 		{
 			toolHints{readOnly: false, destructive: false, idempotent: false, openWorld: true},
 			"reaches a remote system and only appends",
-			[]string{"web_fetch", "jira_worklog_add"},
+			[]string{"web_fetch", "jira_comment_add", "jira_worklog_add"},
 		},
 		{
 			toolHints{readOnly: false, destructive: true, idempotent: true, openWorld: true},

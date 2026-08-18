@@ -256,6 +256,22 @@ func (c *Client) UnassignIssueContext(ctx context.Context, key string) error {
 	return nil
 }
 
+// --- Comment operations ---
+
+// AddComment adds a comment to an issue.
+func (c *Client) AddComment(key, body string) (*gojira.Comment, error) {
+	return c.AddCommentContext(context.Background(), key, body)
+}
+
+// AddCommentContext adds a comment and propagates cancellation to Jira.
+func (c *Client) AddCommentContext(ctx context.Context, key, body string) (*gojira.Comment, error) {
+	created, resp, err := c.jc.Issue.AddCommentWithContext(ctx, key, &gojira.Comment{Body: body})
+	if err = joinJiraResponseError(err, resp); err != nil {
+		return nil, fmt.Errorf("jira add comment %s: %w", key, err)
+	}
+	return created, nil
+}
+
 // --- Worklog operations ---
 
 // GetWorklogs returns worklogs for an issue, optionally filtered by date range.

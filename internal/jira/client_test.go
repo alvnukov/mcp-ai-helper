@@ -231,6 +231,52 @@ func TestUnassignIssue(t *testing.T) {
 	}
 }
 
+// --- Comment tests ---
+
+func TestAddComment(t *testing.T) {
+	var gotMethod, gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		gotMethod, gotPath = r.Method, r.URL.Path
+		writeJiraTestResponse(t, w, []byte(`{"id":"7","body":"test comment"}`))
+	}))
+	defer srv.Close()
+
+	jc, err := newTestClient(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := &Client{jc: jc}
+
+	comment, err := c.AddComment("TEST-1", "test comment")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if comment.ID != "7" {
+		t.Fatalf("unexpected comment id: %s", comment.ID)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/rest/api/2/issue/TEST-1/comment" {
+		t.Fatalf("unexpected request: %s %s", gotMethod, gotPath)
+	}
+}
+
+func TestAddComment_Error(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "comment rejected", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	jc, err := newTestClient(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := &Client{jc: jc}
+
+	if _, err := c.AddComment("TEST-1", "test comment"); err == nil {
+		t.Fatal("expected error for failed comment creation")
+	}
+}
+
 // --- Worklog tests ---
 
 func TestGetWorklogs_DateFilter(t *testing.T) {

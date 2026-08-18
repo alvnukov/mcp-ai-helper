@@ -348,6 +348,33 @@ func registerJiraTools(srv *server.MCPServer, deps *Server) {
 		return structured(map[string]any{"status": "ok", "issue_key": args.IssueKey, "assigned": args.Username})
 	})
 
+	srv.AddTool(basemcp.NewTool("jira_comment_add",
+		addsRemote,
+		basemcp.WithDescription("Add a comment to a Jira issue."),
+		basemcp.WithString("issue_key", basemcp.Required(), basemcp.Description("Jira issue key.")),
+		basemcp.WithString("body", basemcp.Required(), basemcp.Description("Comment body text. Jira wiki markup allowed.")),
+	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
+		var args struct {
+			IssueKey string `json:"issue_key"`
+			Body     string `json:"body"`
+		}
+		if err := bind(req, &args); err != nil {
+			return nil, err
+		}
+		if !checkJiraMutate(deps, args.IssueKey) {
+			return safeError(deps, fmt.Errorf("jira: mutation not allowed")), nil
+		}
+		jc, err := getClient()
+		if err != nil {
+			return safeError(deps, err), nil
+		}
+		comment, err := jc.AddCommentContext(ctx, args.IssueKey, args.Body)
+		if err != nil {
+			return safeError(deps, err), nil
+		}
+		return structured(map[string]any{"status": "ok", "comment": comment})
+	})
+
 	// --- Worklog tools ---
 
 	srv.AddTool(basemcp.NewTool("jira_worklog_list",
