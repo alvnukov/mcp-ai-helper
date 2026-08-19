@@ -738,6 +738,11 @@ models:
   #   temperature: 0
 routing: {}
 
+task_registry:
+  backend: obsidian
+  obsidian:
+    path: obsidian-tasks
+
 command_policy:
   default_timeout_seconds: 300
   max_output_bytes: 200000
@@ -788,6 +793,10 @@ func defaultConfig() *Config {
 		Models:            map[string]ModelConfig{},
 		Routing:           map[string]string{},
 		AssistantGuidance: defaultAssistantGuidance,
+		TaskRegistry: TaskRegistryConfig{
+			Backend:  "obsidian",
+			Obsidian: ObsidianRegistryConfig{Path: "obsidian-tasks"},
+		},
 		CommandPolicy: CommandPolicy{
 			DefaultTimeoutSeconds: 300,
 			MaxOutputBytes:        200000,
@@ -942,9 +951,12 @@ func applyDefaults(cfg *Config) {
 	applyWebPolicyDefaults(&cfg.WebPolicy)
 	cfg.TaskRegistry.Backend = strings.TrimSpace(cfg.TaskRegistry.Backend)
 	if cfg.TaskRegistry.Backend == "" {
-		cfg.TaskRegistry.Backend = "lean"
+		cfg.TaskRegistry.Backend = "obsidian"
 	}
 	cfg.TaskRegistry.Obsidian.Path = strings.TrimSpace(cfg.TaskRegistry.Obsidian.Path)
+	if cfg.TaskRegistry.Backend == "obsidian" && cfg.TaskRegistry.Obsidian.Path == "" {
+		cfg.TaskRegistry.Obsidian.Path = "obsidian-tasks"
+	}
 }
 
 // Validate checks cross-references and provider/model invariants.
@@ -978,7 +990,7 @@ func (c *Config) Validate() error {
 	case "obsidian":
 		path := strings.TrimSpace(c.TaskRegistry.Obsidian.Path)
 		if path == "" {
-			return errors.New("task_registry.obsidian.path is required; configure task_registry.obsidian.path or set task_registry.backend: lean; next_call: server_setup_guidance")
+			return errors.New("task_registry.obsidian.path is required; set task_registry.obsidian.path (default: obsidian-tasks) or task_registry.backend: lean; next_call: server_setup_guidance")
 		}
 		checkPath := strings.TrimSpace(c.TaskRegistry.Obsidian.ResolvedPath)
 		if checkPath == "" {

@@ -693,7 +693,7 @@ func TestObsidianLeanSpecificFieldsNotDropped(t *testing.T) {
 }
 
 func TestTaskListResponseIncludesCountsAndRegistryMetadata(t *testing.T) {
-	backend := &obsidianTaskBackend{}
+	backend := newObsidianTaskBackend(t.TempDir()).(*obsidianTaskBackend)
 	backend.setListMetadata(taskListMetadata{
 		Validation: "obsidian registry validated: 2 task(s), 1 diagnostic(s), 1 changed file(s)",
 		Diagnostics: []taskRegistryDiagnostic{{
@@ -895,6 +895,58 @@ func TestBatchUpsertRejectsInvalidActiveStatus(t *testing.T) {
 		ActiveStatuses: []string{"todo", "banana"},
 	}); err == nil {
 		t.Fatal("BatchUpsert accepted active_statuses entry \"banana\"; expected an error naming the valid enum")
+	}
+}
+
+// A relative registry directory (the obsidian-tasks default) must resolve
+// against the repo the operation targets, never the server working directory.
+func TestObsidianBackendRelativeDirResolvesAgainstRepoPath(t *testing.T) {
+	repo := t.TempDir()
+	backend := newObsidianTaskBackend("obsidian-tasks")
+
+	listed, _, err := backend.ListCurrent(t.Context(), repo)
+	if err != nil {
+		t.Fatalf("ListCurrent: %v", err)
+	}
+	if len(listed) != 0 {
+		t.Fatalf("tasks = %d, want 0", len(listed))
+	}
+	if info, err := os.Stat(filepath.Join(repo, "obsidian-tasks")); err != nil || !info.IsDir() {
+		t.Fatalf("registry dir was not created inside repo: info=%v err=%v", info, err)
+	}
+}
+
+// First access to a missing registry must create it silently and tell the
+// model the registry was just created and is empty; later scans must not
+// repeat that claim.
+func TestObsidianBackendReportsRegistryCreationOnce(t *testing.T) {
+	repo := t.TempDir()
+	notesDir := filepath.Join(repo, "notes")
+	backend := newObsidianTaskBackend(notesDir)
+
+	listed, _, err := backend.ListCurrent(t.Context(), repo)
+	if err != nil {
+		t.Fatalf("ListCurrent: %v", err)
+	}
+	meta := backend.(*obsidianTaskBackend).ListMetadata()
+	if !meta.RegistryCreated || meta.RegistryPath != notesDir {
+		t.Fatalf("creation metadata = %+v, want created at %s", meta, notesDir)
+	}
+	response := taskListResponse(backend, listed, listed, "obsidian_registry")
+	created, ok := response["registry_created"].(bool)
+	if !ok || !created {
+		t.Fatalf("registry_created missing from list response: %+v", response)
+	}
+	note, _ := response["registry_note"].(string)
+	if !strings.Contains(note, "currently empty") {
+		t.Fatalf("registry_note = %q", note)
+	}
+
+	if _, _, err := backend.ListCurrent(t.Context(), repo); err != nil {
+		t.Fatalf("second ListCurrent: %v", err)
+	}
+	if meta := backend.(*obsidianTaskBackend).ListMetadata(); meta.RegistryCreated {
+		t.Fatal("registry_created must not repeat after the first scan")
 	}
 }
 

@@ -336,6 +336,11 @@ func taskListResponse(backend taskBackend, visible []tasks.Task, counted []tasks
 		if len(meta.ChangedFiles) > 0 {
 			out["changed_files"] = meta.ChangedFiles
 		}
+		if meta.RegistryCreated {
+			out["registry_created"] = true
+			out["registry_path"] = meta.RegistryPath
+			out["registry_note"] = "Task registry was created just now and is currently empty; add the first task with task action=upsert (title required)."
+		}
 	}
 	return out
 }

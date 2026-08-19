@@ -29,9 +29,11 @@ type taskRegistryDiagnostic struct {
 }
 
 type taskListMetadata struct {
-	Validation   string                   `json:"validation,omitempty"`
-	Diagnostics  []taskRegistryDiagnostic `json:"diagnostics,omitempty"`
-	ChangedFiles []string                 `json:"changed_files,omitempty"`
+	Validation       string                   `json:"validation,omitempty"`
+	Diagnostics      []taskRegistryDiagnostic `json:"diagnostics,omitempty"`
+	ChangedFiles     []string                 `json:"changed_files,omitempty"`
+	RegistryCreated  bool                     `json:"registry_created,omitempty"`
+	RegistryPath     string                   `json:"registry_path,omitempty"`
 }
 
 type taskListMetadataProvider interface {

@@ -52,11 +52,14 @@ func TestWebPolicyGoogleAPIKeyIsOmittedFromJSON(t *testing.T) {
 	}
 }
 
-func TestTaskRegistryBackendDefaultsToLean(t *testing.T) {
+func TestTaskRegistryBackendDefaultsToObsidian(t *testing.T) {
 	cfg := &Config{}
 	applyDefaults(cfg)
-	if cfg.TaskRegistry.Backend != "lean" {
-		t.Fatalf("backend = %q, want lean", cfg.TaskRegistry.Backend)
+	if cfg.TaskRegistry.Backend != "obsidian" {
+		t.Fatalf("backend = %q, want obsidian", cfg.TaskRegistry.Backend)
+	}
+	if cfg.TaskRegistry.Obsidian.Path != "obsidian-tasks" {
+		t.Fatalf("obsidian path = %q, want obsidian-tasks", cfg.TaskRegistry.Obsidian.Path)
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("Validate: %v", err)
@@ -75,6 +78,7 @@ func TestTaskRegistryBackendRejectsInvalidValue(t *testing.T) {
 func TestTaskRegistryBackendRequiresObsidianPathButAllowsMissingDirectory(t *testing.T) {
 	cfg := &Config{TaskRegistry: TaskRegistryConfig{Backend: "obsidian"}}
 	applyDefaults(cfg)
+	cfg.TaskRegistry.Obsidian.Path = "" // simulate an explicit empty path override
 	err := cfg.Validate()
 	if err == nil || !strings.Contains(err.Error(), "task_registry.obsidian.path is required") {
 		t.Fatalf("expected missing path error, got: %v", err)
@@ -347,11 +351,18 @@ func TestMergeRepoConfigOverlaysTaskRegistry(t *testing.T) {
 	}
 }
 
-func TestMergeRepoConfigRejectsInvalidTaskRegistry(t *testing.T) {
+func TestMergeRepoConfigDefaultsEmptyObsidianPath(t *testing.T) {
+	repo := t.TempDir()
 	repoCfg := &RepoConfig{TaskRegistry: &TaskRegistryConfig{Backend: "obsidian"}}
-	_, err := MergeRepoConfig(&Config{Providers: map[string]ProviderConfig{}, Models: map[string]ModelConfig{}, Routing: map[string]string{}}, repoCfg, t.TempDir())
-	if err == nil || !strings.Contains(err.Error(), "task_registry.obsidian.path is required") {
-		t.Fatalf("expected missing obsidian path error, got: %v", err)
+	merged, err := MergeRepoConfig(&Config{Providers: map[string]ProviderConfig{}, Models: map[string]ModelConfig{}, Routing: map[string]string{}}, repoCfg, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if merged.TaskRegistry.Obsidian.Path != "obsidian-tasks" {
+		t.Fatalf("obsidian path = %q, want obsidian-tasks default", merged.TaskRegistry.Obsidian.Path)
+	}
+	if merged.TaskRegistry.Obsidian.ResolvedPath != filepath.Join(repo, "obsidian-tasks") {
+		t.Fatalf("resolved obsidian path = %q, want %q", merged.TaskRegistry.Obsidian.ResolvedPath, filepath.Join(repo, "obsidian-tasks"))
 	}
 }
 
