@@ -521,6 +521,7 @@ func (b *obsidianTaskBackend) readAll() ([]tasks.Task, error) {
 }
 
 func (b *obsidianTaskBackend) scanNotes(autoHeal bool) (obsidianTaskScan, error) {
+	// #nosec G703 -- b.dir is the validated task_registry path from config; safefs roots bound every access under it.
 	_, statErr := os.Stat(b.dir)
 	root, err := b.ensureRoot()
 	if err != nil {
