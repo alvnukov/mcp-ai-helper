@@ -408,7 +408,6 @@ func ReadFileContentInRepo(repoPath string, filePath string) (FileContent, error
 	}, nil
 }
 
-
 // ReadFilesFileResult is a per-file result in batch reads. RelativePath is the
 // only path it carries: the batch names its repo once, and an absolute path
 // would repeat that root on every file while naming nothing the repo-scoped
@@ -511,7 +510,6 @@ func ReadFilesInRepo(repoPath string, paths []string) (ReadFilesResult, error) {
 
 	return result, nil
 }
-
 
 // Hash returns a SHA-256 hex digest for data.
 func Hash(data []byte) string {
