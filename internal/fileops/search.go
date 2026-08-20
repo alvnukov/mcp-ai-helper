@@ -1,6 +1,7 @@
 package fileops
 
 import (
+	"bytes"
 	"fmt"
 	"io/fs"
 	"path"
@@ -49,6 +50,19 @@ type SearchOptions struct {
 	// GlobExclude drops files matching any pattern, same layout as Glob
 	// (rg -g '!...').
 	GlobExclude []string
+	// NoIgnore disables the .gitignore/.ignore/.rgignore cascade (rg
+	// --no-ignore). The built-in skips — dot directories, vendor trees,
+	// binary extensions, the task registry — always apply.
+	NoIgnore bool
+	// Type and TypeNot include and exclude file types by name (rg -t/-T),
+	// e.g. "go", "py", "md". They fold into Glob and GlobExclude; an
+	// unknown name is an error, not an empty filter.
+	Type    []string
+	TypeNot []string
+	// WordMatch requires matches to sit between word boundaries (rg -w);
+	// LineRegexp requires the pattern to span the whole line (rg -x).
+	WordMatch  bool
+	LineRegexp bool
 	// ContextBefore and ContextAfter add non-matching neighbour lines around
 	// each match, marked with '-' instead of ':' as grep does. They do not
 	// count towards Total.
@@ -57,10 +71,32 @@ type SearchOptions struct {
 	// FilesOnly reports the paths of files holding at least one match instead
 	// of the matching lines (rg -l); Total then counts files.
 	FilesOnly bool
+	// CountOnly reports "path:count" per file holding matches (rg -c); Total
+	// then counts files, not lines.
+	CountOnly bool
 	// Invert matches the lines the pattern does not hit (rg -v).
 	Invert bool
+	// OnlyMatching reports each match's own text instead of its whole line
+	// (rg -o). Replace rewrites that text through the regex's capture
+	// groups (rg -r '$1'); without OnlyMatching it rewrites the matched
+	// spans inside the reported lines. Both force the regex matcher.
+	OnlyMatching bool
+	Replace      string
 	// MaxMatches caps total reported matches; 0 means 100.
 	MaxMatches int
+}
+
+// validateSearchOptions rejects combinations whose meaning would surprise:
+// inverted lines have no matched spans to extract, and two per-file summary
+// modes cannot both shape the output.
+func validateSearchOptions(opts SearchOptions) error {
+	if opts.OnlyMatching && opts.Invert {
+		return fmt.Errorf("only_matching cannot be combined with invert")
+	}
+	if opts.CountOnly && opts.FilesOnly {
+		return fmt.Errorf("count_only cannot be combined with files_only")
+	}
+	return nil
 }
 
 // searchMatcher decides whether one line matches the configured pattern.
@@ -75,7 +111,11 @@ func newSearchMatcher(opts SearchOptions) (searchMatcher, error) {
 	if !icase && opts.SmartCase && opts.Pattern == strings.ToLower(opts.Pattern) {
 		icase = true
 	}
-	if !opts.Regex {
+	// Modes that need match positions or boundaries go through the regex
+	// engine even for a literal pattern; the plain substring fast path stays
+	// for everything else.
+	forceRegex := opts.Regex || opts.WordMatch || opts.LineRegexp || opts.OnlyMatching || opts.Replace != ""
+	if !forceRegex {
 		literal := opts.Pattern
 		if icase {
 			literal = strings.ToLower(literal)
@@ -83,6 +123,15 @@ func newSearchMatcher(opts SearchOptions) (searchMatcher, error) {
 		return searchMatcher{literal: literal, fold: icase}, nil
 	}
 	expr := opts.Pattern
+	if !opts.Regex {
+		expr = regexp.QuoteMeta(expr)
+	}
+	if opts.WordMatch {
+		expr = `\b(?:` + expr + `)\b`
+	}
+	if opts.LineRegexp {
+		expr = `^(?:` + expr + `)$`
+	}
 	if icase {
 		expr = "(?i)" + expr
 	}
@@ -103,41 +152,86 @@ func (m searchMatcher) matches(line string) bool {
 	return strings.Contains(line, m.literal)
 }
 
-// globSet is a precompiled include/exclude glob list. ** crosses directory
-// separators (and a trailing **/ may match nothing, so **/*.go finds root
-// files too), * and ? do not — the rg -g layout.
+// onlyMatches returns the matched spans of one line, or the line itself for
+// a literal matcher (only_matching forces the regex path, so the literal
+// case is a defensive fallback).
+func (m searchMatcher) onlyMatches(line string, replace string) []string {
+	if m.regex == nil {
+		return []string{line}
+	}
+	locs := m.regex.FindAllStringSubmatchIndex(line, -1)
+	if locs == nil {
+		return nil
+	}
+	out := make([]string, 0, len(locs))
+	for _, loc := range locs {
+		if replace != "" {
+			out = append(out, string(m.regex.ExpandString(nil, replace, line, loc)))
+		} else {
+			out = append(out, line[loc[0]:loc[1]])
+		}
+	}
+	return out
+}
+
+// globSet is a precompiled include/exclude glob list.
 type globSet struct {
 	regexes []*regexp.Regexp
 	byBase  []bool
 }
 
+// translateGlob compiles one glob into an anchored regex body: * and ? stay
+// within a path segment, ** crosses separators (and a trailing **/ may match
+// nothing, so **/*.go finds root files too), [class] passes through, and \
+// escapes the next character — the layout rg -g and gitignore share.
+func translateGlob(pattern string) string {
+	var b strings.Builder
+	for i := 0; i < len(pattern); i++ {
+		switch c := pattern[i]; c {
+		case '*':
+			if i+1 < len(pattern) && pattern[i+1] == '*' {
+				if i+2 < len(pattern) && pattern[i+2] == '/' {
+					b.WriteString("(?:.*/)?")
+					i += 2
+				} else {
+					b.WriteString(".*")
+					i++
+				}
+			} else {
+				b.WriteString("[^/]*")
+			}
+		case '?':
+			b.WriteString("[^/]")
+		case '[':
+			end := strings.IndexByte(pattern[i+1:], ']')
+			if end < 0 {
+				b.WriteString(`\[`)
+				break
+			}
+			class := pattern[i+1 : i+1+end]
+			if strings.HasPrefix(class, "!") {
+				class = "^" + class[1:]
+			}
+			b.WriteString("[" + class + "]")
+			i += end + 1
+		case '\\':
+			if i+1 < len(pattern) {
+				i++
+				b.WriteString(regexp.QuoteMeta(string(pattern[i])))
+			} else {
+				b.WriteString(regexp.QuoteMeta(`\`))
+			}
+		default:
+			b.WriteString(regexp.QuoteMeta(string(c)))
+		}
+	}
+	return b.String()
+}
+
 func compileGlobSet(patterns []string) globSet {
 	set := globSet{}
 	for _, pattern := range patterns {
-		var b strings.Builder
-		b.WriteString("^")
-		for i := 0; i < len(pattern); i++ {
-			switch c := pattern[i]; c {
-			case '*':
-				if i+1 < len(pattern) && pattern[i+1] == '*' {
-					if i+2 < len(pattern) && pattern[i+2] == '/' {
-						b.WriteString("(?:.*/)?")
-						i += 2
-					} else {
-						b.WriteString(".*")
-						i++
-					}
-				} else {
-					b.WriteString("[^/]*")
-				}
-			case '?':
-				b.WriteString("[^/]")
-			default:
-				b.WriteString(regexp.QuoteMeta(string(c)))
-			}
-		}
-		b.WriteString("$")
-		re, err := regexp.Compile(b.String())
+		re, err := regexp.Compile("^" + translateGlob(pattern) + "$")
 		if err != nil {
 			// Unreachable — every fragment is quoted or a literal form.
 			continue
@@ -206,13 +300,32 @@ func searchFilesAtRoot(displayPath string, root *safefs.Root, walkRoot string, o
 	if opts.MaxMatches <= 0 {
 		opts.MaxMatches = 100
 	}
+	if err := validateSearchOptions(opts); err != nil {
+		return SearchResult{}, err
+	}
 	matcher, err := newSearchMatcher(opts)
 	if err != nil {
 		return SearchResult{}, err
 	}
-	includeGlobs := compileGlobSet(opts.Glob)
-	excludeGlobs := compileGlobSet(opts.GlobExclude)
+	include := opts.Glob
+	typeInclude, err := typeGlobs(opts.Type)
+	if err != nil {
+		return SearchResult{}, err
+	}
+	include = append(include, typeInclude...)
+	exclude := opts.GlobExclude
+	typeExclude, err := typeGlobs(opts.TypeNot)
+	if err != nil {
+		return SearchResult{}, err
+	}
+	exclude = append(exclude, typeExclude...)
+	includeGlobs := compileGlobSet(include)
+	excludeGlobs := compileGlobSet(exclude)
 	walkRoot = filepath.ToSlash(filepath.Clean(walkRoot))
+	var ignores ignoreStack
+	if !opts.NoIgnore && walkRoot != "." {
+		ignores = ancestorIgnoreLevels(root, walkRoot)
+	}
 	result := SearchResult{Pattern: opts.Pattern, Path: displayPath}
 	err = fs.WalkDir(root.FS(), walkRoot, func(entryPath string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -222,6 +335,9 @@ func searchFilesAtRoot(displayPath string, root *safefs.Root, walkRoot string, o
 		if entryPath == walkRoot {
 			relative = "."
 		}
+		if !opts.NoIgnore {
+			ignores.popLeftDirs(entryPath)
+		}
 		if d.IsDir() {
 			base := path.Base(entryPath)
 			if strings.HasPrefix(base, ".") && entryPath != walkRoot {
@@ -230,6 +346,19 @@ func searchFilesAtRoot(displayPath string, root *safefs.Root, walkRoot string, o
 			if base == "node_modules" || base == "__pycache__" || base == "vendor" || isTaskRegistryRelative(relative) {
 				return fs.SkipDir
 			}
+			if !opts.NoIgnore && ignores.ignores(entryPath, true) {
+				// An ignored directory is pruned whole: git allows no
+				// re-include beneath an excluded parent.
+				return fs.SkipDir
+			}
+			if !opts.NoIgnore {
+				ignores = append(ignores, loadDirIgnore(root, entryPath))
+			}
+			return nil
+		}
+		// A search naming one file searches it whatever the cascade says,
+		// the way `rg pattern file` does.
+		if !opts.NoIgnore && entryPath != walkRoot && ignores.ignores(entryPath, false) {
 			return nil
 		}
 		ext := strings.ToLower(path.Ext(entryPath))
@@ -254,6 +383,12 @@ func searchFilesAtRoot(displayPath string, root *safefs.Root, walkRoot string, o
 		}
 		data, readErr := root.ReadFile(filepath.FromSlash(entryPath))
 		if readErr != nil || len(data) > 1<<20 {
+			return nil
+		}
+		// Binary by content, not by name: one NUL byte means the file is not
+		// text worth searching, whatever the extension says. rg sniffs the
+		// same way.
+		if bytes.IndexByte(data, 0) >= 0 {
 			return nil
 		}
 		lines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
@@ -282,6 +417,28 @@ func searchFilesAtRoot(displayPath string, root *safefs.Root, walkRoot string, o
 			}
 			return nil
 		}
+		if opts.CountOnly {
+			result.Matches = append(result.Matches, fmt.Sprintf("%s:%d", relative, len(hitLines)))
+			result.Total++
+			if result.Total >= opts.MaxMatches {
+				result.Truncated = true
+				return fs.SkipAll
+			}
+			return nil
+		}
+		if opts.OnlyMatching {
+			for _, hit := range hitLines {
+				for _, text := range matcher.onlyMatches(lines[hit], opts.Replace) {
+					result.Matches = append(result.Matches, fmt.Sprintf("%s:%d:%s", relative, hit+1, text))
+					result.Total++
+					if result.Total >= opts.MaxMatches {
+						result.Truncated = true
+						return fs.SkipAll
+					}
+				}
+			}
+			return nil
+		}
 		// Context windows of consecutive hits merge into one run, as in grep,
 		// and a matching line keeps its ':' marker even when an earlier
 		// window already emitted it.
@@ -304,10 +461,14 @@ func searchFilesAtRoot(displayPath string, root *safefs.Root, walkRoot string, o
 			}
 			for i := start; i <= end; i++ {
 				sep := "-"
+				text := lines[i]
 				if hitSet[i] {
 					sep = ":"
+					if opts.Replace != "" && matcher.regex != nil {
+						text = matcher.regex.ReplaceAllString(lines[i], opts.Replace)
+					}
 				}
-				result.Matches = append(result.Matches, fmt.Sprintf("%s%s%d:%s", relative, sep, i+1, lines[i]))
+				result.Matches = append(result.Matches, fmt.Sprintf("%s%s%d:%s", relative, sep, i+1, text))
 				emitted = i
 			}
 			result.Total++

@@ -17,7 +17,7 @@ func registerFileTools(srv *server.MCPServer, deps *Server) {
 	}
 	srv.AddTool(basemcp.NewTool("file",
 		readsLocal,
-		basemcp.WithDescription("Repo file reading and inspection. Required: repo_path, action. Actions: read (path, offset?, limit?) — read single file with line numbers; read_many (paths[]) — read up to 8 files in one call; list (path?) — structured directory listing; search (path?, pattern, max_matches?, regex?, ignore_case?, smart_case?, glob?[], glob_exclude?[], context_before?, context_after?, files_only?, invert?) — rg-like text search, pattern is a literal substring by default and a regexp with regex=true (smart_case: case-insensitive while the pattern is all-lowercase; context lines use '-'; files_only returns paths); snapshot (path) — read file hash/size before guarded edits."),
+		basemcp.WithDescription("Repo file reading and inspection. Required: repo_path, action. Actions: read (path, offset?, limit?) — read single file with line numbers; read_many (paths[]) — read up to 8 files in one call; list (path?) — structured directory listing; search (path?, pattern, max_matches?, regex?, ignore_case?, smart_case?, glob?[], glob_exclude?[], type?[], type_not?[], context_before?, context_after?, files_only?, invert?, no_ignore?, word_match?, line_regexp?, count_only?, only_matching?, replace?) — rg-like text search honoring .gitignore/.ignore/.rgignore (literal substring by default, regexp with regex=true; type names like go/py fold into globs; count_only reports path:count; only_matching plus replace extracts capture groups); snapshot (path) — read file hash/size before guarded edits."),
 		basemcp.WithString("repo_path", basemcp.Required()),
 		basemcp.WithString("action", basemcp.Required(), actionEnum(fileActions)),
 		basemcp.WithString("path", basemcp.Description("Repo-relative file or directory path. Required for read/snapshot; optional dir for list/search (defaults to repo root).")),
@@ -35,6 +35,14 @@ func registerFileTools(srv *server.MCPServer, deps *Server) {
 		basemcp.WithNumber("context_after", basemcp.Description("Non-matching lines after each match, marked with '-' (search action).")),
 		basemcp.WithBoolean("files_only", basemcp.Description("Return only the paths of files with matches, like rg -l (search action).")),
 		basemcp.WithBoolean("invert", basemcp.Description("Report lines the pattern does not match, like rg -v (search action).")),
+		basemcp.WithBoolean("no_ignore", basemcp.Description("Search files the ignore cascade would drop: .gitignore/.ignore/.rgignore stop applying (search action).")),
+		basemcp.WithArray("type", basemcp.Description("Include file types by name, e.g. go, py, md; folds into glob (search action)."), basemcp.WithStringItems()),
+		basemcp.WithArray("type_not", basemcp.Description("Exclude file types by name; folds into glob_exclude (search action)."), basemcp.WithStringItems()),
+		basemcp.WithBoolean("word_match", basemcp.Description("Match only at word boundaries, like rg -w (search action).")),
+		basemcp.WithBoolean("line_regexp", basemcp.Description("Match whole lines only, like rg -x (search action).")),
+		basemcp.WithBoolean("count_only", basemcp.Description("Per-file match counts as path:count, like rg -c (search action).")),
+		basemcp.WithBoolean("only_matching", basemcp.Description("Report each match's own text, not its whole line, like rg -o (search action).")),
+		basemcp.WithString("replace", basemcp.Description("Rewrite matched text with this template, $1 for capture groups, like rg -r (search action).")),
 	), dispatch(deps, "file", fileActions))
 
 	editActions := actions{
@@ -141,6 +149,14 @@ func fileActionSearch(req basemcp.CallToolRequest) (*basemcp.CallToolResult, err
 		ContextAfter  int      `json:"context_after"`
 		FilesOnly     bool     `json:"files_only"`
 		Invert        bool     `json:"invert"`
+		NoIgnore      bool     `json:"no_ignore"`
+		Type          []string `json:"type"`
+		TypeNot       []string `json:"type_not"`
+		WordMatch     bool     `json:"word_match"`
+		LineRegexp    bool     `json:"line_regexp"`
+		CountOnly     bool     `json:"count_only"`
+		OnlyMatching  bool     `json:"only_matching"`
+		Replace       string   `json:"replace"`
 	}
 	if err := bind(req, &args); err != nil {
 		return basemcp.NewToolResultError(err.Error()), nil
@@ -159,6 +175,14 @@ func fileActionSearch(req basemcp.CallToolRequest) (*basemcp.CallToolResult, err
 		ContextAfter:  args.ContextAfter,
 		FilesOnly:     args.FilesOnly,
 		Invert:        args.Invert,
+		NoIgnore:      args.NoIgnore,
+		Type:          args.Type,
+		TypeNot:       args.TypeNot,
+		WordMatch:     args.WordMatch,
+		LineRegexp:    args.LineRegexp,
+		CountOnly:     args.CountOnly,
+		OnlyMatching:  args.OnlyMatching,
+		Replace:       args.Replace,
 		MaxMatches:    args.MaxMatches,
 	})
 	if err != nil {

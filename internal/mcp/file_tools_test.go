@@ -381,3 +381,59 @@ func TestFileSearchInvalidRegex(t *testing.T) {
 		t.Fatalf("error text = %q, want it to name the invalid regex", resultText(t, r))
 	}
 }
+
+// The search handler threads the ignore cascade and the new match modes
+// through: gitignored files vanish by default, no_ignore with type narrows
+// deliberately, word_match filters inside the line, and an unknown type is
+// a readable error.
+func TestFileSearchIgnoreAndTypes(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, ".gitignore", "*.log\n")
+	writeTestFile(t, dir, "a.log", "needle\n")
+	writeTestFile(t, dir, "b.go", "needle\n")
+	writeTestFile(t, dir, "c.md", "needly\n")
+
+	srv := newTestSrv(t)
+	handler := fileToolHandler(t, srv)
+
+	r, err := handler(context.Background(), searchArgs(dir, map[string]any{"pattern": "needle"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := resultMap(t, r)
+	if m["total"].(float64) != 1 || !strings.HasPrefix(m["matches"].([]any)[0].(string), "b.go:1:") {
+		t.Fatalf("gitignored total = %v, matches = %v", m["total"], m["matches"])
+	}
+
+	r, err = handler(context.Background(), searchArgs(dir, map[string]any{
+		"pattern": "needle", "no_ignore": true, "type": []any{"go"},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m = resultMap(t, r)
+	if m["total"].(float64) != 1 || !strings.HasPrefix(m["matches"].([]any)[0].(string), "b.go:1:") {
+		t.Fatalf("no_ignore+type total = %v, matches = %v", m["total"], m["matches"])
+	}
+
+	r, err = handler(context.Background(), searchArgs(dir, map[string]any{
+		"pattern": "needl", "word_match": true,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m = resultMap(t, r)
+	if m["total"].(float64) != 0 {
+		t.Fatalf("word_match total = %v, want zero for a word fragment", m["total"])
+	}
+
+	r, err = handler(context.Background(), searchArgs(dir, map[string]any{
+		"pattern": "needle", "type": []any{"nope"},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.IsError || !strings.Contains(resultText(t, r), "unknown search type") {
+		t.Fatalf("unknown type result = %+v, want a readable error", r)
+	}
+}
