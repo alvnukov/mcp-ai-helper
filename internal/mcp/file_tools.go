@@ -1,6 +1,9 @@
 package mcp
 
 import (
+	"encoding/json"
+	"fmt"
+
 	basemcp "github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
@@ -68,13 +71,23 @@ func registerFileTools(srv *server.MCPServer, deps *Server) {
 
 func fileActionRead(req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
 	var args struct {
-		RepoPath string `json:"repo_path"`
-		Path     string `json:"path"`
-		Offset   int    `json:"offset"`
-		Limit    int    `json:"limit"`
+		RepoPath string   `json:"repo_path"`
+		Path     string   `json:"path"`
+		Paths    []string `json:"paths"`
+		Offset   int      `json:"offset"`
+		Limit    int      `json:"limit"`
 	}
 	if err := bind(req, &args); err != nil {
 		return basemcp.NewToolResultError(err.Error()), nil
+	}
+	// bind drops arguments the struct does not declare, so a read sent paths
+	// would otherwise hear "requires path" while its array vanished. Naming
+	// the stray argument teaches the way the missing-path errors do.
+	if len(args.Paths) > 0 {
+		example, _ := json.Marshal(args.Paths)
+		return basemcp.NewToolResultError(fmt.Sprintf(
+			"file action=read takes path (a single string); you sent paths — use action=read_many with paths=%s to read several files in one call",
+			example)), nil
 	}
 	if args.Path == "" {
 		return basemcp.NewToolResultError("file action=read requires path"), nil
@@ -105,12 +118,21 @@ func fileActionReadMany(req basemcp.CallToolRequest) (*basemcp.CallToolResult, e
 	var args struct {
 		RepoPath string   `json:"repo_path"`
 		Paths    []string `json:"paths"`
+		Path     string   `json:"path"`
 	}
 	if err := bind(req, &args); err != nil {
 		return basemcp.NewToolResultError(err.Error()), nil
 	}
 	if len(args.Paths) == 0 {
-		return basemcp.NewToolResultError("file action=read_many requires paths"), nil
+		// The refusal must carry the shape the caller missed: a bare
+		// "requires paths" has already proven too thin to recover from.
+		if args.Path != "" {
+			example, _ := json.Marshal([]string{args.Path})
+			return basemcp.NewToolResultError(fmt.Sprintf(
+				"file action=read_many requires paths — an array of repo-relative file paths (up to 8); you sent path, send paths=%s instead",
+				example)), nil
+		}
+		return basemcp.NewToolResultError(`file action=read_many requires paths — an array of repo-relative file paths (up to 8), e.g. paths=["internal/mcp/util.go","go.mod"]`), nil
 	}
 	result, err := fileops.ReadFilesInRepo(args.RepoPath, args.Paths)
 	if err != nil {

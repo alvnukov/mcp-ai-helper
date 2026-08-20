@@ -437,3 +437,76 @@ func TestFileSearchIgnoreAndTypes(t *testing.T) {
 		t.Fatalf("unknown type result = %+v, want a readable error", r)
 	}
 }
+
+// A model that calls read_many without the paths array must hear the exact
+// shape it missed — a bare "requires paths" proved too thin to recover from
+// and sent the caller into shell fallbacks.
+func TestReadManyWithoutPathsTeachesTheArrayShape(t *testing.T) {
+	srv := newTestSrv(t)
+	handler := fileToolHandler(t, srv)
+
+	arguments := map[string]any{
+		"repo_path": t.TempDir(),
+		"action":    "read_many",
+	}
+	req := basemcp.CallToolRequest{}
+	req.Params.Arguments = arguments
+	r, err := handler(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.IsError {
+		t.Fatal("expected an error without paths")
+	}
+	got := resultText(t, r)
+	for _, want := range []string{"requires paths", `paths=["`} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("error %q must mention %q", got, want)
+		}
+	}
+
+	// A singular path is the likeliest stumble; the error must fold it into
+	// the array form instead of just refusing.
+	arguments["path"] = "a.txt"
+	r, err = handler(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.IsError {
+		t.Fatal("expected an error for a singular path")
+	}
+	got = resultText(t, r)
+	for _, want := range []string{"you sent path", `paths=["a.txt"]`} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("error %q must mention %q", got, want)
+		}
+	}
+}
+
+// bind drops arguments the handler does not declare, so read must say it saw
+// paths and point at read_many instead of answering "requires path" while the
+// array silently vanishes.
+func TestReadWithPathsRedirectsToReadMany(t *testing.T) {
+	srv := newTestSrv(t)
+	handler := fileToolHandler(t, srv)
+
+	req := basemcp.CallToolRequest{}
+	req.Params.Arguments = map[string]any{
+		"repo_path": t.TempDir(),
+		"action":    "read",
+		"paths":     []any{"a.txt", "b.txt"},
+	}
+	r, err := handler(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.IsError {
+		t.Fatal("expected an error")
+	}
+	got := resultText(t, r)
+	for _, want := range []string{"action=read_many", `paths=["a.txt","b.txt"]`} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("error %q must mention %q", got, want)
+		}
+	}
+}
