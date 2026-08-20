@@ -379,3 +379,31 @@ func TestSearchFilesCountOnlyAndExtraction(t *testing.T) {
 		t.Fatal("expected an error for count_only with files_only")
 	}
 }
+
+// A search scoped to a path that does not exist must fail loudly and name
+// the nearest directory that does, so the caller lists that instead of
+// concluding nothing matches or hunting for another root cause.
+func TestSearchFilesMissingPathTeaches(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "src", "vega"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "src", "vega", "real.txt"), []byte("needle\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := SearchFilesInRepoWithOptions(dir, "src/vega/platform-release/.helm/values", SearchOptions{Pattern: "needle", MaxMatches: 10})
+	if err == nil {
+		t.Fatal("expected an error for a missing search path")
+	}
+	msg := err.Error()
+	for _, want := range []string{`src/vega/platform-release/.helm/values`, `"src/vega"`, "action=list"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error %q must mention %q", msg, want)
+		}
+	}
+
+	if _, err := SearchFilesInRepoWithOptions(dir, "src/vega/real.txt", SearchOptions{Pattern: "needle", MaxMatches: 10}); err != nil {
+		t.Fatalf("existing single-file search must keep working: %v", err)
+	}
+}

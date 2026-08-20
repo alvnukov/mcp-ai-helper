@@ -871,6 +871,10 @@ func ListDir(req ListDirRequest) (ListDirResult, error) {
 
 	entries, err := root.ReadDir(relative)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			nearest := nearestExistingDir(root, relative)
+			return ListDirResult{}, fmt.Errorf("list path %q does not exist under %q; nearest existing directory %q — list it to see available names", relative, display, nearest)
+		}
 		return ListDirResult{}, err
 	}
 	result := ListDirResult{
@@ -921,6 +925,20 @@ func isProtectedLeanPath(path string) bool {
 func isTaskRegistryRelative(relative string) bool {
 	clean := strings.ToLower(path.Clean(filepath.ToSlash(relative)))
 	return clean == "obsidian-tasks" || clean == "tasks" || clean == "mcpaihelperproject"
+}
+
+// nearestExistingDir names the deepest ancestor of relative that exists
+// beneath root, "." when none does. Error messages carry it so a caller who
+// mistyped a path learns which directory to list next instead of guessing.
+func nearestExistingDir(root *safefs.Root, relative string) string {
+	candidate := filepath.ToSlash(filepath.Clean(relative))
+	for candidate != "." && candidate != "/" {
+		if _, err := root.Stat(filepath.FromSlash(candidate)); err == nil {
+			return candidate
+		}
+		candidate = path.Dir(candidate)
+	}
+	return "."
 }
 
 func cleanPath(path string) (string, error) {

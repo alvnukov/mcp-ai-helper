@@ -572,6 +572,24 @@ func TestListDirEntriesAreAddressableFromTheListing(t *testing.T) {
 	}
 }
 
+// Listing a path that does not exist must name the nearest directory that
+// does, so the caller lists that instead of guessing at the tree layout.
+func TestListDirMissingPathTeaches(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "src", "vega"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := ListDir(ListDirRequest{RepoPath: dir, Path: "src/vega/platform-release/.helm"})
+	if err == nil {
+		t.Fatal("expected an error for a missing list path")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, `"src/vega"`) || !strings.Contains(msg, `"src/vega/platform-release/.helm"`) {
+		t.Fatalf("error %q must name the missing path and the nearest existing directory", msg)
+	}
+}
+
 func TestListDirOfRepoRootNamesEntriesByNameAlone(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module x\n"), 0o600); err != nil {
@@ -1265,12 +1283,8 @@ func TestRepoOperationsRejectSymlinkedParentEscape(t *testing.T) {
 	if _, err := ListDir(ListDirRequest{RepoPath: repoPath, Path: "linked"}); err == nil {
 		t.Fatal("ListDir unexpectedly traversed a symlinked directory")
 	}
-	search, err := SearchFilesInRepo(repoPath, "linked", "secret", 10)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if search.Total != 0 {
-		t.Fatalf("SearchFilesInRepo returned %d matches outside the repository", search.Total)
+	if _, err := SearchFilesInRepo(repoPath, "linked", "secret", 10); err == nil || !strings.Contains(err.Error(), "does not exist") {
+		t.Fatal("SearchFilesInRepo must refuse a symlinked directory as a walk root instead of traversing it")
 	}
 	if _, err := os.Stat(filepath.Join(outsideDir, "file.txt")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("outside file error = %v, want not exist", err)

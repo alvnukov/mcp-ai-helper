@@ -322,6 +322,15 @@ func searchFilesAtRoot(displayPath string, root *safefs.Root, walkRoot string, o
 	includeGlobs := compileGlobSet(include)
 	excludeGlobs := compileGlobSet(exclude)
 	walkRoot = filepath.ToSlash(filepath.Clean(walkRoot))
+	// A missing walk root must fail loudly with the nearest directory that
+	// does exist: a silent zero-match answer reads as "nothing matches
+	// anywhere" and sends the caller hunting for a different root cause.
+	if _, statErr := root.Stat(filepath.FromSlash(walkRoot)); statErr != nil {
+		nearest := nearestExistingDir(root, walkRoot)
+		return SearchResult{Pattern: opts.Pattern, Path: displayPath}, fmt.Errorf(
+			"search path %q does not exist under repo root %q; nearest existing directory %q — call file action=list on it to see available names",
+			walkRoot, root.Path(), nearest)
+	}
 	var ignores ignoreStack
 	if !opts.NoIgnore && walkRoot != "." {
 		ignores = ancestorIgnoreLevels(root, walkRoot)
