@@ -17,15 +17,24 @@ func registerFileTools(srv *server.MCPServer, deps *Server) {
 	}
 	srv.AddTool(basemcp.NewTool("file",
 		readsLocal,
-		basemcp.WithDescription("Repo file reading and inspection. Required: repo_path, action. Actions: read (path, offset?, limit?) — read single file with line numbers; read_many (paths[]) — read up to 8 files in one call; list (path?) — structured directory listing; search (path?, pattern, max_matches?) — search text in files under a directory; snapshot (path) — read file hash/size before guarded edits."),
+		basemcp.WithDescription("Repo file reading and inspection. Required: repo_path, action. Actions: read (path, offset?, limit?) — read single file with line numbers; read_many (paths[]) — read up to 8 files in one call; list (path?) — structured directory listing; search (path?, pattern, max_matches?, regex?, ignore_case?, smart_case?, glob?[], glob_exclude?[], context_before?, context_after?, files_only?, invert?) — rg-like text search, pattern is a literal substring by default and a regexp with regex=true (smart_case: case-insensitive while the pattern is all-lowercase; context lines use '-'; files_only returns paths); snapshot (path) — read file hash/size before guarded edits."),
 		basemcp.WithString("repo_path", basemcp.Required()),
 		basemcp.WithString("action", basemcp.Required(), actionEnum(fileActions)),
 		basemcp.WithString("path", basemcp.Description("Repo-relative file or directory path. Required for read/snapshot; optional dir for list/search (defaults to repo root).")),
 		basemcp.WithArray("paths", basemcp.Description("Repo-relative file paths to read (max 8). Required for read_many."), basemcp.WithStringItems(), basemcp.MinItems(1), basemcp.MaxItems(8)),
-		basemcp.WithString("pattern", basemcp.Description("Search pattern, a literal substring (not a regular expression). Required for search.")),
+		basemcp.WithString("pattern", basemcp.Description("Search pattern. A literal substring by default; a regular expression when regex is true.")),
 		basemcp.WithNumber("offset", basemcp.Description("1-based line number to start reading from (read action).")),
 		basemcp.WithNumber("limit", basemcp.Description("Maximum lines to return (read action).")),
 		basemcp.WithNumber("max_matches", basemcp.Description("Maximum total matches (search action). Defaults to 100.")),
+		basemcp.WithBoolean("regex", basemcp.Description("Treat pattern as a regular expression (search action).")),
+		basemcp.WithBoolean("ignore_case", basemcp.Description("Case-insensitive matching whatever the pattern's case (search action).")),
+		basemcp.WithBoolean("smart_case", basemcp.Description("Case-insensitive while pattern has no uppercase letter, like rg -S (search action).")),
+		basemcp.WithArray("glob", basemcp.Description("Include file globs, e.g. *.go or pkg/*.go; without a separator a glob matches the base name (search action)."), basemcp.WithStringItems()),
+		basemcp.WithArray("glob_exclude", basemcp.Description("Exclude file globs; files matching any of them are skipped (search action)."), basemcp.WithStringItems()),
+		basemcp.WithNumber("context_before", basemcp.Description("Non-matching lines before each match, marked with '-' (search action).")),
+		basemcp.WithNumber("context_after", basemcp.Description("Non-matching lines after each match, marked with '-' (search action).")),
+		basemcp.WithBoolean("files_only", basemcp.Description("Return only the paths of files with matches, like rg -l (search action).")),
+		basemcp.WithBoolean("invert", basemcp.Description("Report lines the pattern does not match, like rg -v (search action).")),
 	), dispatch(deps, "file", fileActions))
 
 	editActions := actions{
@@ -119,10 +128,19 @@ func fileActionList(req basemcp.CallToolRequest) (*basemcp.CallToolResult, error
 
 func fileActionSearch(req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
 	var args struct {
-		RepoPath   string `json:"repo_path"`
-		Path       string `json:"path"`
-		Pattern    string `json:"pattern"`
-		MaxMatches int    `json:"max_matches"`
+		RepoPath      string   `json:"repo_path"`
+		Path          string   `json:"path"`
+		Pattern       string   `json:"pattern"`
+		MaxMatches    int      `json:"max_matches"`
+		Regex         bool     `json:"regex"`
+		IgnoreCase    bool     `json:"ignore_case"`
+		SmartCase     bool     `json:"smart_case"`
+		Glob          []string `json:"glob"`
+		GlobExclude   []string `json:"glob_exclude"`
+		ContextBefore int      `json:"context_before"`
+		ContextAfter  int      `json:"context_after"`
+		FilesOnly     bool     `json:"files_only"`
+		Invert        bool     `json:"invert"`
 	}
 	if err := bind(req, &args); err != nil {
 		return basemcp.NewToolResultError(err.Error()), nil
@@ -130,7 +148,19 @@ func fileActionSearch(req basemcp.CallToolRequest) (*basemcp.CallToolResult, err
 	if args.Pattern == "" {
 		return basemcp.NewToolResultError("file action=search requires pattern"), nil
 	}
-	result, err := fileops.SearchFilesInRepo(args.RepoPath, args.Path, args.Pattern, args.MaxMatches)
+	result, err := fileops.SearchFilesInRepoWithOptions(args.RepoPath, args.Path, fileops.SearchOptions{
+		Pattern:       args.Pattern,
+		Regex:         args.Regex,
+		IgnoreCase:    args.IgnoreCase,
+		SmartCase:     args.SmartCase,
+		Glob:          args.Glob,
+		GlobExclude:   args.GlobExclude,
+		ContextBefore: args.ContextBefore,
+		ContextAfter:  args.ContextAfter,
+		FilesOnly:     args.FilesOnly,
+		Invert:        args.Invert,
+		MaxMatches:    args.MaxMatches,
+	})
 	if err != nil {
 		return basemcp.NewToolResultError(err.Error()), nil
 	}

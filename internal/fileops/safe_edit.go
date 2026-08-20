@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -409,96 +408,6 @@ func ReadFileContentInRepo(repoPath string, filePath string) (FileContent, error
 	}, nil
 }
 
-// SearchResult holds structured search results.
-type SearchResult struct {
-	Pattern string `json:"pattern"`
-	Path    string `json:"path"`
-	// Matches are grep's own file:line:text, one string per match, rather than
-	// objects with file, line_number and text keys. Those three key names would
-	// repeat on every match, which across a full result is most of the payload,
-	// and the reader is a model that has met this exact layout in grep and
-	// ripgrep output far more often than in any JSON shape of it.
-	Matches []string `json:"matches"`
-	Total   int      `json:"total"`
-	// Truncated reports that the walk stopped at the match cap, so the tree may
-	// hold matches this result does not show. Without it Total reads as a count
-	// of everything, and a reader draws a conclusion from a partial answer
-	// without knowing that it is partial.
-	Truncated bool `json:"truncated"`
-}
-
-// SearchFiles runs a simple text search in a directory and returns structured results.
-// It reads each non-binary file under root, splits into lines, and matches pattern.
-func SearchFiles(rootPath string, pattern string, maxMatches int) (SearchResult, error) {
-	root, err := safefs.Open(rootPath)
-	if err != nil {
-		return SearchResult{Pattern: pattern, Path: rootPath}, err
-	}
-	defer func() { _ = root.Close() }()
-	return searchFilesAtRoot(rootPath, root, ".", pattern, maxMatches)
-}
-
-func searchFilesAtRoot(displayPath string, root *safefs.Root, walkRoot string, pattern string, maxMatches int) (SearchResult, error) {
-	if maxMatches <= 0 {
-		maxMatches = 100
-	}
-	walkRoot = filepath.ToSlash(filepath.Clean(walkRoot))
-	result := SearchResult{Pattern: pattern, Path: displayPath}
-	err := fs.WalkDir(root.FS(), walkRoot, func(entryPath string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return nil
-		}
-		relative := strings.TrimPrefix(entryPath, walkRoot+"/")
-		if entryPath == walkRoot {
-			relative = "."
-		}
-		if d.IsDir() {
-			base := path.Base(entryPath)
-			if strings.HasPrefix(base, ".") && entryPath != walkRoot {
-				return fs.SkipDir
-			}
-			if base == "node_modules" || base == "__pycache__" || base == "vendor" || isTaskRegistryRelative(relative) {
-				return fs.SkipDir
-			}
-			return nil
-		}
-		ext := strings.ToLower(path.Ext(entryPath))
-		switch ext {
-		case ".exe", ".dll", ".so", ".dylib", ".bin", ".jpg", ".png", ".gif", ".ico",
-			".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".pdf", ".class", ".pyc", ".pyo":
-			return nil
-		}
-		if isProtectedLeanPath(entryPath) {
-			return nil
-		}
-		if relative == "." {
-			// The walk names its root "."; for a search scoped to a single
-			// file that root is the target, not something to skip.
-			relative = path.Base(entryPath)
-		}
-		data, readErr := root.ReadFile(filepath.FromSlash(entryPath))
-		if readErr != nil || len(data) > 1<<20 {
-			return nil
-		}
-		lines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
-		for i, line := range lines {
-			if !strings.Contains(line, pattern) {
-				continue
-			}
-			result.Matches = append(result.Matches, fmt.Sprintf("%s:%d:%s", relative, i+1, line))
-			result.Total++
-			if result.Total >= maxMatches {
-				result.Truncated = true
-				return fs.SkipAll
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return result, err
-	}
-	return result, nil
-}
 
 // ReadFilesFileResult is a per-file result in batch reads. RelativePath is the
 // only path it carries: the batch names its repo once, and an absolute path
@@ -603,23 +512,6 @@ func ReadFilesInRepo(repoPath string, paths []string) (ReadFilesResult, error) {
 	return result, nil
 }
 
-// SearchFilesInRepo runs a text search under a repo-relative directory.
-func SearchFilesInRepo(repoPath string, filePath string, pattern string, maxMatches int) (SearchResult, error) {
-	root, err := safefs.Open(repoPath)
-	if err != nil {
-		return SearchResult{}, err
-	}
-	defer func() { _ = root.Close() }()
-
-	if strings.TrimSpace(filePath) == "" {
-		return searchFilesAtRoot(root.Path(), root, ".", pattern, maxMatches)
-	}
-	display, relative, err := repoRelativePath(repoPath, filePath)
-	if err != nil {
-		return SearchResult{}, err
-	}
-	return searchFilesAtRoot(display, root, relative, pattern, maxMatches)
-}
 
 // Hash returns a SHA-256 hex digest for data.
 func Hash(data []byte) string {

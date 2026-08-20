@@ -304,3 +304,80 @@ func TestFileReadActionStillRegistered(t *testing.T) {
 		t.Fatal("file tool no longer registered")
 	}
 }
+
+func searchArgs(dir string, extra map[string]any) basemcp.CallToolRequest {
+	args := map[string]any{
+		"repo_path": dir,
+		"action":    "search",
+		"pattern":   "needle",
+	}
+	for k, v := range extra {
+		args[k] = v
+	}
+	req := basemcp.CallToolRequest{}
+	req.Params.Arguments = args
+	return req
+}
+
+// The rg-like options must reach the fileops search through the handler:
+// regex and glob filters answer differently from the literal default.
+func TestFileSearchWithOptions(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "a.go", "func  spaced needle()\n")
+	writeTestFile(t, dir, "b.md", "func\\s+spaced needle literal\n")
+
+	srv := newTestSrv(t)
+	handler := fileToolHandler(t, srv)
+
+	r, err := handler(context.Background(), searchArgs(dir, map[string]any{
+		"pattern": "func\\s+spaced",
+		"regex":   true,
+		"glob":    []any{"*.go"},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := resultMap(t, r)
+	if m["total"].(float64) != 1 {
+		t.Fatalf("regex+glob total = %v, matches = %v", m["total"], m["matches"])
+	}
+	matches := m["matches"].([]any)
+	if matches[0].(string) != "a.go:1:func  spaced needle()" {
+		t.Fatalf("match = %q", matches[0])
+	}
+
+	r, err = handler(context.Background(), searchArgs(dir, map[string]any{
+		"pattern": "func\\s+spaced",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m = resultMap(t, r)
+	if m["total"].(float64) != 1 || !strings.HasPrefix(m["matches"].([]any)[0].(string), "b.md:1:") {
+		t.Fatalf("literal default total = %v, matches = %v", m["total"], m["matches"])
+	}
+}
+
+// An invalid regex must come back as a readable tool error rather than a
+// silent empty result.
+func TestFileSearchInvalidRegex(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "a.txt", "needle\n")
+
+	srv := newTestSrv(t)
+	handler := fileToolHandler(t, srv)
+
+	r, err := handler(context.Background(), searchArgs(dir, map[string]any{
+		"pattern": "needle(",
+		"regex":   true,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.IsError {
+		t.Fatal("expected a tool error for an invalid regex")
+	}
+	if !strings.Contains(resultText(t, r), "invalid regex") {
+		t.Fatalf("error text = %q, want it to name the invalid regex", resultText(t, r))
+	}
+}
