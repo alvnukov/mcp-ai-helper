@@ -873,7 +873,7 @@ func ListDir(req ListDirRequest) (ListDirResult, error) {
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			nearest := nearestExistingDir(root, relative)
-			return ListDirResult{}, fmt.Errorf("list path %q does not exist under %q; nearest existing directory %q — list it to see available names", relative, display, nearest)
+			return ListDirResult{}, fmt.Errorf("list path %q does not exist under repo root %q; nearest existing directory %q — list it to see available names", relative, root.Path(), nearest)
 		}
 		return ListDirResult{}, err
 	}
