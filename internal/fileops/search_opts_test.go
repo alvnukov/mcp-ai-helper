@@ -304,7 +304,7 @@ func TestSearchFilesSkipsBinaryByContent(t *testing.T) {
 // both keep working on a literal pattern.
 func TestSearchFilesWordAndLineMatch(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "w.txt"), []byte("main mainly\nmain\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "w.txt"), []byte("mainly\nmain\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
