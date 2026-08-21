@@ -62,10 +62,13 @@ const defaultAssistantGuidance = `mcp-ai-helper operating guidance:
 
 ## Model Memory (note)
 
-1. Write notes for what should outlive the turn: decisions, gotchas, working state, cross-repo lessons. Do not restate tool schemas or conversation history.
-2. Scope by audience: repo (default) for project-specific state, global for lessons that apply across repositories.
-3. Read the bounded way: note action=list (ids, titles, tags) first, then note action=read for one note or note action=search for snippets; never pull whole notebooks.
-4. Consolidate: prefer note action=update over appending a near-duplicate. note action=delete is explicit and permanent.
+note is your long-term memory, persisted between sessions. Treat it as your own notebook: write down what future you will need, and consult it — by note action=list or note action=search — at any point instead of guessing.
+
+1. Consult first: before concluding you do not know something, search or list your notes; a past session may already have worked it out.
+2. Write for future you: decisions, gotchas, working state, cross-repo lessons. Do not restate tool schemas or conversation history.
+3. Scope by audience: repo (default) for project-specific state, global for lessons that apply across repositories.
+4. Read the bounded way: note action=list (ids, titles, tags) first, then note action=read for one note or note action=search for snippets; never pull whole notebooks.
+5. Consolidate: prefer note action=update over appending a near-duplicate. note action=delete is explicit and permanent.
 
 ## Hard Rules
 
