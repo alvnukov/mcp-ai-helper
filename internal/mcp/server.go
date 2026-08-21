@@ -150,8 +150,8 @@ func configOrigin(cfg *config.Config) string {
 }
 
 // buildProjectStore resolves the helper data root, falling back to .mcp-ai-helper
-// beside the process when the configured log dir is unusable: command logs, the
-// notebooks and the task plumbing all need a root even when logging does not.
+// beside the process when the configured log dir is unusable: command logs and
+// the task plumbing both need a root even when logging does not.
 func buildProjectStore(cfg *config.Config) *project.Store {
 	store, err := project.NewStore(cfg.CommandPolicy.LogDir)
 	if err != nil {
@@ -159,6 +159,17 @@ func buildProjectStore(cfg *config.Config) *project.Store {
 		store, _ = project.NewStore(".mcp-ai-helper")
 	}
 	return store
+}
+
+// buildNotesStore resolves the home-based helper data root for the global
+// notebook. It is independent of command_policy.log_dir on purpose: global
+// notes are shared across repositories and must not move with the log dir.
+func buildNotesStore() *notes.Store {
+	store, err := project.NewStore("")
+	if err != nil {
+		store, _ = project.NewStore(".mcp-ai-helper")
+	}
+	return notes.NewStore(store.Root())
 }
 
 func buildDeps(cfg *config.Config) (provider.ChatClient, *command.Runner, *pipeline.Runner, *tasks.Store, taskBackend) {
@@ -279,7 +290,7 @@ func New(cfg *config.Config) *server.MCPServer {
 	// client here they answer "not configured" until a reload builds one.
 	deps.confluenceClient, deps.confluenceClientErr = buildConfluenceClient(cfg)
 	deps.chat, deps.commands, deps.pipelines, deps.taskStore, deps.taskBackend = buildDeps(cfg)
-	deps.notesStore = notes.NewStore(buildProjectStore(cfg).Root())
+	deps.notesStore = buildNotesStore()
 
 	registerLanguageTools(srv)
 	registerFileTools(srv, deps)
@@ -315,7 +326,7 @@ func New(cfg *config.Config) *server.MCPServer {
 			deps.pipelines = pipes
 			deps.taskStore = store
 			deps.taskBackend = backend
-			deps.notesStore = notes.NewStore(buildProjectStore(next).Root())
+			deps.notesStore = buildNotesStore()
 			deps.secretMask = buildSecretMask(next)
 			deps.jiraClient, deps.jiraClientErr = buildJiraClient(next)
 			deps.confluenceClient, deps.confluenceClientErr = buildConfluenceClient(next)
