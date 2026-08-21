@@ -184,7 +184,6 @@ type Options struct {
 // Run registers the helper with every client named in opts, reporting to out.
 func Run(opts Options, out io.Writer) error {
 	command := helperCommand()
-	args := launchArgs(opts.ConfigPath)
 
 	report := make([]string, 0, len(opts.Clients))
 	for _, requested := range opts.Clients {
@@ -205,11 +204,11 @@ func Run(opts Options, out io.Writer) error {
 		var entry string
 		switch spec.format {
 		case claudeJSON:
-			entry, err = mergeJSON(existing, "mcpServers", claudeEntry(command, args))
+			entry, err = mergeClaudeJSON(existing, command, opts.ConfigPath)
 		case opencodeJSON:
-			entry, err = mergeJSON(existing, "mcp", opencodeEntry(command, args))
+			entry, err = mergeOpenCodeJSON(existing, command, opts.ConfigPath)
 		case codexTOML:
-			entry, err = mergeCodexTOML(existing, command, args)
+			entry, err = mergeCodexTOML(existing, command, launchArgs(opts.ConfigPath))
 		}
 		if err != nil {
 			return err
@@ -592,10 +591,35 @@ func configPath(spec clientSpec, global bool) (string, error) {
 	case spec.id == "codex":
 		return scoped{global: filepath.Join(".codex", "config.toml")}.resolve(true)
 	case spec.id == "opencode" && !global:
-		return scoped{project: "opencode.json"}.resolve(false)
+		return opencodeConfigPath(false)
 	case spec.id == "opencode":
-		return scoped{global: filepath.Join(".config", "opencode", "opencode.json")}.resolve(true)
+		return opencodeConfigPath(true)
 	default:
 		return "", fmt.Errorf("unknown client %q", spec.id)
 	}
+}
+
+// opencodeConfigPath picks the config file OpenCode will actually read: the
+// JSONC spelling when the user already has one, the plain JSON name when they
+// do not. Writing a second file alongside a user's own would give OpenCode
+// two configs to merge and the user one more thing to wonder about.
+func opencodeConfigPath(global bool) (string, error) {
+	dir, err := scoped{}.resolve(global)
+	if err != nil {
+		return "", err
+	}
+	if global {
+		dir = filepath.Join(dir, ".config", "opencode")
+	}
+	for _, name := range []string{"opencode.jsonc", "opencode.json"} {
+		if path := filepath.Join(dir, name); fileExists(path) {
+			return path, nil
+		}
+	}
+	return filepath.Join(dir, "opencode.json"), nil
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }

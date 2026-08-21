@@ -107,7 +107,7 @@ func TestStatusNoticesAnInstructionsBlockThatDrifted(t *testing.T) {
 func TestStatusNoticesAnEntryPointingAtAHelperThatIsGone(t *testing.T) {
 	project := sandbox(t)
 
-	entry, err := mergeJSON("", "mcpServers", claudeEntry(filepath.Join(project, "nowhere", "mcp-ai-helper"), nil))
+	entry, err := mergeClaudeJSON("", filepath.Join(project, "nowhere", "mcp-ai-helper"), "")
 	if err != nil {
 		t.Fatalf("build entry: %v", err)
 	}
@@ -136,9 +136,9 @@ func TestRegisteredCommandReadsEveryClientsShape(t *testing.T) {
 		var err error
 		switch spec.format {
 		case claudeJSON:
-			existing, err = mergeJSON("", sectionFor(spec.format), claudeEntry("/opt/mcp-ai-helper", nil))
+			existing, err = mergeClaudeJSON("", "/opt/mcp-ai-helper", "")
 		case opencodeJSON:
-			existing, err = mergeJSON("", sectionFor(spec.format), opencodeEntry("/opt/mcp-ai-helper", nil))
+			existing, err = mergeOpenCodeJSON("", "/opt/mcp-ai-helper", "")
 		case codexTOML:
 			existing, err = mergeCodexTOML("", "/opt/mcp-ai-helper", nil)
 		}
@@ -157,5 +157,16 @@ func TestRegisteredCommandReadsEveryClientsShape(t *testing.T) {
 		if _, registered, err := registeredCommand("", spec.format); err != nil || registered {
 			t.Errorf("%s: an empty config registers nothing, got (%v, %v)", spec.id, registered, err)
 		}
+	}
+}
+
+// TestRegisteredCommandReadsAJSONCConfig keeps status honest on the configs
+// OpenCode actually accepts — comments and trailing commas are legal there —
+// so reading the entry must not die on them the way a strict parser does.
+func TestRegisteredCommandReadsAJSONCConfig(t *testing.T) {
+	existing := "{\n  // pinned by hand\n  \"mcp\": {\"" + serverName + "\": {\"command\": [\"/opt/mcp-ai-helper\", \"--repo\", \"/r\"],},}\n}\n"
+	command, registered, err := registeredCommand(existing, opencodeJSON)
+	if err != nil || !registered || command != "/opt/mcp-ai-helper" {
+		t.Errorf("got (%q, %v, %v), want (/opt/mcp-ai-helper, true, nil)", command, registered, err)
 	}
 }

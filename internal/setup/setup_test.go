@@ -357,3 +357,76 @@ func TestCodexUsesUserConfigAndInstallsUserWideSkills(t *testing.T) {
 		t.Errorf("Codex skills must not be skipped:\n%s", out.String())
 	}
 }
+
+// TestOpenCodeConfigIsEditedInPlace runs the whole command against a config
+// the way a user really has one: a comment, a hand-pinned flag, a neighbour
+// on one line. The file that comes back must differ only inside the helper's
+// own entry.
+func TestOpenCodeConfigIsEditedInPlace(t *testing.T) {
+	project := sandbox(t)
+	seed := `{
+  "$schema": "https://opencode.ai/config.json",
+  // my tuning, do not touch
+  "mcp": {
+    "happ": {"type": "local", "command": ["/opt/homebrew/bin/happ", "mcp"]},
+    "mcp-ai-helper": {
+      "type": "local",
+      "command": ["/old/bin/mcp-ai-helper", "--repo", "/r"],
+      "enabled": true,
+      "timeout": 600000
+    }
+  }
+}
+`
+	if err := os.WriteFile(filepath.Join(project, "opencode.json"), []byte(seed), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	if err := Run(Options{Clients: []string{"opencode"}, NoInstructions: true, NoSkills: true}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	after, err := os.ReadFile(filepath.Join(project, "opencode.json"))
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+
+	for _, want := range []string{
+		"// my tuning, do not touch",
+		`"happ": {"type": "local", "command": ["/opt/homebrew/bin/happ", "mcp"]}`,
+		`"timeout": 600000`,
+		`"--repo"`,
+		`"/r"`,
+	} {
+		if !strings.Contains(string(after), want) {
+			t.Errorf("setup rewrote more than its own entry; lost %q:\n%s", want, after)
+		}
+	}
+	if strings.Contains(string(after), "/old/bin/mcp-ai-helper") {
+		t.Errorf("the stale binary must be re-pinned:\n%s", after)
+	}
+}
+
+// TestOpenCodeUsesAnExistingJsoncConfig pins the file choice: a user with an
+// opencode.jsonc gets it edited where it lies, not a second config written
+// beside it.
+func TestOpenCodeUsesAnExistingJsoncConfig(t *testing.T) {
+	project := sandbox(t)
+	jsonc := filepath.Join(project, "opencode.jsonc")
+	if err := os.WriteFile(jsonc, []byte("{\n  // hand written\n}\n"), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	if err := Run(Options{Clients: []string{"opencode"}, NoInstructions: true, NoSkills: true}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(project, "opencode.json")); !os.IsNotExist(err) {
+		t.Error("a jsonc config must not gain a competing opencode.json")
+	}
+	after, err := os.ReadFile(jsonc)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if !strings.Contains(string(after), serverName) || !strings.Contains(string(after), "// hand written") {
+		t.Errorf("the jsonc config should have been edited in place:\n%s", after)
+	}
+}

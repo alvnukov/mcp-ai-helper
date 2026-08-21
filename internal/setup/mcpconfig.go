@@ -1,8 +1,6 @@
 package setup
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -11,21 +9,86 @@ import (
 
 // The MCP server entry itself: the stanza that makes the helper's tools exist.
 //
-// Three clients, three shapes. Every function here takes the file as it stands
-// and returns what it should become, so the caller decides whether that is
-// different enough to be worth a write.
+// Three clients, three shapes. The JSON clients are served by the surgical
+// editor in jsonedit.go — their configs hold far more than the helper's own
+// entry, so only these entry builders decide content, and the splice under it
+// decides bytes. Codex keeps TOML, whose one writer (BurntSushi) round-trips
+// the whole file; that is its own contract, unchanged here.
 
-func claudeEntry(command string, args []string) map[string]any {
-	return map[string]any{"command": command, "args": jsonArgs(args)}
+// mergeClaudeJSON registers the helper in a Claude Code config: "command"
+// with the binary, "args" with the launch flags, under "mcpServers".
+//
+// The binary and the --config pair are the helper's to manage. Anything else
+// in the entry — env settings, a timeout — and every other byte of the file
+// survives the registration untouched.
+func mergeClaudeJSON(existing, command, configPath string) (string, error) {
+	return jsonMerge(existing, "mcpServers", func(entryRaw, indent string) string {
+		managed := []managedMember{
+			{key: "command", text: compactValue(command)},
+			{key: "args", text: compactValue(mergeArgs(argvFromMember(entryRaw, "args"), configPath))},
+		}
+		return spliceEntry(entryRaw, indent, managed)
+	})
 }
 
-func opencodeEntry(command string, args []string) map[string]any {
-	argv := append([]string{command}, args...)
-	return map[string]any{"type": "local", "command": argv, "enabled": true}
+// mergeOpenCodeJSON registers the helper in an OpenCode config: the whole
+// argv in "command", under "mcp".
+//
+// OpenCode keeps the executable and its flags in one array, so re-pinning the
+// binary has to keep the flags a user added by hand: the old binary and any
+// --config pair are replaced, everything after them — a --repo, say — keeps
+// its place.
+func mergeOpenCodeJSON(existing, command, configPath string) (string, error) {
+	return jsonMerge(existing, "mcp", func(entryRaw, indent string) string {
+		managed := []managedMember{
+			{key: "type", text: compactValue("local")},
+			{key: "command", text: compactValue(mergeArgv(commandArgv(entryRaw), command, configPath))},
+			{key: "enabled", text: compactValue(true)},
+		}
+		return spliceEntry(entryRaw, indent, managed)
+	})
 }
 
-// jsonArgs keeps an absent argument list an empty array rather than null, which
-// is what the clients' schemas expect and what makes a re-run compare equal.
+// commandArgv reads the command array out of an existing OpenCode entry. A
+// missing or unreadable one reads as empty, which leaves the user's flags
+// none the worse: there are none.
+func commandArgv(entryRaw string) []string {
+	pos, err := jsonSkip(entryRaw, 0)
+	if err != nil || pos >= len(entryRaw) || entryRaw[pos] != '{' {
+		return nil
+	}
+	obj, err := jsonScanObject(entryRaw, pos)
+	if err != nil {
+		return nil
+	}
+	member, ok := obj.member("command")
+	if !ok {
+		return nil
+	}
+	return stringArgv(entryRaw, member.valStart)
+}
+
+// argvFromMember reads a string-array member out of an existing entry, for
+// the clients that keep their flags in a separate "args".
+func argvFromMember(entryRaw, key string) []string {
+	pos, err := jsonSkip(entryRaw, 0)
+	if err != nil || pos >= len(entryRaw) || entryRaw[pos] != '{' {
+		return nil
+	}
+	obj, err := jsonScanObject(entryRaw, pos)
+	if err != nil {
+		return nil
+	}
+	member, ok := obj.member(key)
+	if !ok {
+		return nil
+	}
+	return stringArgv(entryRaw, member.valStart)
+}
+
+// jsonArgs keeps an absent argument list an empty array rather than null,
+// which is what the clients' schemas expect and what makes a re-run compare
+// equal.
 func jsonArgs(args []string) []string {
 	if args == nil {
 		return []string{}
@@ -45,167 +108,97 @@ func sectionFor(format configFormat) string {
 	}
 }
 
-// registeredCommand returns the executable a client would start for the helper,
-// and whether it has an entry for the helper at all.
+// registeredCommand returns the executable a client would start for the
+// helper, and whether it has an entry for the helper at all.
 //
 // The clients disagree about the shape: Claude Code and Codex keep the
 // executable in "command" with the rest in "args", while OpenCode keeps the
-// whole argv in "command". Both are read, because a status check wants the same
-// fact either way — which binary this client is going to try to start, so that
-// an entry pointing at a helper that has since moved can be told apart from no
-// entry at all. The client itself cannot make that distinction visible: both
-// look like tools that are not there.
+// whole argv in "command". Both are read, because a status check wants the
+// same fact either way — which binary this client is going to try to start,
+// so that an entry pointing at a helper that has since moved can be told
+// apart from no entry at all. The client itself cannot make that distinction
+// visible: both look like tools that are not there.
+//
+// The JSON half reads through the lenient scanner, so a config with comments
+// — legal JSONC to OpenCode — answers instead of erroring.
 func registeredCommand(existing string, format configFormat) (string, bool, error) {
 	if strings.TrimSpace(existing) == "" {
 		return "", false, nil
 	}
-	decode := decodeJSON
 	if format == codexTOML {
-		decode = decodeTOML
+		root, err := decodeTOML(existing)
+		if err != nil {
+			return "", false, err
+		}
+		table, ok := root["mcp_servers"].(map[string]any)
+		if !ok {
+			return "", false, nil
+		}
+		entry, ok := table[serverName].(map[string]any)
+		if !ok {
+			return "", false, nil
+		}
+		command, _ := entry["command"].(string)
+		return command, true, nil
 	}
-	root, err := decode(existing)
+	return registeredJSONCommand(existing, sectionFor(format))
+}
+
+// registeredJSONCommand reads the helper's command through the surgical
+// scanner: tolerant of comments and trailing commas, deaf to layout.
+func registeredJSONCommand(existing, section string) (string, bool, error) {
+	root, err := jsonScanRoot(existing)
 	if err != nil {
 		return "", false, err
 	}
-
-	table, ok := root[sectionFor(format)].(map[string]any)
+	secMember, ok := root.member(section)
 	if !ok {
 		return "", false, nil
 	}
-	entry, ok := table[serverName].(map[string]any)
+	sec, isObject, err := jsonScanValueObject(existing, secMember.valStart)
+	if err != nil || !isObject {
+		return "", false, err
+	}
+	entry, ok := sec.member(serverName)
 	if !ok {
 		return "", false, nil
 	}
-	switch command := entry["command"].(type) {
-	case string:
-		return command, true, nil
-	case []any:
-		if len(command) == 0 {
-			return "", true, nil
-		}
-		first, _ := command[0].(string)
-		return first, true, nil
-	default:
+	entryObject, isObject, err := jsonScanValueObject(existing, entry.valStart)
+	if err != nil || !isObject {
+		// Registered, but not an entry the helper can read: the caller
+		// reports the binary as unknown rather than absent.
+		return "", true, err
+	}
+	command, ok := entryObject.member("command")
+	if !ok {
 		return "", true, nil
 	}
+	raw := existing[command.valStart:command.valEnd]
+	if strings.HasPrefix(raw, "\"") {
+		if _, decoded, err := jsonScanString(existing, command.valStart); err == nil {
+			return decoded, true, nil
+		}
+		return "", true, nil
+	}
+	if argv := stringArgv(existing, command.valStart); len(argv) > 0 {
+		return argv[0], true, nil
+	}
+	return "", true, nil
 }
 
-// mergeJSON inserts the helper under section, leaving every other key of the
-// file intact.
-func mergeJSON(existing string, section string, entry map[string]any) (string, error) {
-	root, err := decodeJSON(existing)
-	if err != nil {
-		return "", err
-	}
-
-	servers, ok := root[section]
-	if !ok || servers == nil {
-		servers = map[string]any{}
-	}
-	table, ok := servers.(map[string]any)
-	if !ok {
-		return "", fmt.Errorf("%q in the existing config is not a map", section)
-	}
-	table[serverName] = mergeEntry(table[serverName], entry)
-	root[section] = table
-
-	return encodeJSON(root)
-}
-
-// mergeEntry writes wanted over the entry that is already there, rather than
-// replacing it.
-//
-// The keys the helper sets are the ones it knows about — the command line, and
-// how the client should launch it. Everything else under the entry belongs to
-// the user: Codex keeps per-tool approval_mode there, and the JSON clients take
-// env and timeout settings. Replacing the entry wholesale would silently
-// discard those on every re-registration, which is the sort of loss nobody
-// notices until an approval prompt they had turned off comes back.
-func mergeEntry(existing any, wanted map[string]any) map[string]any {
-	merged, ok := existing.(map[string]any)
-	if !ok {
-		return wanted
-	}
-	for key, value := range wanted {
-		merged[key] = value
-	}
-	return merged
-}
-
-// withoutJSON drops the helper from section, and section itself once it holds
-// nothing else, so uninstalling leaves the file as clean as it found it. A nil
-// result says the helper was not there — the caller writes nothing at all in
-// that case, which is what keeps a re-run from reformatting a config for no
-// reason.
+// withoutJSON drops the helper from section — its entry and, once that is
+// all the section held, the section — leaving every other byte of the file
+// as it found it. A nil result says the helper was not there, and the caller
+// writes nothing at all, which is what keeps a re-run from reformatting a
+// config for no reason.
 func withoutJSON(existing string, section string) (*string, error) {
-	if strings.TrimSpace(existing) == "" {
-		return nil, nil
-	}
-	root, err := decodeJSON(existing)
-	if err != nil {
-		return nil, err
-	}
-
-	table, ok := root[section].(map[string]any)
-	if !ok {
-		return nil, nil
-	}
-	if _, ok := table[serverName]; !ok {
-		return nil, nil
-	}
-	delete(table, serverName)
-	if len(table) == 0 {
-		delete(root, section)
-	}
-	if len(root) == 0 {
-		// A config file whose whole content would be {} says nothing that its
-		// absence does not. Reporting it as empty lets the caller take the file
-		// away instead of leaving a husk behind.
-		empty := ""
-		return &empty, nil
-	}
-
-	text, err := encodeJSON(root)
-	if err != nil {
-		return nil, err
-	}
-	return &text, nil
+	return jsonWithout(existing, section)
 }
 
-// decodeJSON reads the file into a tree, treating an empty file as an empty
-// object. Numbers are kept as json.Number so that re-encoding a config the
-// helper only passed through cannot round a large integer through float64.
-func decodeJSON(existing string) (map[string]any, error) {
-	if strings.TrimSpace(existing) == "" {
-		return map[string]any{}, nil
-	}
-	decoder := json.NewDecoder(strings.NewReader(existing))
-	decoder.UseNumber()
-	var root any
-	if err := decoder.Decode(&root); err != nil {
-		return nil, fmt.Errorf("existing config is not valid JSON: %w", err)
-	}
-	table, ok := root.(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("existing config is not a JSON object")
-	}
-	return table, nil
-}
-
-func encodeJSON(root map[string]any) (string, error) {
-	var buffer bytes.Buffer
-	encoder := json.NewEncoder(&buffer)
-	encoder.SetIndent("", "  ")
-	// The clients' configs hold URLs and shell arguments, where escaping &, <
-	// and > would rewrite somebody else's entry into something they no longer
-	// recognise.
-	encoder.SetEscapeHTML(false)
-	if err := encoder.Encode(root); err != nil {
-		return "", fmt.Errorf("encode config: %w", err)
-	}
-	return buffer.String(), nil
-}
-
+// mergeCodexTOML inserts the helper into Codex's TOML config. TOML has no
+// surgical editor here: BurntSushi's decoder is the only reader this repo
+// has for it, and re-encoding the whole file is the contract Codex users
+// already live with.
 func mergeCodexTOML(existing string, command string, args []string) (string, error) {
 	root, err := decodeTOML(existing)
 	if err != nil {
@@ -256,6 +249,21 @@ func withoutCodexTOML(existing string) (*string, error) {
 	return &text, nil
 }
 
+// mergeEntry writes wanted over the entry that is already there, rather than
+// replacing it. The keys the helper sets are the ones it knows about;
+// everything else under the entry belongs to the user. (TOML path only — the
+// JSON clients go through spliceEntry, which keeps the bytes too.)
+func mergeEntry(existing any, wanted map[string]any) map[string]any {
+	merged, ok := existing.(map[string]any)
+	if !ok {
+		return wanted
+	}
+	for key, value := range wanted {
+		merged[key] = value
+	}
+	return merged
+}
+
 func decodeTOML(existing string) (map[string]any, error) {
 	root := map[string]any{}
 	if strings.TrimSpace(existing) == "" {
@@ -268,7 +276,7 @@ func decodeTOML(existing string) (map[string]any, error) {
 }
 
 func encodeTOML(root map[string]any) (string, error) {
-	var buffer bytes.Buffer
+	var buffer strings.Builder
 	if err := toml.NewEncoder(&buffer).Encode(root); err != nil {
 		return "", fmt.Errorf("encode config: %w", err)
 	}
