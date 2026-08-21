@@ -24,6 +24,7 @@ import (
 	"github.com/alvnukov/mcp-ai-helper/internal/config"
 	"github.com/alvnukov/mcp-ai-helper/internal/evidence"
 	"github.com/alvnukov/mcp-ai-helper/internal/security"
+	"github.com/alvnukov/mcp-ai-helper/internal/vars"
 )
 
 // Context keys for per-request secret injection.
@@ -47,6 +48,57 @@ func secretsFromContext(ctx context.Context) ([]string, *security.Mask) {
 	envs, _ := ctx.Value(secretEnvsKey).([]string)
 	mask, _ := ctx.Value(secretMaskKey).(*security.Mask)
 	return envs, mask
+}
+
+const execValuesKey contextKey = "exec_values"
+
+// Exec carries the value channels of one execution to the runner: template
+// variables applied to command and stdin at execution time, and stdin content
+// piped to the process. Records keep the template as written, so substituted
+// secret values never reach history.
+type Exec struct {
+	Vars  map[string]string
+	Stdin string
+}
+
+// ContextWithExec stores per-execution value channels in the context.
+func ContextWithExec(ctx context.Context, exec Exec) context.Context {
+	return context.WithValue(ctx, execValuesKey, exec)
+}
+
+func execFromContext(ctx context.Context) Exec {
+	values, _ := ctx.Value(execValuesKey).(Exec)
+	return values
+}
+
+// PrepareExec validates the value channels of one execution — secret handles,
+// explicit vars and env, stdin or stdin_var — and returns the context the
+// runner consumes. It fails closed on every ambiguity before anything runs.
+func PrepareExec(ctx context.Context, cfg *config.Config, handles []string, explicitVars map[string]string, explicitEnv map[string]string, stdin string, stdinVar string) (context.Context, error) {
+	if stdin != "" && stdinVar != "" {
+		return ctx, errors.New("stdin and stdin_var are mutually exclusive; pass stdin content or a var name, not both")
+	}
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+	resolved, err := cfg.ResolveValues(handles, explicitVars, explicitEnv)
+	if err != nil {
+		return ctx, err
+	}
+	if stdinVar != "" {
+		value, ok := resolved.Vars[stdinVar]
+		if !ok {
+			return ctx, fmt.Errorf("stdin_var %q has no value; pass it in vars or secret_handles", stdinVar)
+		}
+		stdin = value
+	}
+	if resolved.Mask != nil || len(resolved.Env) > 0 {
+		ctx = ContextWithSecrets(ctx, resolved.Env, resolved.Mask)
+	}
+	if len(resolved.Vars) > 0 || stdin != "" {
+		ctx = ContextWithExec(ctx, Exec{Vars: resolved.Vars, Stdin: stdin})
+	}
+	return ctx, nil
 }
 
 type activeCommand struct {
@@ -274,13 +326,34 @@ func (r *Runner) executePrepared(ctx context.Context, commandID string, cmd stri
 		sum := sha256.Sum256([]byte(strings.Join(stdoutLines, "\n") + "\n" + strings.Join(stderrLines, "\n")))
 		_ = r.history.UpdateRunningOutput(commandID, stdoutLines, stderrLines, combined, outputTruncated, hex.EncodeToString(sum[:]))
 	}
+	resolvedCmd := cmd
+	resolvedStdin := execFromContext(ctx).Stdin
+	if values := execFromContext(ctx).Vars; len(values) > 0 {
+		substituted, subErr := vars.Substitute(cmd, values)
+		if subErr != nil {
+			r.recordFailedPreparation(ctx, commandID, cmd, runCWD, repoPath, started, subErr)
+			return Result{}, subErr
+		}
+		resolvedCmd = substituted
+		if resolvedStdin != "" {
+			substituted, subErr := vars.Substitute(resolvedStdin, values)
+			if subErr != nil {
+				r.recordFailedPreparation(ctx, commandID, cmd, runCWD, repoPath, started, subErr)
+				return Result{}, subErr
+			}
+			resolvedStdin = substituted
+		}
+	}
 	output := newLiveOutput(r.policy.MaxOutputBytes, updateRunningOutput)
 	// #nosec G204 -- command execution is this package's explicit MCP capability and is constrained by cwd, timeout, and output policy.
-	command := exec.CommandContext(runCtx, shellBin(), shellArgs(cmd)...)
+	command := exec.CommandContext(runCtx, shellBin(), shellArgs(resolvedCmd)...)
 	command.Dir = runCWD
 	configureCommandTermination(command)
 	if len(envs) > 0 {
-		command.Env = append(os.Environ(), envs...)
+		command.Env = mergeEnv(os.Environ(), envs)
+	}
+	if resolvedStdin != "" {
+		command.Stdin = strings.NewReader(resolvedStdin)
 	}
 	command.Stdout = output.stdoutWriter()
 	command.Stderr = output.stderrWriter()
@@ -377,6 +450,65 @@ func (r *Runner) executePrepared(ctx context.Context, commandID string, cmd stri
 		FailureMarkers:    maskedFailureMarkers(exitCode, combined),
 		EvidenceDistilled: evidenceDistilled,
 	}, nil
+}
+
+// recordFailedPreparation closes a running history record for a command that
+// never started: template substitution failed, and an orphaned running
+// record would outlive the call that created it.
+func (r *Runner) recordFailedPreparation(ctx context.Context, commandID string, cmd string, runCWD string, repoPath string, started time.Time, cause error) {
+	if r.history == nil {
+		return
+	}
+	now := time.Now().UTC()
+	lines := []string{cause.Error()}
+	_ = r.history.Put(Record{
+		CommandID:   commandID,
+		Status:      "failed",
+		RepoPath:    repoPath,
+		Command:     r.maskText(ctx, cmd),
+		CWD:         runCWD,
+		ExitCode:    1,
+		DurationMS:  now.Sub(started).Milliseconds(),
+		Stderr:      lines,
+		Combined:    lines,
+		StartedAt:   started,
+		CompletedAt: now,
+		CreatedAt:   now,
+	})
+}
+
+// mergeEnv merges KEY=value pairs over base; a key set by a later overlay
+// replaces its earlier value in place, so exactly one entry per key reaches
+// the process and the last writer wins deterministically.
+func mergeEnv(base []string, overlays ...[]string) []string {
+	order := make([]string, 0, len(base))
+	values := make(map[string]string, len(base))
+	put := func(pair string) {
+		key, value := pair, ""
+		if i := strings.Index(pair, "="); i >= 0 {
+			key, value = pair[:i], pair[i+1:]
+		}
+		if key == "" {
+			return
+		}
+		if _, seen := values[key]; !seen {
+			order = append(order, key)
+		}
+		values[key] = value
+	}
+	for _, pair := range base {
+		put(pair)
+	}
+	for _, overlay := range overlays {
+		for _, pair := range overlay {
+			put(pair)
+		}
+	}
+	merged := make([]string, 0, len(order))
+	for _, key := range order {
+		merged = append(merged, key+"="+values[key])
+	}
+	return merged
 }
 
 // previousRun looks for a recent run of the same command in the same repository.

@@ -124,7 +124,7 @@ func registerCommandTools(srv *server.MCPServer, deps *Server) {
 	}
 	srv.AddTool(basemcp.NewTool("command",
 		runsCommands,
-		basemcp.WithDescription("Command execution and history management. Required: action. Actions: run (command, repo_path, cwd?, timeout_seconds?, mcp_wait_seconds?) — run a command under policy limits; the reply carries previous when the same command already ran in this repo within the hour, and previous.same_output means the repeat produced byte-identical output; cleanup () — remove old command log records; abort (command_id) — abort a running command; list (repo_path?, status?, limit?) — list recent command history; get (command_id, mode?, wait_seconds?, include?, exclude?, preset?, max_lines?, context_before?, context_after?) — get durable command status/result, blocking up to wait_seconds until it finishes instead of sleeping in a shell; filter (command_id, include?, exclude?, preset?, max_lines?, context_before?, context_after?) — grep retained command output; health (repo_path) — quick build/vet/test check. A run or get reply carries failure_markers when the output reports a failure the exit code did not, which is what a pipe into tail, head or grep does to it."),
+		basemcp.WithDescription("Command execution and history management. Required: action. Actions: run (command, repo_path, cwd?, env?, vars?, stdin?/stdin_var?, secret_handles?, timeout_seconds?, mcp_wait_seconds?, filter?) — run a command under policy limits; values ride as data: env injects $NAME, vars substitute {{NAME}} into command/stdin, stdin/stdin_var pipe stdin, secret_handles resolve to {{NAME}}/$NAME/$HELPER_SECRET_NAME masked as [HELPER_SECRET:NAME]; the reply carries previous when the same command already ran in this repo within the hour, and previous.same_output means the repeat produced byte-identical output; cleanup () — remove old command log records; abort (command_id) — abort a running command; list (repo_path?, status?, limit?) — list recent command history; get (command_id, mode?, wait_seconds?, include?, exclude?, preset?, max_lines?, context_before?, context_after?) — get durable command status/result, blocking up to wait_seconds until it finishes instead of sleeping in a shell; filter (command_id, include?, exclude?, preset?, max_lines?, context_before?, context_after?) — grep retained command output; health (repo_path) — quick build/vet/test check. A run or get reply carries failure_markers when the output reports a failure the exit code did not, which is what a pipe into tail, head or grep does to it."),
 		basemcp.WithString("action", basemcp.Required(), actionEnum(commandActions)),
 		basemcp.WithString("command", basemcp.Description("Shell command. Required for run.")),
 		basemcp.WithString("repo_path", basemcp.Description("Repository root. Required for run and health; optional for list.")),
@@ -135,6 +135,11 @@ func registerCommandTools(srv *server.MCPServer, deps *Server) {
 		basemcp.WithNumber("limit", basemcp.Description("Max entries for list (default 50, max 200).")),
 		basemcp.WithNumber("timeout_seconds", basemcp.Description("Execution timeout in seconds (run action).")),
 		basemcp.WithNumber("mcp_wait_seconds", basemcp.Description("MCP wait budget before returning running + command_id (run action).")),
+		basemcp.WithObject("env", basemcp.Description("Map of NAME to value injected into the process environment (run action); reference as $NAME, always double-quoted. Values are caller data, not redacted — use secret_handles for secrets.")),
+		basemcp.WithObject("vars", basemcp.Description("Map of NAME to value substituted into command and stdin as {{NAME}} before the shell parses anything (run action). Literal, non-recursive; {{{{ writes a literal {{; an unknown {{NAME}} fails closed listing known names.")),
+		basemcp.WithString("stdin", basemcp.Description("String piped to the command's stdin instead of a heredoc (run action); {{NAME}} substitution applies.")),
+		basemcp.WithString("stdin_var", basemcp.Description("Name of a var whose value is piped to stdin (run action); mutually exclusive with stdin.")),
+		basemcp.WithArray("secret_handles", basemcp.Description("Server-config secret handles (run action): each resolves to {{NAME}} substitution plus $NAME and $HELPER_SECRET_NAME in the environment, masked in output as [HELPER_SECRET:NAME]."), basemcp.WithStringItems()),
 		basemcp.WithNumber("wait_seconds", basemcp.Description("Block up to this long waiting for a running command to finish (get action, max 600). Use instead of sleeping in a shell command.")),
 		basemcp.WithString("include", basemcp.Description("Regex include pattern (get/filter).")),
 		basemcp.WithString("exclude", basemcp.Description("Regex exclude pattern applied after include (get/filter).")),
@@ -148,12 +153,17 @@ func registerCommandTools(srv *server.MCPServer, deps *Server) {
 
 func commandActionRun(ctx context.Context, req basemcp.CallToolRequest, deps *Server) (*basemcp.CallToolResult, error) {
 	var args struct {
-		Command        string         `json:"command"`
-		RepoPath       string         `json:"repo_path"`
-		CWD            string         `json:"cwd"`
-		TimeoutSeconds int            `json:"timeout_seconds"`
-		MCPWaitSeconds int            `json:"mcp_wait_seconds"`
-		Filter         command.Filter `json:"filter"`
+		Command        string            `json:"command"`
+		RepoPath       string            `json:"repo_path"`
+		CWD            string            `json:"cwd"`
+		TimeoutSeconds int               `json:"timeout_seconds"`
+		MCPWaitSeconds int               `json:"mcp_wait_seconds"`
+		Filter         command.Filter    `json:"filter"`
+		Env            map[string]string `json:"env"`
+		Vars           map[string]string `json:"vars"`
+		Stdin          string            `json:"stdin"`
+		StdinVar       string            `json:"stdin_var"`
+		SecretHandles  []string          `json:"secret_handles"`
 	}
 	if err := bind(req, &args); err != nil {
 		return basemcp.NewToolResultError(err.Error()), nil
@@ -168,7 +178,15 @@ func commandActionRun(ctx context.Context, req basemcp.CallToolRequest, deps *Se
 	if err != nil {
 		return basemcp.NewToolResultError(err.Error()), nil
 	}
-	result, err := cmds.RunFilteredInRepoWithWait(ctx, args.Command, args.RepoPath, args.CWD, args.TimeoutSeconds, args.MCPWaitSeconds, args.Filter)
+	cfg, err := deps.mergedConfigForRepo(args.RepoPath)
+	if err != nil {
+		return basemcp.NewToolResultError(err.Error()), nil
+	}
+	execCtx, err := command.PrepareExec(ctx, cfg, args.SecretHandles, args.Vars, args.Env, args.Stdin, args.StdinVar)
+	if err != nil {
+		return basemcp.NewToolResultError(err.Error()), nil
+	}
+	result, err := cmds.RunFilteredInRepoWithWait(execCtx, args.Command, args.RepoPath, args.CWD, args.TimeoutSeconds, args.MCPWaitSeconds, args.Filter)
 	if err != nil {
 		return basemcp.NewToolResultError(err.Error()), nil
 	}

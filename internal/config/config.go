@@ -14,6 +14,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/alvnukov/mcp-ai-helper/internal/security"
+	"github.com/alvnukov/mcp-ai-helper/internal/vars"
 )
 
 const (
@@ -38,6 +39,11 @@ const defaultAssistantGuidance = `mcp-ai-helper operating guidance:
 5. Execute: prefer one self-contained run action=workflow: minimal edits -> formatting -> focused checks -> task status transition -> git action=commit. Never split code commit and task status into a post-hoc status commit.
 6. Close only when acceptance criteria, relevant gate, task transition, and owned-files commit all succeeded. If there is no such unified commit means the task is not done.
 7. On failure: inspect actual state once, form a new hypothesis, and run the next minimal check. Do not repeat the same failed command without new information.
+
+## Values as Data
+
+1. Pass values as data instead of nesting shell quotes: env maps reach the command as "$NAME" (always double-quoted), vars maps substitute {{NAME}} into command and stdin before the shell parses anything, stdin/stdin_var replaces heredocs, and secret_handles resolve to {{NAME}}, $NAME and $HELPER_SECRET_NAME while staying masked in output.
+2. An unknown {{NAME}} fails closed and lists the known names; write {{{{ for a literal {{. Substitution never touches repo_path or other path arguments.
 
 ## Tool Discovery Hints
 
@@ -115,6 +121,85 @@ func (c Config) ResolveSecretEnv(handles []string) ([]string, *security.Mask, er
 		mask.AddNamed(h, s.Value)
 	}
 	return envs, mask, nil
+}
+
+// reservedEnvNames may not be used as plain secret-handle environment names:
+// injecting HOME=... or PATH=... would break process startup in ways the
+// caller cannot see. The HELPER_SECRET_<NAME> alias stays available through
+// ResolveSecretEnv, which does not inject plain names.
+var reservedEnvNames = map[string]struct{}{
+	"PATH": {}, "HOME": {}, "TMPDIR": {}, "USER": {}, "LOGNAME": {},
+	"SHELL": {}, "PWD": {}, "LANG": {}, "LC_ALL": {}, "TERM": {}, "TZ": {},
+}
+
+// ResolvedValues is the complete value-channel set for one execution.
+type ResolvedValues struct {
+	// Vars is the {{name}} substitution scope: explicit vars plus the value
+	// of every requested secret handle.
+	Vars map[string]string
+	// Env holds KEY=value pairs to merge over the inherited environment:
+	// HELPER_SECRET_<NAME> and plain <NAME> per handle, then explicit env.
+	Env []string
+	// Mask redacts resolved secret values from retained output.
+	Mask *security.Mask
+}
+
+// ResolveValues merges secret handles with explicit vars and env for one
+// execution. It fails closed on every ambiguity that would make $NAME and
+// {{NAME}} resolve differently: a var colliding with a handle, an env key
+// colliding with a handle, a handle shadowing a reserved environment name,
+// and malformed names. Explicit env values are caller-chosen data and are
+// not added to the mask.
+func (c Config) ResolveValues(handles []string, explicitVars map[string]string, explicitEnv map[string]string) (ResolvedValues, error) {
+	resolved := ResolvedValues{Vars: make(map[string]string, len(explicitVars)+len(handles))}
+	for name := range explicitVars {
+		if !vars.ValidateName(name) {
+			return ResolvedValues{}, fmt.Errorf("invalid vars name %q: must match ^[A-Za-z_][A-Za-z0-9_-]{0,63}$", name)
+		}
+	}
+	for name := range explicitEnv {
+		if name == "" || strings.ContainsAny(name, "=\x00") {
+			return ResolvedValues{}, fmt.Errorf("invalid env name %q", name)
+		}
+	}
+	var mask *security.Mask
+	if len(handles) > 0 {
+		mask = security.NewMask()
+	}
+	for _, h := range handles {
+		if !validSecretHandle.MatchString(h) {
+			return ResolvedValues{}, fmt.Errorf("invalid secret handle: %s", h)
+		}
+		if _, reserved := reservedEnvNames[h]; reserved {
+			return ResolvedValues{}, fmt.Errorf("secret handle %s is a reserved environment name; rename the handle", h)
+		}
+		if _, clash := explicitVars[h]; clash {
+			return ResolvedValues{}, fmt.Errorf("vars[%s] collides with secret handle %s: rename one so {{%s}} keeps a single meaning", h, h, h)
+		}
+		if _, clash := explicitEnv[h]; clash {
+			return ResolvedValues{}, fmt.Errorf("env[%s] collides with secret handle %s: $%s and {{%s}} would resolve to different values; drop one", h, h, h, h)
+		}
+		s, ok := c.Secrets[h]
+		if !ok {
+			return ResolvedValues{}, fmt.Errorf("secret handle not found: %s", h)
+		}
+		if !s.Enabled {
+			return ResolvedValues{}, fmt.Errorf("secret is disabled: %s", h)
+		}
+		if len(s.Value) < 8 {
+			return ResolvedValues{}, fmt.Errorf("secret value too short for handle: %s", h)
+		}
+		resolved.Vars[h] = s.Value
+		resolved.Env = append(resolved.Env, "HELPER_SECRET_"+h+"="+s.Value, h+"="+s.Value)
+		mask.AddNamed(h, s.Value)
+	}
+	for name, value := range explicitVars {
+		resolved.Vars[name] = value
+	}
+	for name, value := range explicitEnv {
+		resolved.Env = append(resolved.Env, name+"="+value)
+	}
+	return resolved, nil
 }
 
 // SecretMask returns a redaction mask for all configured server-side secrets.

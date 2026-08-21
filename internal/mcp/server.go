@@ -169,19 +169,37 @@ func buildDeps(cfg *config.Config) (provider.ChatClient, *command.Runner, *pipel
 	return chat, cmds, pipes, store, backend
 }
 
-func (s *Server) commandRunnerForRepo(repoPath string, toolName string) (*command.Runner, error) {
-	cfg, _, cmds, _, _ := s.loadDeps()
+// mergedConfigForRepo returns the server config with repo-local overrides
+// merged in, for surfaces that need config values rather than a runner.
+func (s *Server) mergedConfigForRepo(repoPath string) (*config.Config, error) {
+	cfg, _, _, _, _ := s.loadDeps()
 	repoCfg, err := config.LoadRepoConfig(repoPath)
 	if err != nil {
 		return nil, err
 	}
 	if repoCfg == nil {
+		return cfg, nil
+	}
+	merged, err := config.MergeRepoConfig(cfg, repoCfg, repoPath)
+	if err != nil {
+		return nil, err
+	}
+	return merged, nil
+}
+
+func (s *Server) commandRunnerForRepo(repoPath string, toolName string) (*command.Runner, error) {
+	repoCfg, err := config.LoadRepoConfig(repoPath)
+	if err != nil {
+		return nil, err
+	}
+	if repoCfg == nil {
+		_, _, cmds, _, _ := s.loadDeps()
 		return cmds, nil
 	}
 	if repoCfg.ToolDenied(toolName) {
 		return nil, fmt.Errorf("tool %q is denied by repo-local config", toolName)
 	}
-	merged, err := config.MergeRepoConfig(cfg, repoCfg, repoPath)
+	merged, err := s.mergedConfigForRepo(repoPath)
 	if err != nil {
 		return nil, err
 	}

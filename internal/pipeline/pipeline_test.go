@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alvnukov/mcp-ai-helper/internal/command"
 	"github.com/alvnukov/mcp-ai-helper/internal/config"
 )
 
@@ -1449,5 +1450,145 @@ func TestRunWorkflowRejectsMalformedWriteBase64BeforeAnyStepRuns(t *testing.T) {
 	}
 	if _, statErr := os.Stat(filepath.Join(dir, "created.txt")); !os.IsNotExist(statErr) {
 		t.Fatalf("created.txt state: %v", statErr)
+	}
+}
+
+func TestRunPipelineVarsEnvStdin(t *testing.T) {
+	dir := t.TempDir()
+	runner := NewRunner(testConfig(dir), nil)
+	result, err := runner.Run(t.Context(), Request{
+		RepoPath: dir,
+		Command:  "printf '%s|%s' \"{{GREETING}}\" \"$WHO\"",
+		Env:      map[string]string{"WHO": "env"},
+		Vars:     map[string]string{"GREETING": "vars"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Command.ExitCode != 0 {
+		t.Fatalf("exit = %d, stderr = %v", result.Command.ExitCode, result.Command.StderrTail)
+	}
+	if joined := strings.Join(result.Command.StdoutTail, "\n"); joined != "vars|env" {
+		t.Fatalf("stdout = %q, want vars|env", joined)
+	}
+	if !strings.Contains(result.Command.Command, "{{GREETING}}") {
+		t.Fatalf("records must keep the template command, got %q", result.Command.Command)
+	}
+}
+
+func TestRunPipelineStdinVarReplacesHeredoc(t *testing.T) {
+	dir := t.TempDir()
+	runner := NewRunner(testConfig(dir), nil)
+	result, err := runner.Run(t.Context(), Request{
+		RepoPath: dir,
+		Command:  "cat",
+		StdinVar: "PAYLOAD",
+		Vars:     map[string]string{"PAYLOAD": "first line\nsecond \"quoted\" line\n"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(result.Command.StdoutTail, "\n")
+	if !strings.Contains(joined, "first line") || !strings.Contains(joined, `second "quoted" line`) {
+		t.Fatalf("stdout = %q, want stdin_var payload piped verbatim", joined)
+	}
+}
+
+func TestRunPipelineUnknownVarFailsClosed(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "must-not-exist")
+	runner := NewRunner(testConfig(dir), nil)
+	_, err := runner.Run(t.Context(), Request{
+		RepoPath: dir,
+		Command:  "touch " + marker + "; echo {{UNKNOWN}}",
+		Vars:     map[string]string{"KNOWN": "x"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "Known variables: KNOWN") {
+		t.Fatalf("err = %v, want fail-closed teaching error", err)
+	}
+	if _, statErr := os.Stat(marker); !os.IsNotExist(statErr) {
+		t.Fatal("command must not run when a template reference has no value")
+	}
+}
+
+func TestRunWorkflowSecretHandleEquivalenceAcrossChannels(t *testing.T) {
+	dir := t.TempDir()
+	cfg := testConfig(dir)
+	cfg.Secrets = map[string]config.SecretConfig{
+		"GH_TOKEN": {Value: "fake-gh-token-42a7b9c1d3e5f", Enabled: true},
+	}
+	runner := NewRunner(cfg, nil)
+	result, err := runner.RunWorkflow(t.Context(), WorkflowRequest{
+		RepoPath:      dir,
+		SecretHandles: []string{"GH_TOKEN"},
+		Checks: []WorkflowCommand{{
+			Command: "sh -c 'test \"{{GH_TOKEN}}\" = \"$GH_TOKEN\" && test \"$GH_TOKEN\" = \"$HELPER_SECRET_GH_TOKEN\" && printf %s \"$GH_TOKEN\"'",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "ok" {
+		t.Fatalf("status = %q, reason = %q", result.Status, result.Reason)
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(encoded)
+	switch {
+	case strings.Contains(text, "fake-gh-token-42a7b9c1d3e5f"):
+		t.Error("FAIL: raw secret leaked into model-facing output")
+	case strings.Contains(text, "[HELPER_SECRET:GH_TOKEN]"):
+		t.Log("PASS: secret masked while all three channels stayed equal")
+	default:
+		t.Error("FAIL: secret neither leaked nor masked — a channel may be broken")
+	}
+}
+
+func TestRunWorkflowStepVarsEnvStdinAndWriteFileSubstitution(t *testing.T) {
+	dir := t.TempDir()
+	runner := NewRunner(testConfig(dir), nil)
+	result, err := runner.RunWorkflow(t.Context(), WorkflowRequest{
+		RepoPath: dir,
+		Vars:     map[string]string{"TOP": "top-value"},
+		Env:      map[string]string{"WHO": "wf"},
+		Steps: []WorkflowStep{
+			{ID: "write", Tool: "write_file", Args: map[string]any{"path": "out.txt", "content": "{{TOP}}\n"}},
+			{ID: "cmd", Tool: "command", Args: map[string]any{
+				"command": "printf '%s|%s|%s\\n' \"{{TOP}}\" \"$WHO\" \"{{STEP}}\"; cat",
+				"vars":    map[string]any{"STEP": "step-value"},
+				"stdin":   "payload-{{TOP}}\n",
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "ok" {
+		t.Fatalf("status = %q, reason = %q", result.Status, result.Reason)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "out.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "top-value\n" {
+		t.Fatalf("out.txt = %q, want substituted write_file content", data)
+	}
+	for _, step := range result.StepResults {
+		if step.ID != "cmd" {
+			continue
+		}
+		check, ok := step.Output.(command.Result)
+		if !ok {
+			t.Fatalf("cmd step output = %#v, want command.Result", step.Output)
+		}
+		joined := strings.Join(check.StdoutTail, "\n")
+		if !strings.Contains(joined, "top-value|wf|step-value") {
+			t.Fatalf("stdout = %q, want workflow+step vars and env applied", joined)
+		}
+		if !strings.Contains(joined, "payload-top-value") {
+			t.Fatalf("stdout = %q, want stdin substitution applied", joined)
+		}
 	}
 }

@@ -686,3 +686,68 @@ func TestAbortRequiresCommandID(t *testing.T) {
 		t.Fatal("expected error for empty command_id")
 	}
 }
+
+func TestRunnerSubstitutesVarsAndKeepsTemplateInRecords(t *testing.T) {
+	dir := t.TempDir()
+	runner := NewRunner(config.CommandPolicy{AllowedCWDs: []string{dir}, DefaultTimeoutSeconds: 5, MaxOutputBytes: 1000, MaxLines: 20})
+	ctx := ContextWithExec(t.Context(), Exec{Vars: map[string]string{"BRANCH": "feature/vars-env-stdin"}})
+	result, err := runner.Run(ctx, "printf '%s' \"{{BRANCH}}\"", dir, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if joined := strings.Join(result.StdoutTail, "\n"); joined != "feature/vars-env-stdin" {
+		t.Fatalf("stdout = %q, want substituted value", joined)
+	}
+	if !strings.Contains(result.Command, "{{BRANCH}}") {
+		t.Fatalf("records must keep the template command, got %q", result.Command)
+	}
+}
+
+func TestRunnerUnknownVarFailsClosedBeforeExecution(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "marker")
+	runner := NewRunner(config.CommandPolicy{AllowedCWDs: []string{dir}, DefaultTimeoutSeconds: 5, MaxOutputBytes: 1000, MaxLines: 20})
+	ctx := ContextWithExec(t.Context(), Exec{Vars: map[string]string{"KNOWN": "x"}})
+	_, err := runner.Run(ctx, "touch "+marker+"; printf '{{UNKNOWN}}'", dir, 5)
+	if err == nil || !strings.Contains(err.Error(), "Known variables: KNOWN") {
+		t.Fatalf("err = %v, want fail-closed teaching error listing known names", err)
+	}
+	if _, statErr := os.Stat(marker); !os.IsNotExist(statErr) {
+		t.Fatal("command must not run when a template reference has no value")
+	}
+}
+
+func TestRunnerPipesStdinWithSubstitution(t *testing.T) {
+	dir := t.TempDir()
+	runner := NewRunner(config.CommandPolicy{AllowedCWDs: []string{dir}, DefaultTimeoutSeconds: 5, MaxOutputBytes: 1000, MaxLines: 20})
+	ctx := ContextWithExec(t.Context(), Exec{Stdin: "line one\nline {{N}}\n", Vars: map[string]string{"N": "two"}})
+	result, err := runner.Run(ctx, "cat", dir, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(result.StdoutTail, "\n")
+	if !strings.Contains(joined, "line one") || !strings.Contains(joined, "line two") {
+		t.Fatalf("stdout = %q, want stdin piped with substitution", joined)
+	}
+}
+
+func TestRunnerInjectsEnvFromContext(t *testing.T) {
+	dir := t.TempDir()
+	runner := NewRunner(config.CommandPolicy{AllowedCWDs: []string{dir}, DefaultTimeoutSeconds: 5, MaxOutputBytes: 1000, MaxLines: 20})
+	ctx := ContextWithSecrets(t.Context(), []string{"GREETING=adios"}, nil)
+	result, err := runner.Run(ctx, "printf '%s' \"$GREETING\"", dir, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if joined := strings.Join(result.StdoutTail, "\n"); joined != "adios" {
+		t.Fatalf("stdout = %q, want env-injected greeting", joined)
+	}
+}
+
+func TestMergeEnvLastWriterWins(t *testing.T) {
+	merged := mergeEnv([]string{"A=1", "B=2", "A=0"}, []string{"B=3", "C=4"})
+	want := []string{"A=0", "B=3", "C=4"}
+	if !sameStrings(merged, want) {
+		t.Fatalf("merged = %#v, want %#v", merged, want)
+	}
+}

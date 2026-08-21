@@ -3,6 +3,7 @@ package pipeline
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +21,7 @@ import (
 	"github.com/alvnukov/mcp-ai-helper/internal/gitops"
 	"github.com/alvnukov/mcp-ai-helper/internal/provider"
 	"github.com/alvnukov/mcp-ai-helper/internal/tasks"
+	"github.com/alvnukov/mcp-ai-helper/internal/vars"
 	"github.com/alvnukov/mcp-ai-helper/internal/webfetch"
 )
 
@@ -51,20 +53,24 @@ type taskStatusMutationBackend interface {
 
 // Request describes the legacy command-analysis pipeline input.
 type Request struct {
-	CurrentTaskID  string   `json:"current_task_id,omitempty"`
-	TaskOnStart    string   `json:"task_on_start,omitempty"`
-	TaskOnSuccess  string   `json:"task_on_success,omitempty"`
-	TaskOnFailure  string   `json:"task_on_failure,omitempty"`
-	Command        string   `json:"command"`
-	RepoPath       string   `json:"repo_path"`
-	CWD            string   `json:"cwd"`
-	TimeoutSeconds int      `json:"timeout_seconds"`
-	MCPWaitSeconds int      `json:"mcp_wait_seconds"`
-	Analyze        bool     `json:"analyze"`
-	Task           string   `json:"task"`
-	ModelID        string   `json:"model_id"`
-	CompactOutput  *bool    `json:"compact_output,omitempty"`
-	SecretHandles  []string `json:"secret_handles,omitempty"`
+	CurrentTaskID  string            `json:"current_task_id,omitempty"`
+	TaskOnStart    string            `json:"task_on_start,omitempty"`
+	TaskOnSuccess  string            `json:"task_on_success,omitempty"`
+	TaskOnFailure  string            `json:"task_on_failure,omitempty"`
+	Command        string            `json:"command"`
+	RepoPath       string            `json:"repo_path"`
+	CWD            string            `json:"cwd"`
+	TimeoutSeconds int               `json:"timeout_seconds"`
+	MCPWaitSeconds int               `json:"mcp_wait_seconds"`
+	Analyze        bool              `json:"analyze"`
+	Task           string            `json:"task"`
+	ModelID        string            `json:"model_id"`
+	CompactOutput  *bool             `json:"compact_output,omitempty"`
+	SecretHandles  []string          `json:"secret_handles,omitempty"`
+	Env            map[string]string `json:"env,omitempty"`
+	Vars           map[string]string `json:"vars,omitempty"`
+	Stdin          string            `json:"stdin,omitempty"`
+	StdinVar       string            `json:"stdin_var,omitempty"`
 }
 
 // Result is the command-analysis pipeline output.
@@ -111,6 +117,8 @@ type WorkflowRequest struct {
 	Checks        []WorkflowCommand `json:"checks"`
 	Commit        WorkflowCommit    `json:"commit"`
 	SecretHandles []string          `json:"secret_handles,omitempty"`
+	Env           map[string]string `json:"env,omitempty"`
+	Vars          map[string]string `json:"vars,omitempty"`
 }
 
 // WorkflowStep is one deterministic workflow DSL step.
@@ -175,13 +183,17 @@ func (w WorkflowWriteFile) writeRequest(repoPath string) fileops.WriteFileReques
 
 // WorkflowCommand describes one repo-scoped command check.
 type WorkflowCommand struct {
-	Command        string         `json:"command"`
-	CWD            string         `json:"cwd"`
-	TimeoutSeconds int            `json:"timeout_seconds"`
-	MCPWaitSeconds int            `json:"mcp_wait_seconds"`
-	Filter         command.Filter `json:"filter"`
-	WebDocID       string         `json:"web_doc_id,omitempty"`
-	WebDocSource   string         `json:"web_doc_source,omitempty"`
+	Command        string            `json:"command"`
+	CWD            string            `json:"cwd"`
+	TimeoutSeconds int               `json:"timeout_seconds"`
+	MCPWaitSeconds int               `json:"mcp_wait_seconds"`
+	Filter         command.Filter    `json:"filter"`
+	WebDocID       string            `json:"web_doc_id,omitempty"`
+	WebDocSource   string            `json:"web_doc_source,omitempty"`
+	Env            map[string]string `json:"env,omitempty"`
+	Vars           map[string]string `json:"vars,omitempty"`
+	Stdin          string            `json:"stdin,omitempty"`
+	StdinVar       string            `json:"stdin_var,omitempty"`
 }
 
 // WorkflowCommit controls optional owned-file commit behavior.
@@ -261,26 +273,112 @@ func (r *Runner) withWebArtifact(args WorkflowCommand) (WorkflowCommand, error) 
 	return args, nil
 }
 
-// prepareWorkflow validates all request-wide preconditions before lifecycle mutation.
-func (r *Runner) prepareWorkflow(ctx context.Context, req WorkflowRequest) (context.Context, [][]WorkflowStep, error) {
-	if strings.TrimSpace(req.RepoPath) == "" {
-		return ctx, nil, errors.New("repo_path is required")
+// workflowScope is the request-wide value scope resolved once per workflow:
+// template variables (explicit plus secret-handle values) and environment
+// pairs (handle aliases plus explicit env). Command steps merge their own
+// vars and env over it; write_file content is substituted with it.
+type workflowScope struct {
+	resolved config.ResolvedValues
+}
+
+// resolveWorkflowScope resolves every request-wide value channel up front, so
+// a bad handle or name fails the workflow before its first step runs.
+func (r *Runner) resolveWorkflowScope(req WorkflowRequest) (workflowScope, error) {
+	resolved, err := r.cfg.ResolveValues(req.SecretHandles, req.Vars, req.Env)
+	if err != nil {
+		return workflowScope{}, err
 	}
-	if len(req.SecretHandles) > 0 {
-		envs, mask, err := r.cfg.ResolveSecretEnv(req.SecretHandles)
-		if err != nil {
-			return ctx, nil, err
+	return workflowScope{resolved: resolved}, nil
+}
+
+// commandExecContext builds the context one command runs under: scope env with
+// the command's own env appended (last writer wins), scope vars merged with
+// the command's vars (the command wins), and stdin resolved from stdin_var.
+func commandExecContext(ctx context.Context, scope workflowScope, args WorkflowCommand) (context.Context, error) {
+	merged := scope.resolved
+	if len(args.Vars) > 0 {
+		merged.Vars = make(map[string]string, len(scope.resolved.Vars)+len(args.Vars))
+		for name, value := range scope.resolved.Vars {
+			merged.Vars[name] = value
 		}
-		ctx = command.ContextWithSecrets(ctx, envs, mask)
+		for name, value := range args.Vars {
+			merged.Vars[name] = value
+		}
+	}
+	if len(args.Env) > 0 {
+		merged.Env = make([]string, 0, len(scope.resolved.Env)+len(args.Env))
+		merged.Env = append(merged.Env, scope.resolved.Env...)
+		for name, value := range args.Env {
+			merged.Env = append(merged.Env, name+"="+value)
+		}
+	}
+	stdin := args.Stdin
+	if args.StdinVar != "" {
+		if stdin != "" {
+			return ctx, errors.New("stdin and stdin_var are mutually exclusive; pass stdin content or a var name, not both")
+		}
+		value, ok := merged.Vars[args.StdinVar]
+		if !ok {
+			return ctx, fmt.Errorf("stdin_var %q has no value; pass it in vars or secret_handles", args.StdinVar)
+		}
+		stdin = value
+	}
+	if merged.Mask != nil || len(merged.Env) > 0 {
+		ctx = command.ContextWithSecrets(ctx, merged.Env, merged.Mask)
+	}
+	if len(merged.Vars) > 0 || stdin != "" {
+		ctx = command.ContextWithExec(ctx, command.Exec{Vars: merged.Vars, Stdin: stdin})
+	}
+	return ctx, nil
+}
+
+// substituteWriteContent applies {{name}} substitution to the content a
+// write_file step writes, decoded from whichever field carries it.
+func substituteWriteContent(args WorkflowWriteFile, values map[string]string) (WorkflowWriteFile, error) {
+	content := args.Content
+	if args.ContentB64 != "" {
+		decoded, err := base64.StdEncoding.DecodeString(args.ContentB64)
+		if err != nil {
+			return args, err
+		}
+		content = string(decoded)
+	}
+	substituted, err := vars.Substitute(content, values)
+	if err != nil {
+		return args, err
+	}
+	if args.ContentB64 != "" {
+		args.Content = ""
+		args.ContentB64 = base64.StdEncoding.EncodeToString([]byte(substituted))
+		return args, nil
+	}
+	args.Content = substituted
+	return args, nil
+}
+
+// prepareWorkflow validates all request-wide preconditions before lifecycle mutation.
+func (r *Runner) prepareWorkflow(ctx context.Context, req WorkflowRequest) (context.Context, workflowScope, [][]WorkflowStep, error) {
+	if strings.TrimSpace(req.RepoPath) == "" {
+		return ctx, workflowScope{}, nil, errors.New("repo_path is required")
+	}
+	scope, err := r.resolveWorkflowScope(req)
+	if err != nil {
+		return ctx, workflowScope{}, nil, err
+	}
+	if scope.resolved.Mask != nil || len(scope.resolved.Env) > 0 {
+		ctx = command.ContextWithSecrets(ctx, scope.resolved.Env, scope.resolved.Mask)
+	}
+	if len(scope.resolved.Vars) > 0 {
+		ctx = command.ContextWithExec(ctx, command.Exec{Vars: scope.resolved.Vars})
 	}
 	if err := validateEditEncodings(req); err != nil {
-		return ctx, nil, err
+		return ctx, workflowScope{}, nil, err
 	}
 	waves, err := buildStepWaves(req.Steps)
 	if err != nil {
-		return ctx, nil, err
+		return ctx, workflowScope{}, nil, err
 	}
-	return ctx, waves, nil
+	return ctx, scope, waves, nil
 }
 
 // validateEditEncodings decodes every base64 edit argument in the request before
@@ -319,7 +417,7 @@ func validateEditEncodings(req WorkflowRequest) error {
 
 // RunWorkflow executes either the stable steps DSL or the legacy edit/check/commit workflow.
 func (r *Runner) RunWorkflow(ctx context.Context, req WorkflowRequest) (result WorkflowResult, err error) {
-	ctx, waves, err := r.prepareWorkflow(ctx, req)
+	ctx, scope, waves, err := r.prepareWorkflow(ctx, req)
 	if err != nil {
 		return WorkflowResult{}, err
 	}
@@ -347,7 +445,7 @@ func (r *Runner) RunWorkflow(ctx context.Context, req WorkflowRequest) (result W
 	}()
 
 	if len(req.Steps) > 0 {
-		return r.runWorkflowSteps(ctx, req, waves), nil
+		return r.runWorkflowSteps(ctx, req, waves, scope), nil
 	}
 	result = WorkflowResult{Status: "ok"}
 	changedSet := map[string]struct{}{}
@@ -381,11 +479,15 @@ func (r *Runner) RunWorkflow(ctx context.Context, req WorkflowRequest) (result W
 		result.ChangedFiles = append(result.ChangedFiles, file)
 	}
 	for _, check := range req.Checks {
-		check, err := r.withWebArtifact(check)
+		checkCtx, err := commandExecContext(ctx, scope, check)
 		if err != nil {
 			return WorkflowResult{}, err
 		}
-		checkResult, err := r.commands.RunFilteredInRepoWithWait(ctx, check.Command, req.RepoPath, check.CWD, check.TimeoutSeconds, check.MCPWaitSeconds, check.Filter)
+		check, err = r.withWebArtifact(check)
+		if err != nil {
+			return WorkflowResult{}, err
+		}
+		checkResult, err := r.commands.RunFilteredInRepoWithWait(checkCtx, check.Command, req.RepoPath, check.CWD, check.TimeoutSeconds, check.MCPWaitSeconds, check.Filter)
 		if err != nil {
 			return WorkflowResult{}, err
 		}
@@ -420,7 +522,7 @@ func (r *Runner) RunWorkflow(ctx context.Context, req WorkflowRequest) (result W
 	return result, nil
 }
 
-func (r *Runner) runWorkflowSteps(ctx context.Context, req WorkflowRequest, waves [][]WorkflowStep) WorkflowResult {
+func (r *Runner) runWorkflowSteps(ctx context.Context, req WorkflowRequest, waves [][]WorkflowStep, scope workflowScope) WorkflowResult {
 	result := WorkflowResult{Status: "ok"}
 	stepResults := map[string]WorkflowStepResult{}
 	files := newWorkflowFiles()
@@ -451,7 +553,7 @@ func (r *Runner) runWorkflowSteps(ctx context.Context, req WorkflowRequest, wave
 				stateMu.Unlock()
 
 				fileLocks.lock(paths)
-				sr, execErr := r.executeWorkflowStep(ctx, req.RepoPath, *step, files, commitPtr(req.Commit))
+				sr, execErr := r.executeWorkflowStep(ctx, req.RepoPath, *step, files, commitPtr(req.Commit), scope)
 				fileLocks.unlock(paths)
 
 				if execErr != nil {
@@ -817,13 +919,20 @@ func (f *workflowFiles) changedFiles() []string {
 	return sortedKeys(f.changed)
 }
 
-func (r *Runner) executeWorkflowStep(ctx context.Context, repoPath string, step WorkflowStep, files *workflowFiles, topLevelCommit *WorkflowCommit) (WorkflowStepResult, error) {
+func (r *Runner) executeWorkflowStep(ctx context.Context, repoPath string, step WorkflowStep, files *workflowFiles, topLevelCommit *WorkflowCommit, scope workflowScope) (WorkflowStepResult, error) {
 	base := WorkflowStepResult{ID: step.ID, Tool: step.Tool, Status: "ok"}
 	switch step.Tool {
 	case "write_file":
 		var args WorkflowWriteFile
 		if err := bindStepArgs(step.Args, &args); err != nil {
 			return WorkflowStepResult{}, err
+		}
+		if len(scope.resolved.Vars) > 0 {
+			substituted, subErr := substituteWriteContent(args, scope.resolved.Vars)
+			if subErr != nil {
+				return WorkflowStepResult{}, fmt.Errorf("write_file %s: %w", args.Path, subErr)
+			}
+			args = substituted
 		}
 		path := normalizeStepPath(args.Path)
 		writeReq := args.writeRequest(repoPath)
@@ -879,11 +988,15 @@ func (r *Runner) executeWorkflowStep(ctx context.Context, repoPath string, step 
 		if err := bindStepArgs(step.Args, &args); err != nil {
 			return WorkflowStepResult{}, err
 		}
-		args, err := r.withWebArtifact(args)
+		stepCtx, err := commandExecContext(ctx, scope, args)
 		if err != nil {
 			return WorkflowStepResult{}, err
 		}
-		checkResult, err := r.commands.RunInRepoWithWait(ctx, args.Command, repoPath, args.CWD, args.TimeoutSeconds, args.MCPWaitSeconds)
+		args, err = r.withWebArtifact(args)
+		if err != nil {
+			return WorkflowStepResult{}, err
+		}
+		checkResult, err := r.commands.RunInRepoWithWait(stepCtx, args.Command, repoPath, args.CWD, args.TimeoutSeconds, args.MCPWaitSeconds)
 		if err != nil {
 			return WorkflowStepResult{}, err
 		}
@@ -1465,15 +1578,12 @@ func (r *Runner) Run(ctx context.Context, req Request) (result Result, err error
 			err = updateErr
 		}
 	}()
-	if len(req.SecretHandles) > 0 {
-		envs, mask, err := r.cfg.ResolveSecretEnv(req.SecretHandles)
-		if err != nil {
-			return Result{}, err
-		}
-		ctx = command.ContextWithSecrets(ctx, envs, mask)
+	execCtx, err := command.PrepareExec(ctx, r.cfg, req.SecretHandles, req.Vars, req.Env, req.Stdin, req.StdinVar)
+	if err != nil {
+		return Result{}, err
 	}
 
-	cmdResult, err := r.commands.RunInRepoWithWait(ctx, req.Command, req.RepoPath, req.CWD, req.TimeoutSeconds, req.MCPWaitSeconds)
+	cmdResult, err := r.commands.RunInRepoWithWait(execCtx, req.Command, req.RepoPath, req.CWD, req.TimeoutSeconds, req.MCPWaitSeconds)
 	if err != nil {
 		return Result{}, err
 	}
