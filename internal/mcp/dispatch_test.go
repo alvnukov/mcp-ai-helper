@@ -145,6 +145,7 @@ func TestEveryMergedToolRegistersWithAnActionEnumThatMatchesItsHandlers(t *testi
 		"command": {"run": nil, "cleanup": nil, "abort": nil, "list": nil, "get": nil, "filter": nil, "health": nil},
 		"task":    {"current": nil, "get": nil, "list": nil, "search": nil, "upsert": nil, "set_status": nil, "batch_upsert": nil, "delete": nil},
 		"run":     {"pipeline": nil, "workflow": nil, "workflow_status": nil, "schema": nil},
+		"note":    {"add": nil, "list": nil, "read": nil, "search": nil, "update": nil, "delete": nil},
 	}
 	for _, name := range gitAdvancedActions {
 		if merged["git"] == nil {

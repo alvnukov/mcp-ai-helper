@@ -13,6 +13,7 @@ import (
 	"github.com/alvnukov/mcp-ai-helper/internal/config"
 	"github.com/alvnukov/mcp-ai-helper/internal/confluence"
 	"github.com/alvnukov/mcp-ai-helper/internal/jira"
+	"github.com/alvnukov/mcp-ai-helper/internal/notes"
 	"github.com/alvnukov/mcp-ai-helper/internal/pipeline"
 	"github.com/alvnukov/mcp-ai-helper/internal/project"
 	"github.com/alvnukov/mcp-ai-helper/internal/provider"
@@ -29,6 +30,7 @@ type Server struct {
 	pipelines           *pipeline.Runner
 	taskStore           *tasks.Store
 	taskBackend         taskBackend
+	notesStore          *notes.Store
 	secretMask          *security.Mask
 	jiraClient          *jira.Client
 	jiraClientErr       error
@@ -147,17 +149,24 @@ func configOrigin(cfg *config.Config) string {
 	return "the active config file"
 }
 
+// buildProjectStore resolves the helper data root, falling back to .mcp-ai-helper
+// beside the process when the configured log dir is unusable: command logs, the
+// notebooks and the task plumbing all need a root even when logging does not.
+func buildProjectStore(cfg *config.Config) *project.Store {
+	store, err := project.NewStore(cfg.CommandPolicy.LogDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mcp-ai-helper: project store from %q: %v; falling back to .mcp-ai-helper\n", cfg.CommandPolicy.LogDir, err)
+		store, _ = project.NewStore(".mcp-ai-helper")
+	}
+	return store
+}
+
 func buildDeps(cfg *config.Config) (provider.ChatClient, *command.Runner, *pipeline.Runner, *tasks.Store, taskBackend) {
 	chat := provider.NewClient(cfg.Providers)
 	commandPolicy := cfg.CommandPolicy
 	commandPolicy.ProtectedConfigPath = cfg.SourcePath
 	cmds := command.NewRunnerWithMask(commandPolicy, cfg.SecretMask())
-	projectStore, err := project.NewStore(cfg.CommandPolicy.LogDir)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "mcp-ai-helper: project store from %q: %v; falling back to .mcp-ai-helper\n", cfg.CommandPolicy.LogDir, err)
-		projectStore, _ = project.NewStore(".mcp-ai-helper")
-	}
-	store := tasks.NewStore(projectStore)
+	store := tasks.NewStore(buildProjectStore(cfg))
 	backend, err := buildTaskBackend(cfg, cmds, store)
 	if err != nil {
 		// config.Load and MergeRepoConfig already reject these values; this
@@ -270,10 +279,12 @@ func New(cfg *config.Config) *server.MCPServer {
 	// client here they answer "not configured" until a reload builds one.
 	deps.confluenceClient, deps.confluenceClientErr = buildConfluenceClient(cfg)
 	deps.chat, deps.commands, deps.pipelines, deps.taskStore, deps.taskBackend = buildDeps(cfg)
+	deps.notesStore = notes.NewStore(buildProjectStore(cfg).Root())
 
 	registerLanguageTools(srv)
 	registerFileTools(srv, deps)
 	registerGitTools(srv, deps)
+	registerNoteTools(srv, deps)
 
 	if cfg.LayerEnabled("guidance") {
 		registerGuidance(srv, deps)
@@ -304,6 +315,7 @@ func New(cfg *config.Config) *server.MCPServer {
 			deps.pipelines = pipes
 			deps.taskStore = store
 			deps.taskBackend = backend
+			deps.notesStore = notes.NewStore(buildProjectStore(next).Root())
 			deps.secretMask = buildSecretMask(next)
 			deps.jiraClient, deps.jiraClientErr = buildJiraClient(next)
 			deps.confluenceClient, deps.confluenceClientErr = buildConfluenceClient(next)

@@ -51,7 +51,7 @@ Most of the surface is a handful of tools dispatching on an ` + "`action`" + `:
 - ` + "`command`" + ` — run, get, filter, list, abort, cleanup, health
 - ` + "`git`" + ` — status, diff, commit, log, blame, prepare_task_worktree
 - ` + "`task`" + ` — current, get, list, search, upsert, set_status, batch_upsert
-- ` + "`run`" + ` — pipeline, workflow, schema
+- ` + "`run`" + ` — pipeline, workflow, schema; ` + "`note`" + ` — add, list, read, search, update, delete
 
 Prefer them over shell, editor, direct git and generic web tools. They return
 ids, hashes and bounded fragments rather than whole files and whole logs, which

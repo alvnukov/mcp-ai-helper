@@ -95,7 +95,7 @@ func TestEveryRegisteredToolPublishesAllFourAnnotations(t *testing.T) {
 		{
 			toolHints{readOnly: false, destructive: true, idempotent: false, openWorld: false},
 			"overwrites local state, and what it does depends on the state it finds",
-			[]string{"edit", "git", "task"},
+			[]string{"edit", "git", "task", "note"},
 		},
 		{
 			toolHints{readOnly: false, destructive: false, idempotent: false, openWorld: true},
