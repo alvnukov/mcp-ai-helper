@@ -12,9 +12,9 @@ import (
 	"github.com/alvnukov/mcp-ai-helper/internal/config"
 )
 
-// conf_* tools are registered from the startup config, so the client behind
-// them has to exist from process start too. It used to be built only by the
-// config-reload path, so every call on a fresh server answered
+// The confluence tool is registered from the startup config, so the client
+// behind it has to exist from process start too. It used to be built only by
+// the config-reload path, so every call on a fresh server answered
 // "confluence: not configured" until something reloaded the config.
 func TestConfluenceToolsAnswerFromProcessStart(t *testing.T) {
 	wiki := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -35,20 +35,21 @@ func TestConfluenceToolsAnswerFromProcessStart(t *testing.T) {
 	}}
 
 	srv := New(cfg)
-	tool, ok := srv.ListTools()["conf_spaces"]
+	tool, ok := srv.ListTools()["confluence"]
 	if !ok {
-		t.Fatal("conf_spaces is not registered")
+		t.Fatal("confluence is not registered")
 	}
 	var req basemcp.CallToolRequest
-	req.Params.Name = "conf_spaces"
+	req.Params.Name = "confluence"
+	req.Params.Arguments = map[string]any{"action": "spaces"}
 	result, err := tool.Handler(context.Background(), req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if result.IsError {
-		t.Fatalf("conf_spaces refused on a fresh server without a config reload: %s", resultText(t, result))
+		t.Fatalf("confluence spaces refused on a fresh server without a config reload: %s", resultText(t, result))
 	}
 	if got := resultText(t, result); !strings.Contains(got, `"total"`) {
-		t.Errorf("conf_spaces returned %s", got)
+		t.Errorf("confluence spaces returned %s", got)
 	}
 }

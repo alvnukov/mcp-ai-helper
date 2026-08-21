@@ -67,7 +67,7 @@ func TestEveryRegisteredToolPublishesAllFourAnnotations(t *testing.T) {
 			toolHints{readOnly: true, destructive: false, idempotent: true, openWorld: true},
 			"answers from a remote system and writes nothing",
 			[]string{
-				"conf_search", "conf_read", "conf_spaces",
+
 				"jira_search", "jira_read", "jira_get_property",
 				"jira_worklog_list", "jira_worklog_report",
 				"query_model", "web_search",
@@ -110,7 +110,7 @@ func TestEveryRegisteredToolPublishesAllFourAnnotations(t *testing.T) {
 		{
 			toolHints{readOnly: false, destructive: true, idempotent: false, openWorld: true},
 			"changes remote state depending on what it finds, or runs a command that can do anything",
-			[]string{"conf_edit", "jira_transition", "command", "run", "lake_smoke"},
+			[]string{"confluence", "jira_transition", "command", "run", "lake_smoke"},
 		},
 	}
 

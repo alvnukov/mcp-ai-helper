@@ -10,13 +10,19 @@ import (
 	"github.com/alvnukov/mcp-ai-helper/internal/confluence"
 )
 
-type confSearchRequest struct {
-	CQL        string `json:"cql"`
-	MaxResults int    `json:"max_results"`
-}
-
-type confReadRequest struct {
-	PageID string `json:"page_id"`
+type confRequest struct {
+	PageID          string `json:"page_id"`
+	ExpectedVersion int    `json:"expected_version"`
+	SpaceKey        string `json:"space_key"`
+	Title           string `json:"title"`
+	Body            string `json:"body"`
+	Old             string `json:"old"`
+	New             string `json:"new"`
+	ParentID        string `json:"parent_id"`
+	VersionMessage  string `json:"version_message"`
+	MinorEdit       bool   `json:"minor_edit"`
+	CQL             string `json:"cql"`
+	MaxResults      int    `json:"max_results"`
 }
 
 func checkConfSpace(deps *Server, spaceKey string) bool {
@@ -28,70 +34,19 @@ func checkConfSpace(deps *Server, spaceKey string) bool {
 }
 
 func registerConfluenceTools(srv *server.MCPServer, deps *Server) {
-	getClient := func() (*confluence.Client, error) {
-		return deps.getConfluenceClient()
+	confluenceActions := actions{
+		"search": withDeps(confActionSearch, deps),
+		"read":   withDeps(confActionRead, deps),
+		"spaces": withDeps(confActionSpaces, deps),
+		"update": withDeps(confActionUpdate, deps),
+		"create": withDeps(confActionCreate, deps),
+		"delete": withDeps(confActionDelete, deps),
 	}
 
-	srv.AddTool(basemcp.NewTool("conf_search",
-		readsRemote,
-		basemcp.WithDescription("Search Confluence pages by CQL (Confluence Query Language)."),
-		basemcp.WithString("cql", basemcp.Required(), basemcp.Description("CQL query string, e.g. 'title ~ kubernetes'.")),
-		basemcp.WithNumber("max_results", basemcp.Description("Maximum results. Defaults to 20.")),
-	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
-		var args confSearchRequest
-		if err := bind(req, &args); err != nil {
-			return nil, err
-		}
-		if args.MaxResults <= 0 {
-			args.MaxResults = 20
-		}
-		jc, err := getClient()
-		if err != nil {
-			return safeError(deps, err), nil
-		}
-		results, err := jc.SearchContext(ctx, args.CQL, args.MaxResults)
-		if err != nil {
-			return safeError(deps, err), nil
-		}
-		return structured(map[string]any{"total": len(results), "results": results})
-	})
-
-	srv.AddTool(basemcp.NewTool("conf_read",
-		readsRemote,
-		basemcp.WithDescription("Read a Confluence page by ID, including content body and version."),
-		basemcp.WithString("page_id", basemcp.Required(), basemcp.Description("Confluence page ID (numeric string).")),
-	), func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
-		var args confReadRequest
-		if err := bind(req, &args); err != nil {
-			return nil, err
-		}
-		page, refusal := confReadPage(ctx, deps, args.PageID)
-		if refusal != nil {
-			return refusal, nil
-		}
-		return structured(map[string]any{"page": page})
-	})
-
-	srv.AddTool(basemcp.NewTool("conf_spaces",
-		readsRemote,
-		basemcp.WithDescription("List all Confluence spaces."),
-	), func(ctx context.Context, _ basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
-		jc, err := getClient()
-		if err != nil {
-			return safeError(deps, err), nil
-		}
-		spaces, err := jc.GetSpacesContext(ctx)
-		if err != nil {
-			return safeError(deps, err), nil
-		}
-		return structured(map[string]any{"total": len(spaces), "spaces": spaces})
-	})
-
-	editActions := confEditActions(deps)
-	srv.AddTool(basemcp.NewTool("conf_edit",
+	srv.AddTool(basemcp.NewTool("confluence",
 		rewritesRemote,
-		basemcp.WithDescription("Edit Confluence. Required: action. Actions: read (page_id) — the page with its body and current version, which is where an edit starts; update (page_id, expected_version, body|old+new, title?, version_message?, minor_edit?) — replace the whole page body or one unique span of it; create (space_key, title, body?, parent_id?) — add a page; delete (page_id, expected_version) — remove one. Read the page here first and pass back the version that read reported: every edit is refused unless the page is still at that version, so a page someone else changed meanwhile is never overwritten. Editing is refused entirely when the integration is read_only or the space is outside allowed_spaces; reading is not."),
-		basemcp.WithString("action", basemcp.Required(), actionEnum(editActions)),
+		basemcp.WithDescription("Interact with Confluence. Required: action. Actions: search (cql, max_results?) — search pages by CQL; read (page_id) — the page with its body and current version; spaces () — list all spaces; update (page_id, expected_version, body|old+new, title?, version_message?, minor_edit?) — replace the whole page body or one unique span of it; create (space_key, title, body?, parent_id?) — add a page; delete (page_id, expected_version) — remove one. For updates, read the page first and pass back the version that read reported: every edit is refused unless the page is still at that version, so a page someone else changed meanwhile is never overwritten. Editing is refused entirely when the integration is read_only or the space is outside allowed_spaces; reading is not."),
+		basemcp.WithString("action", basemcp.Required(), actionEnum(confluenceActions)),
 		basemcp.WithString("page_id", basemcp.Description("Confluence page ID (read, update, delete; required).")),
 		basemcp.WithNumber("expected_version", basemcp.Description("Version the read action reported for the page (update, delete; required). The edit is refused if the page has moved past it.")),
 		basemcp.WithString("space_key", basemcp.Description("Space key to create the page in (create; required).")),
@@ -102,33 +57,9 @@ func registerConfluenceTools(srv *server.MCPServer, deps *Server) {
 		basemcp.WithString("parent_id", basemcp.Description("Page ID to create the new page under (create).")),
 		basemcp.WithString("version_message", basemcp.Description("Note recorded beside the new version in page history (update).")),
 		basemcp.WithBoolean("minor_edit", basemcp.Description("Record the new version as a minor edit, which does not notify watchers (update).")),
-	), dispatch(deps, "conf_edit", editActions))
-}
-
-type confEditRequest struct {
-	PageID          string `json:"page_id"`
-	ExpectedVersion int    `json:"expected_version"`
-	SpaceKey        string `json:"space_key"`
-	Title           string `json:"title"`
-	Body            string `json:"body"`
-	Old             string `json:"old"`
-	New             string `json:"new"`
-	ParentID        string `json:"parent_id"`
-	VersionMessage  string `json:"version_message"`
-	MinorEdit       bool   `json:"minor_edit"`
-}
-
-// confEditActions is the whole editing loop, read included. An edit has to
-// start from the page as it stands — its body to edit and its version to guard
-// against — so a caller that reached for this tool finds that read here rather
-// than having to know which other tool to call first.
-func confEditActions(deps *Server) actions {
-	return actions{
-		"read":   withDeps(confEditRead, deps),
-		"update": withDeps(confEditUpdate, deps),
-		"create": withDeps(confEditCreate, deps),
-		"delete": withDeps(confEditDelete, deps),
-	}
+		basemcp.WithString("cql", basemcp.Description("CQL query string, e.g. 'title ~ kubernetes' (search; required).")),
+		basemcp.WithNumber("max_results", basemcp.Description("Maximum results. Defaults to 20 (search).")),
+	), dispatch(deps, "confluence", confluenceActions))
 }
 
 // confWritesAllowed reports why an edit must not happen, or nil when it may.
@@ -147,9 +78,7 @@ func confWritesAllowed(deps *Server) error {
 	return nil
 }
 
-// confReadPage reads one page and refuses a space outside the allowlist. Both
-// the read tool and the read action of the edit tool answer with it, so the page
-// an edit starts from is exactly the page a plain read would have shown.
+// confReadPage reads one page and refuses a space outside the allowlist.
 func confReadPage(ctx context.Context, deps *Server, pageID string) (*confluence.PageInfo, *basemcp.CallToolResult) {
 	if pageID == "" {
 		return nil, basemcp.NewToolResultError("confluence: page_id is required")
@@ -170,12 +99,7 @@ func confReadPage(ctx context.Context, deps *Server, pageID string) (*confluence
 
 // confPageForEdit reads the page an edit names and puts it through both gates:
 // the integration must allow writes at all, and the page's space must be one a
-// read would have answered for. It hands back the page it checked, so the page
-// that passed the allowlist and the page that gets written are the same read —
-// not two reads that could disagree.
-//
-// The write gate runs first, so a read_only integration refuses without
-// reaching Confluence at all.
+// read would have answered for.
 func confPageForEdit(ctx context.Context, deps *Server, pageID string) (*confluence.Client, *confluence.PageInfo, *basemcp.CallToolResult) {
 	if err := confWritesAllowed(deps); err != nil {
 		return nil, nil, safeError(deps, err)
@@ -191,12 +115,27 @@ func confPageForEdit(ctx context.Context, deps *Server, pageID string) (*conflue
 	return client, page, nil
 }
 
-// confEditRead answers with the page an edit will be built from. It is not
-// gated on write permission: a read_only integration can still be read, and the
-// refusal a caller then gets from update names read_only rather than pretending
-// the page was unreachable.
-func confEditRead(ctx context.Context, req basemcp.CallToolRequest, deps *Server) (*basemcp.CallToolResult, error) {
-	var args confEditRequest
+func confActionSearch(ctx context.Context, req basemcp.CallToolRequest, deps *Server) (*basemcp.CallToolResult, error) {
+	var args confRequest
+	if err := bind(req, &args); err != nil {
+		return nil, err
+	}
+	if args.MaxResults <= 0 {
+		args.MaxResults = 20
+	}
+	client, err := deps.getConfluenceClient()
+	if err != nil {
+		return safeError(deps, err), nil
+	}
+	results, err := client.SearchContext(ctx, args.CQL, args.MaxResults)
+	if err != nil {
+		return safeError(deps, err), nil
+	}
+	return structured(map[string]any{"total": len(results), "results": results})
+}
+
+func confActionRead(ctx context.Context, req basemcp.CallToolRequest, deps *Server) (*basemcp.CallToolResult, error) {
+	var args confRequest
 	if err := bind(req, &args); err != nil {
 		return nil, err
 	}
@@ -207,8 +146,20 @@ func confEditRead(ctx context.Context, req basemcp.CallToolRequest, deps *Server
 	return structured(map[string]any{"page": page})
 }
 
-func confEditUpdate(ctx context.Context, req basemcp.CallToolRequest, deps *Server) (*basemcp.CallToolResult, error) {
-	var args confEditRequest
+func confActionSpaces(ctx context.Context, _ basemcp.CallToolRequest, deps *Server) (*basemcp.CallToolResult, error) {
+	client, err := deps.getConfluenceClient()
+	if err != nil {
+		return safeError(deps, err), nil
+	}
+	spaces, err := client.GetSpacesContext(ctx)
+	if err != nil {
+		return safeError(deps, err), nil
+	}
+	return structured(map[string]any{"total": len(spaces), "spaces": spaces})
+}
+
+func confActionUpdate(ctx context.Context, req basemcp.CallToolRequest, deps *Server) (*basemcp.CallToolResult, error) {
+	var args confRequest
 	if err := bind(req, &args); err != nil {
 		return nil, err
 	}
@@ -232,8 +183,8 @@ func confEditUpdate(ctx context.Context, req basemcp.CallToolRequest, deps *Serv
 	return structured(result)
 }
 
-func confEditCreate(ctx context.Context, req basemcp.CallToolRequest, deps *Server) (*basemcp.CallToolResult, error) {
-	var args confEditRequest
+func confActionCreate(ctx context.Context, req basemcp.CallToolRequest, deps *Server) (*basemcp.CallToolResult, error) {
+	var args confRequest
 	if err := bind(req, &args); err != nil {
 		return nil, err
 	}
@@ -259,8 +210,8 @@ func confEditCreate(ctx context.Context, req basemcp.CallToolRequest, deps *Serv
 	return structured(result)
 }
 
-func confEditDelete(ctx context.Context, req basemcp.CallToolRequest, deps *Server) (*basemcp.CallToolResult, error) {
-	var args confEditRequest
+func confActionDelete(ctx context.Context, req basemcp.CallToolRequest, deps *Server) (*basemcp.CallToolResult, error) {
+	var args confRequest
 	if err := bind(req, &args); err != nil {
 		return nil, err
 	}
