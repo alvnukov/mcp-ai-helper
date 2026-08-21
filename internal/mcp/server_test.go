@@ -73,6 +73,11 @@ func TestNewExposesAssistantGuidance(t *testing.T) {
 	if !strings.Contains(cfg.AssistantGuidance, "no such unified commit means the task is not done") {
 		t.Fatal("guidance text does not describe commit closeout policy")
 	}
+	for _, want := range []string{"note action=list", "note action=read", "note action=search", "note action=update"} {
+		if !strings.Contains(currentGuidance(cfg), want) {
+			t.Fatalf("guidance text does not describe model memory for %q", want)
+		}
+	}
 	for _, want := range []string{"tool_manifest", "command action=get", "command action=filter", "issue_add", "issue_list", "issue_accept"} {
 		if !strings.Contains(currentGuidance(cfg), want) {
 			t.Fatalf("guidance text does not describe tool discovery for %q", want)

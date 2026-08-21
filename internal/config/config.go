@@ -60,6 +60,13 @@ const defaultAssistantGuidance = `mcp-ai-helper operating guidance:
 5. Cite evidence by doc_id, URL/source, offsets, and snippet. If fetched evidence is missing or blocked, say insufficient_evidence instead of relying on search snippets.
 6. For Google, use web_search with provider=google_cse and configured web_policy.google_cse_id plus google_api_key_env/google_api_key. Do not scrape Google HTML results.
 
+## Model Memory (note)
+
+1. Write notes for what should outlive the turn: decisions, gotchas, working state, cross-repo lessons. Do not restate tool schemas or conversation history.
+2. Scope by audience: repo (default) for project-specific state, global for lessons that apply across repositories.
+3. Read the bounded way: note action=list (ids, titles, tags) first, then note action=read for one note or note action=search for snippets; never pull whole notebooks.
+4. Consolidate: prefer note action=update over appending a near-duplicate. note action=delete is explicit and permanent.
+
 ## Hard Rules
 
 1. Never use broad staging or destructive git operations. Commit only explicit owned files after relevant checks pass.
