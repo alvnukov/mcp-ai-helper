@@ -485,8 +485,8 @@ func mergeEnv(base []string, overlays ...[]string) []string {
 	values := make(map[string]string, len(base))
 	put := func(pair string) {
 		key, value := pair, ""
-		if i := strings.Index(pair, "="); i >= 0 {
-			key, value = pair[:i], pair[i+1:]
+		if k, v, ok := strings.Cut(pair, "="); ok {
+			key, value = k, v
 		}
 		if key == "" {
 			return

@@ -128,11 +128,11 @@ func jsonScanString(doc string, pos int) (int, string, error) {
 				if i+6 > len(doc) {
 					return 0, "", fmt.Errorf("truncated \\u escape at offset %d", i)
 				}
-				v, err := strconv.ParseUint(doc[i+2:i+6], 16, 32)
+				v, err := strconv.ParseUint(doc[i+2:i+6], 16, 16)
 				if err != nil {
-					return 0, "", fmt.Errorf("bad \\u escape at offset %d: %v", i, err)
+					return 0, "", fmt.Errorf("bad \\u escape at offset %d: %w", i, err)
 				}
-				b.WriteRune(rune(v))
+				b.WriteRune(rune(v)) // #nosec G115 -- four hex digits cap v at 0xFFFF, always a valid rune
 				i += 4
 			default:
 				return 0, "", fmt.Errorf("unknown escape %q at offset %d", e, i)
@@ -183,7 +183,7 @@ func jsonSkipValue(doc string, pos int) (int, error) {
 // jsonSkipContainer walks the container whose opening brace sits at pos,
 // returning the offset just past its matching close. Members and elements are
 // skipped, never interpreted; a comma directly before the close is legal.
-func jsonSkipContainer(doc string, pos int, close byte) (int, error) {
+func jsonSkipContainer(doc string, pos int, closing byte) (int, error) {
 	pos++
 	for {
 		next, err := jsonSkip(doc, pos)
@@ -192,10 +192,10 @@ func jsonSkipContainer(doc string, pos int, close byte) (int, error) {
 		}
 		pos = next
 		if pos >= len(doc) {
-			return 0, fmt.Errorf("unterminated %c", close)
+			return 0, fmt.Errorf("unterminated %c", closing)
 		}
 		switch doc[pos] {
-		case close:
+		case closing:
 			return pos + 1, nil
 		case ',':
 			pos++
@@ -209,7 +209,7 @@ func jsonSkipContainer(doc string, pos int, close byte) (int, error) {
 			}
 			pos = valueEnd
 		default:
-			if close == '}' && doc[pos] != '"' {
+			if closing == '}' && doc[pos] != '"' {
 				return 0, fmt.Errorf("expected a member key at offset %d", pos)
 			}
 			if doc[pos] == '"' {
@@ -422,7 +422,7 @@ type managedMember struct {
 // An existing entry that is not an object at all is simply replaced.
 func spliceEntry(existingRaw, base string, managed []managedMember) string {
 	member := base + "  "
-	var lines []string
+	lines := make([]string, 0, len(managed))
 	for _, m := range managed {
 		lines = append(lines, member+strconv.Quote(m.key)+": "+m.text)
 	}
