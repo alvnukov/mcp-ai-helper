@@ -40,7 +40,7 @@ const blockBody = "" +
 	`## mcp-ai-helper
 
 This project is served by the ` + "`mcp-ai-helper`" + ` MCP server. Call
-` + "`assistant_guidance`" + ` before anything else: the rules it returns are read from
+` + "`assistant_guidance`" + ` before the first helper call: the rules it returns are read from
 the server's own config, so they are current in a way this block cannot be, and
 they take precedence over habit.
 
@@ -80,8 +80,7 @@ commit followed by a separate status commit means the task is not done.
 
 If these tools are not visible, call ` + "`tool_manifest`" + ` and follow
 ` + "`mcp-ai-helper-surface`" + `: some are opt-in layers that ship off, and a client's
-tool cache goes stale. Do not substitute shell, filesystem or direct git
-fallbacks.`
+tool cache goes stale.`
 
 // block is the block as it should appear, markers included.
 func block() string {
