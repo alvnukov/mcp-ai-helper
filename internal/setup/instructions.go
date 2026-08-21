@@ -29,9 +29,13 @@ const (
 // Deliberately short. This text is loaded in full at the start of every session,
 // so it earns its place only by answering the question a model actually has —
 // should I use this instead of what I would have done? — rather than by
-// restating the tool schemas, which the client already has. The rules that do
-// change live behind assistant_guidance, which is read at run time from the
-// server's config and is therefore current in a way this block cannot be.
+// restating the tool schemas, which the client already has. Past that it
+// carries the few working patterns a model trips over when nothing else is
+// loaded, because no other text in the session is guaranteed to be read: the
+// guidance tool and the skills only speak when the model goes to them. The
+// rules that do change live behind assistant_guidance, which is read at run
+// time from the server's config and is therefore current in a way this block
+// cannot be.
 const blockBody = "" +
 	`## mcp-ai-helper
 
@@ -52,6 +56,14 @@ Most of the surface is a handful of tools dispatching on an ` + "`action`" + `:
 Prefer them over shell, editor, direct git and generic web tools. They return
 ids, hashes and bounded fragments rather than whole files and whole logs, which
 is the point: the same answer for a fraction of the context.
+
+Four patterns keep the work honest when nothing else is loaded:
+
+- ` + "`task action=current`" + ` before repo work: one fitting task, not a blocked parent.
+- Search before you read: ` + "`file action=search`" + ` with context, then ` + "`read`" + ` ranges.
+- A command returns ` + "`command_id`" + `: wait with ` + "`get`" + `+` + "`wait_seconds`" + `, narrow with ` + "`filter`" + `, stop with ` + "`abort`" + `; never rerun or sleep-poll.
+- Before believing output, read ` + "`exit_code`" + `, ` + "`truncated`" + `, ` + "`failure_markers`" + `: a
+  green tail can hide a failed command; a truncated log is not evidence.
 
 The procedures live in skills, which cost nothing until they are loaded:
 ` + "`mcp-ai-helper-tasks`" + `, ` + "`mcp-ai-helper-edits`" + `, ` + "`mcp-ai-helper-commands`" + `,

@@ -119,3 +119,21 @@ func TestAHalfDeletedBlockIsRefusedRatherThanGuessedAt(t *testing.T) {
 		t.Error("markers in the wrong order must be refused")
 	}
 }
+
+func TestTheBlockCarriesTheWorkingPatterns(t *testing.T) {
+	// The block is the only text guaranteed to be read in every session, so
+	// the patterns a model most often trips over must survive here even when
+	// nothing else is loaded.
+	for _, needle := range []string{
+		"task action=current",
+		"file action=search",
+		"command_id",
+		"wait_seconds",
+		"truncated",
+		"failure_markers",
+	} {
+		if !strings.Contains(blockBody, needle) {
+			t.Errorf("the block must teach %q:\n%s", needle, blockBody)
+		}
+	}
+}
