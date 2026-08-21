@@ -1,0 +1,77 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__mcp-ai-helper__assistant_guidance",
+      "mcp__mcp-ai-helper__snapshot_file",
+      "mcp__mcp-ai-helper__run_workflow",
+      "mcp__mcp-ai-helper__run_pipeline",
+      "Read(//Users/zol/.claude/**)",
+      "Read(//Users/zol/.claude/projects/**)",
+      "mcp__mcp-ai-helper__collect_command_output",
+      "WebSearch",
+      "Bash(claude --version)",
+      "Bash(npx claude *)",
+      "Read(//Users/zol/.config/**)",
+      "Read(//Users/zol/.config/claude/**)",
+      "Bash(git *)",
+      "mcp__mcp-ai-helper__apply_guarded_replace",
+      "mcp__mcp-ai-helper__filter_command_history",
+      "mcp__mcp-ai-helper__task_current",
+      "mcp__mcp-ai-helper__task_batch_upsert",
+      "mcp__mcp-ai-helper__language_detect",
+      "mcp__mcp-ai-helper__health",
+      "mcp__mcp-ai-helper__task_list",
+      "mcp__mcp-ai-helper__config_read",
+      "mcp__mcp-ai-helper__search_files",
+      "mcp__mcp-ai-helper__language_profiles",
+      "mcp__mcp-ai-helper__read_file",
+      "mcp__mcp-ai-helper__workflow_schema",
+      "mcp__mcp-ai-helper__task_upsert",
+      "mcp__mcp-ai-helper__git_commit_owned",
+      "mcp__mcp-ai-helper__task_set_status",
+      "mcp__mcp-ai-helper__issue_add",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); mcp=d.get\\('mcpServers',{}\\).get\\('mcp-ai-helper',{}\\); print\\(json.dumps\\(mcp, indent=2\\)\\)\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); mcp=d.get\\('mcpServers',{}\\); print\\(json.dumps\\(mcp, indent=2\\)\\)\")",
+      "Bash(chmod +x *)",
+      "Skill(update-config)",
+      "mcp__mcp-ai-helper__issue_list",
+      "mcp__mcp-ai-helper__task_get",
+      "mcp__mcp-ai-helper__issue_accept",
+      "mcp__mcp-ai-helper__server_setup_guidance",
+      "mcp__mcp-ai-helper__config_reload",
+      "mcp__mcp-ai-helper__dev_rebuild_server",
+      "mcp__mcp-ai-helper__task_update",
+      "mcp__mcp-ai-helper__plan_task_execution",
+      "mcp__mcp-ai-helper__config_replace",
+      "mcp__mcp-ai-helper__jira_search",
+      "mcp__mcp-ai-helper__task_add",
+      "mcp__mcp-ai-helper__jira_worklog_report",
+      "mcp__mcp-ai-helper__jira_worklog_list",
+      "mcp__mcp-ai-helper__confluence",
+      "mcp__mcp-ai-helper__dev_status",
+      "mcp__mcp-ai-helper__config_schema",
+      "mcp__mcp-ai-helper__task_packet",
+      "mcp__mcp-ai-helper__task_search",
+      "mcp__mcp-ai-helper__read_files",
+      "mcp__mcp-ai-helper__task_context",
+      "mcp__mcp-ai-helper__task_export",
+      "mcp__mcp-ai-helper__task_graph",
+      "mcp__happ__code"
+    ]
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "mcp-ai-helper"
+  ],
+  "mcpServers": {
+    "mcp-ai-helper": {
+      "command": "/Users/zol/src/mcp-ai-helper/bin/mcp-ai-helper-dev",
+      "args": [
+        "--repo",
+        "/Users/zol/src/mcp-ai-helper",
+        "--config",
+        "/Users/zol/.mcp-ai-helper/config.yaml"
+      ]
+    }
+  }
+}
