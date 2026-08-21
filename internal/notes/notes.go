@@ -124,7 +124,7 @@ func (s *Store) Add(scope Scope, repoPath, title, body string, tags []string) (N
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return Note{}, fmt.Errorf("create notebook %s: %w", dir, err)
 	}
 	now := time.Now().UTC()
@@ -182,7 +182,7 @@ func (s *Store) List(scope Scope, repoPath, tag string) ([]Summary, int, error) 
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+		data, err := os.ReadFile(filepath.Join(dir, entry.Name())) // #nosec G304 -- notes are in a controlled directory
 		if err != nil {
 			skipped++
 			continue
@@ -221,7 +221,7 @@ func (s *Store) Get(scope Scope, repoPath, id string) (Note, error) {
 	if err != nil {
 		return Note{}, err
 	}
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path is constructed from scope and note id
 	if errors.Is(err, os.ErrNotExist) {
 		return Note{}, fmt.Errorf("note %q not found in %s notebook", strings.TrimSpace(id), normalizeScope(scope))
 	}
@@ -269,7 +269,7 @@ func (s *Store) Search(scope Scope, repoPath, query string, maxResults int) ([]M
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+		data, err := os.ReadFile(filepath.Join(dir, entry.Name())) // #nosec G304 -- notes are in a controlled directory
 		if err != nil {
 			continue
 		}
@@ -307,7 +307,7 @@ func (s *Store) Update(scope Scope, repoPath, id string, fields UpdateFields) (N
 	if err != nil {
 		return Note{}, err
 	}
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path is constructed from scope and note id
 	if errors.Is(err, os.ErrNotExist) {
 		return Note{}, fmt.Errorf("note %q not found in %s notebook", strings.TrimSpace(id), normalizeScope(scope))
 	}
@@ -333,7 +333,7 @@ func (s *Store) Update(scope Scope, repoPath, id string, fields UpdateFields) (N
 		return Note{}, err
 	}
 	temp := path + ".tmp"
-	if err := os.WriteFile(temp, out, 0o644); err != nil {
+	if err := os.WriteFile(temp, out, 0o600); err != nil {
 		return Note{}, fmt.Errorf("write note %s: %w", temp, err)
 	}
 	if err := os.Rename(temp, path); err != nil {
@@ -425,7 +425,7 @@ func marshalNote(note Note) ([]byte, error) {
 }
 
 func writeFileExclusive(path string, data []byte) error {
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) // #nosec G304 -- path is constructed from scope and note id
 	if err != nil {
 		return err
 	}
