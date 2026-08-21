@@ -378,6 +378,62 @@ func TestSetupThenRemoveLeavesTheConfigAsItWas(t *testing.T) {
 	}
 }
 
+func TestRemoveRestoresBytesWhenTheHelperInsertedTheSection(t *testing.T) {
+	// The round trip above starts from a config that already holds the
+	// section. Starting from one without it exercises the insert path,
+	// where the separating comma lands after the newline the file kept
+	// before its close brace — and removal used to eat that newline.
+	configs := []struct {
+		original string
+		section  string
+		claude   bool
+	}{
+		{original: "{\n  \"theme\": \"dark\"\n}\n", section: "mcp"},
+		{original: "{\n  \"theme\": \"dark\",\n  \"note\": \"x\"\n}\n", section: "mcp"},
+		{original: `{"theme":"dark"}`, section: "mcp"},
+		{original: "{\"sessionId\":123}\n", section: "mcpServers", claude: true},
+		{original: "{\n  \"mcpServers\": {\"other\": {\"command\": \"o\"}}\n}\n", section: "mcpServers", claude: true},
+	}
+	for _, cfg := range configs {
+		var installed string
+		var err error
+		if cfg.claude {
+			installed, err = mergeClaudeJSON(cfg.original, "/usr/bin/mcp-ai-helper", "")
+		} else {
+			installed, err = mergeOpenCodeJSON(cfg.original, "/usr/bin/mcp-ai-helper", "")
+		}
+		if err != nil {
+			t.Fatalf("merge %q: %v", cfg.original, err)
+		}
+		uninstalled, err := withoutJSON(installed, cfg.section)
+		if err != nil || uninstalled == nil {
+			t.Fatalf("remove %q: got (%v, %v)", cfg.original, uninstalled, err)
+		}
+		if *uninstalled != cfg.original {
+			t.Errorf("insert-then-remove must restore %q byte for byte, got:\n%q", cfg.original, *uninstalled)
+		}
+	}
+}
+
+func TestRemoveTakesAConsumedDanglingCommaAlong(t *testing.T) {
+	// A JSONC file whose last member already carried a dangling comma has
+	// that comma consumed as the separator of the inserted member, so
+	// removal takes it along: the result is the original minus the comma.
+	original := "{\n  \"theme\": \"dark\",\n}\n"
+	installed, err := mergeOpenCodeJSON(original, "/usr/bin/mcp-ai-helper", "")
+	if err != nil {
+		t.Fatalf("merge: %v", err)
+	}
+	uninstalled, err := withoutJSON(installed, "mcp")
+	if err != nil || uninstalled == nil {
+		t.Fatalf("remove: got (%v, %v)", uninstalled, err)
+	}
+	want := "{\n  \"theme\": \"dark\"\n}\n"
+	if *uninstalled != want {
+		t.Errorf("a consumed dangling comma leaves with its member:\n%q\nwant:\n%q", *uninstalled, want)
+	}
+}
+
 func TestCodexGetsTomlUnderMcpServers(t *testing.T) {
 	written, err := mergeCodexTOML("model = \"o3\"\n", "/usr/bin/mcp-ai-helper", []string{"--config", "/etc/helper.yaml"})
 	if err != nil {

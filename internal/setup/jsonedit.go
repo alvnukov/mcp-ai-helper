@@ -344,33 +344,40 @@ func (o jsonObject) childIndent(doc string) string {
 	return lineIndent(doc, o.open) + "  "
 }
 
-// jsonGapHasComma reports whether the bytes between the last member and the
-// close brace already carry the trailing comma a JSONC file may have.
-func jsonGapHasComma(doc string, obj jsonObject) bool {
+// jsonGapComma reports where the bytes between the last member and the
+// close brace carry the trailing comma a JSONC file may have, or -1 when
+// they do not.
+func jsonGapComma(doc string, obj jsonObject) int {
 	if len(obj.members) == 0 {
-		return false
+		return -1
 	}
 	last := obj.members[len(obj.members)-1].valEnd
 	for i := last; i < obj.close-1; i++ {
 		if doc[i] == ',' {
-			return true
+			return i
 		}
 	}
-	return false
+	return -1
 }
 
 // jsonInsertMember appends "key": valueText to obj in doc, matching the
 // indentation of the members already there, and returns the new document.
-// Only bytes before the close brace are touched — and none after the last
-// byte of the new value, so removing the member again restores the file
-// exactly as it was.
+// Only bytes the new member needs are touched, so removing the member again
+// restores the file exactly as it was. A file whose last member already ends
+// in a dangling comma gets the member right after that comma, so the
+// whitespace it kept before the close brace stays after the member, where
+// removal leaves it alone.
 func jsonInsertMember(doc string, obj jsonObject, key, valueText string) string {
 	lead := ","
-	if len(obj.members) == 0 || jsonGapHasComma(doc, obj) {
+	at := obj.close - 1
+	if len(obj.members) == 0 {
 		lead = ""
+	} else if comma := jsonGapComma(doc, obj); comma >= 0 {
+		lead = ""
+		at = comma + 1
 	}
 	insertion := lead + "\n" + obj.childIndent(doc) + strconv.Quote(key) + ": " + valueText
-	return doc[:obj.close-1] + insertion + doc[obj.close-1:]
+	return doc[:at] + insertion + doc[at:]
 }
 
 // jsonDeleteMember removes member i from obj in doc — its separators and its
@@ -385,9 +392,23 @@ func jsonDeleteMember(doc string, obj jsonObject, i int) string {
 		// separated by the previous member's own comma.
 		end = obj.members[i+1].keyStart
 	case i > 0:
-		// The last member: cut from just past the previous value, so the
-		// comma that separated them goes with it.
+		// The last member: cut from the comma that separated it, so an
+		// inserted member comes out exactly as it went in. jsonInsertMember
+		// places that comma after the whitespace the file already kept
+		// before its close brace, so cutting from the previous value would
+		// eat that whitespace; cutting from the comma leaves it. A
+		// hand-written comma sits right after the previous value, where the
+		// skip below finds it at once.
 		start = obj.members[i-1].valEnd
+		for start < m.keyStart {
+			if c := doc[start]; c != ' ' && c != '\t' && c != '\n' && c != '\r' {
+				break
+			}
+			start++
+		}
+		if start >= m.keyStart || doc[start] != ',' {
+			start = m.keyStart
+		}
 	default:
 		// The only member: empty the braces rather than delete them, keeping
 		// any comment that stood around them.
