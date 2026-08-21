@@ -67,8 +67,9 @@ Four patterns keep the work honest when nothing else is loaded:
 
 The procedures live in skills, which cost nothing until they are loaded:
 ` + "`mcp-ai-helper-tasks`" + `, ` + "`mcp-ai-helper-edits`" + `, ` + "`mcp-ai-helper-commands`" + `,
-` + "`mcp-ai-helper-web`" + ` and ` + "`mcp-ai-helper-surface`" + `. Load the one that matches the
-work rather than reconstructing the protocol from the tool schemas.
+` + "`mcp-ai-helper-workflows`" + `, ` + "`mcp-ai-helper-web`" + ` and ` + "`mcp-ai-helper-surface`" + `.
+Load the one that matches the work rather than reconstructing the protocol
+from the tool schemas.
 
 Editing is guarded. Read the file, take ` + "`file action=snapshot`" + ` for its hash, then
 hand that hash to ` + "`edit action=replace`" + ` — the write fails rather than silently

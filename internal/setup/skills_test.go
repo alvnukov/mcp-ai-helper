@@ -86,7 +86,7 @@ var toolActions = map[string][]string{
 	"git": {"status", "diff", "commit", "log", "log_diff", "stash_list", "branch_list",
 		"remote_list", "tag_list", "blame", "prepare_task_worktree"},
 	"task": {"current", "get", "list", "search", "upsert", "set_status", "batch_upsert", "delete"},
-	"run":  {"pipeline", "workflow", "schema"},
+	"run":  {"pipeline", "workflow", "workflow_status", "schema"},
 }
 
 // workflowSteps pins the step types run action=workflow dispatches on.

@@ -1,0 +1,4 @@
+interface:
+  display_name: "mcp-ai-helper Workflows"
+  short_description: "Compose edits, checks, and commit in one call"
+  default_prompt: "Use $mcp-ai-helper-workflows to build, run, and follow one-call workflow executions."

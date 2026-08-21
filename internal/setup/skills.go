@@ -37,6 +37,7 @@ var skillNames = []string{
 	"mcp-ai-helper-tasks",
 	"mcp-ai-helper-edits",
 	"mcp-ai-helper-commands",
+	"mcp-ai-helper-workflows",
 	"mcp-ai-helper-web",
 	"mcp-ai-helper-surface",
 }
