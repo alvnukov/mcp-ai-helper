@@ -102,7 +102,7 @@ func isExecutableTask(task tasks.Task) bool {
 	if task.Status != "todo" && task.Status != "in_progress" {
 		return false
 	}
-	return !strings.EqualFold(task.TaskType, "epic") && !hasTag(task.Tags, "goal")
+	return !strings.EqualFold(task.TaskType, "epic") && !hasGoalTag(task.Tags)
 }
 
 func currentStatusRank(status string) int {

@@ -7,13 +7,13 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"go/build"
 	"io"
 	"log"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -190,7 +190,7 @@ func resolveGoBinary(repoRoot string) string {
 			}
 		}
 	}
-	if goRoot := runtime.GOROOT(); goRoot != "" { //nolint:staticcheck // SA1019: the wrapper is rebuilt in place, so its build-time GOROOT is exactly the toolchain to prefer.
+	if goRoot := build.Default.GOROOT; goRoot != "" {
 		goBinary := filepath.Join(goRoot, "bin", "go")
 		if info, err := os.Stat(goBinary); err == nil && !info.IsDir() {
 			return goBinary

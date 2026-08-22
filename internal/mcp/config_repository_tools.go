@@ -96,13 +96,13 @@ func allowConfigRepository(
 	targets := make([]target, 0, 2)
 	if selection == "jira" || selection == "both" {
 		if cfg.Integrations.Jira == nil {
-			return nil, nil, "", errors.New("Jira integration is not configured; add its credentials before allowing repositories")
+			return nil, nil, "", errors.New("jira integration is not configured; add its credentials before allowing repositories")
 		}
 		targets = append(targets, target{name: "jira", allowed: &cfg.Integrations.Jira.AllowedRepositories})
 	}
 	if selection == "confluence" || selection == "both" {
 		if cfg.Integrations.Confluence == nil {
-			return nil, nil, "", errors.New("Confluence integration is not configured; add its credentials before allowing repositories")
+			return nil, nil, "", errors.New("confluence integration is not configured; add its credentials before allowing repositories")
 		}
 		targets = append(targets, target{name: "confluence", allowed: &cfg.Integrations.Confluence.AllowedRepositories})
 	}

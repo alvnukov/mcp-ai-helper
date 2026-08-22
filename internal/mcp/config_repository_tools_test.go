@@ -125,7 +125,7 @@ func TestAllowConfigRepositoryRejectsUnsafeTargets(t *testing.T) {
 		t.Fatalf("write config: %v", err)
 	}
 	if _, _, _, err := allowConfigRepository(configPath, "both", repoPath); err == nil ||
-		!strings.Contains(err.Error(), "Confluence integration is not configured") {
+		!strings.Contains(err.Error(), "confluence integration is not configured") {
 		t.Fatalf("missing integration error = %v", err)
 	}
 	loaded, err := config.Load(configPath)

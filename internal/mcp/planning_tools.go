@@ -349,7 +349,7 @@ func planTaskExecution(list []tasks.Task, req planTaskExecutionRequest) planTask
 	blocked := make([]taskPlanSummary, 0)
 	for _, task := range currentTasks(list) {
 		summary := summarizeTaskForPlan(task)
-		if hasTag(task.Tags, "goal") && task.ParentID == "" {
+		if hasGoalTag(task.Tags) && task.ParentID == "" {
 			item := summary
 			goal = &item
 			continue

@@ -60,7 +60,7 @@ func currentTasks(list []tasks.Task) []tasks.Task {
 	for _, task := range list {
 		switch task.Status {
 		case "todo", "in_progress", "blocked":
-			if hasTag(task.Tags, "goal") {
+			if hasGoalTag(task.Tags) {
 				goals = append(goals, task)
 			} else {
 				current = append(current, task)
@@ -70,9 +70,9 @@ func currentTasks(list []tasks.Task) []tasks.Task {
 	return append(goals, current...)
 }
 
-func hasTag(tags []string, target string) bool {
+func hasGoalTag(tags []string) bool {
 	for _, t := range tags {
-		if t == target {
+		if t == "goal" {
 			return true
 		}
 	}
@@ -82,7 +82,7 @@ func hasTag(tags []string, target string) bool {
 func buildTaskTree(list []tasks.Task) map[string]any {
 	var goal *tasks.Task
 	for i := range list {
-		if hasTag(list[i].Tags, "goal") && list[i].ParentID == "" {
+		if hasGoalTag(list[i].Tags) && list[i].ParentID == "" {
 			g := list[i]
 			goal = &g
 			break
