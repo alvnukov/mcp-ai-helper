@@ -629,6 +629,13 @@ func buildStepWaves(steps []WorkflowStep) ([][]WorkflowStep, error) {
 		inDegree[stepIndex]++
 		reverse[dependencyIndex] = append(reverse[dependencyIndex], stepIndex)
 	}
+	isFinalTaskTransition := func(step WorkflowStep) bool {
+		if step.Tool != "task_transition" {
+			return false
+		}
+		to, _ := step.Args["to"].(string)
+		return strings.TrimSpace(to) == "done"
+	}
 
 	var editIndices []int
 	for i, step := range steps {
@@ -654,6 +661,31 @@ func buildStepWaves(steps []WorkflowStep) ([][]WorkflowStep, error) {
 				return nil, fmt.Errorf("workflow step %q condition references unknown step %q", step.ID, dependencyID)
 			}
 			addDependency(i, dependencyIndex)
+		}
+	}
+
+	// Closeout is irreversible relative to a failed gate. Make a final task
+	// transition observe every ordinary step, and make commits observe both
+	// ordinary work and final task transitions even when the caller omitted
+	// depends_on. Multiple closeout steps retain their request order.
+	for i, step := range steps {
+		switch {
+		case isFinalTaskTransition(step):
+			for dependencyIndex, dependency := range steps {
+				if dependencyIndex == i || dependency.Tool == "git_commit_owned" ||
+					isFinalTaskTransition(dependency) && dependencyIndex > i {
+					continue
+				}
+				addDependency(i, dependencyIndex)
+			}
+		case step.Tool == "git_commit_owned":
+			for dependencyIndex, dependency := range steps {
+				if dependencyIndex == i ||
+					dependency.Tool == "git_commit_owned" && dependencyIndex > i {
+					continue
+				}
+				addDependency(i, dependencyIndex)
+			}
 		}
 	}
 

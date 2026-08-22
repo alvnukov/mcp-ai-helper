@@ -294,6 +294,76 @@ func TestRunWorkflowStopsBeforeCommitOnFailedCheck(t *testing.T) {
 	}
 }
 
+func TestRunWorkflowFailedGateCannotRaceCloseout(t *testing.T) {
+	dir := t.TempDir()
+	runTestGit(t, dir, "init")
+	runTestGit(t, dir, "config", "user.email", "test@example.invalid")
+	runTestGit(t, dir, "config", "user.name", "Test User")
+	path := filepath.Join(dir, "x.txt")
+	if err := os.WriteFile(path, []byte("baseline\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runTestGit(t, dir, "add", "x.txt")
+	runTestGit(t, dir, "commit", "-m", "baseline")
+	if err := os.WriteFile(path, []byte("dirty\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	runner, backend := newTaskTestRunner(testConfig(dir))
+	created, err := backend.Add(tasks.AddRequest{
+		RepoPath: dir,
+		ID:       "closeout-must-wait",
+		Title:    "Closeout must wait",
+		Status:   "todo",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := runner.RunWorkflow(t.Context(), WorkflowRequest{
+		RepoPath: dir,
+		Steps: []WorkflowStep{
+			{ID: "gate", Tool: "command", Args: map[string]any{"command": "exit 7"}},
+			{
+				ID:   "done",
+				Tool: "task_transition",
+				Args: map[string]any{
+					"task_ids": []string{created.ID},
+					"from":     "todo",
+					"to":       "done",
+				},
+			},
+			{
+				ID:   "commit",
+				Tool: "git_commit_owned",
+				Args: map[string]any{
+					"files":   []string{"x.txt"},
+					"message": "must not commit",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "failed" || result.FailedStepID != "gate" {
+		t.Fatalf("workflow result = %#v, want failed gate", result)
+	}
+	if result.CommitResult != nil {
+		t.Fatalf("commit raced the failed gate: %#v", result.CommitResult)
+	}
+	got, err := backend.Get(t.Context(), dir, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "todo" {
+		t.Fatalf("task status = %q, want todo after failed gate", got.Status)
+	}
+	if subject := strings.TrimSpace(runTestGit(t, dir, "log", "-1", "--pretty=%s")); subject != "baseline" {
+		t.Fatalf("latest commit = %q, want baseline", subject)
+	}
+}
+
 func TestRunWorkflowStepsCommitUsesTopLevelOwnedFiles(t *testing.T) {
 	dir := t.TempDir()
 	runTestGit(t, dir, "init")
