@@ -1,7 +1,7 @@
 ---
 id: task-current-must-be-bounded-and-consistent
 title: Сделать task current компактным, свежим и семантически однозначным
-status: todo
+status: done
 priority: high
 model_level: medium
 task_type: bug
@@ -21,7 +21,7 @@ verification_plan:
     - Run focused large-registry response tests.
     - Run self-describing discovery-flow tests.
 created_at: "2026-08-01T11:19:08.032731Z"
-updated_at: "2026-08-01T11:19:08.032731Z"
+updated_at: "2026-08-22T17:04:59.58242Z"
 ---
 
 ## Body

@@ -2,14 +2,21 @@ package mcp
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"path/filepath"
+	"sort"
 	"strings"
+	"time"
 
 	basemcp "github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/alvnukov/mcp-ai-helper/internal/tasks"
 )
+
+const taskCurrentLimit = 12
 
 func registerTaskTools(srv *server.MCPServer, deps *Server) {
 	taskActions := actions{
@@ -24,7 +31,7 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 	}
 	srv.AddTool(basemcp.NewTool("task",
 		rewritesLocal,
-		basemcp.WithDescription("Per-repository task registry. Required: repo_path, action. Actions: current (no extra args, returns active tasks); get (id); list (status?, query?); search (query, status?); upsert (id?, title, status?, task_type?, priority?, model_level?, body?, tags?, acceptance_criteria?, verification_plan?, parent_id?); set_status (id, status); batch_upsert (tasks[], close_missing?, missing_status?, active_statuses?); delete (id)."),
+		basemcp.WithDescription("Per-repository task registry. Required: repo_path, action. Actions: current (no extra args, returns a bounded ranked executable subset plus active and registry totals); get (id); list (status?, query?); search (query, status?); upsert (id?, title, status?, task_type?, priority?, model_level?, body?, tags?, acceptance_criteria?, verification_plan?, parent_id?); set_status (id, status); batch_upsert (tasks[], close_missing?, missing_status?, active_statuses?); delete (id)."),
 		basemcp.WithString("repo_path", basemcp.Required()),
 		basemcp.WithString("action", basemcp.Required(), actionEnum(taskActions)),
 		basemcp.WithString("id", basemcp.Description("Task id. Required for get, set_status, delete. Optional for upsert (creates new if absent).")),
@@ -42,7 +49,7 @@ func registerTaskTools(srv *server.MCPServer, deps *Server) {
 		basemcp.WithArray("tasks", basemcp.Items(taskUpsertItemSchema()), basemcp.Description("Batch upsert task array. Each item requires id and title.")),
 		basemcp.WithBoolean("close_missing", basemcp.Description("Batch: close active tasks omitted from the batch.")),
 		basemcp.WithString("missing_status", basemcp.Description("Batch: status for omitted tasks.")),
-		basemcp.WithArray("active_statuses", basemcp.Description("Batch: statuses considered active for close_missing.")),
+		basemcp.WithString("active_statuses", basemcp.Description("Batch: statuses considered active for close_missing.")),
 	), dispatch(deps, "task", taskActions))
 }
 
@@ -55,11 +62,160 @@ func taskActionCurrent(ctx context.Context, req basemcp.CallToolRequest, deps *S
 	if err != nil {
 		return basemcp.NewToolResultError(err.Error()), nil
 	}
-	list, source, err := backend.ListCurrent(ctx, args.RepoPath)
+	all, source, err := backend.ListAll(ctx, args.RepoPath)
 	if err != nil {
 		return basemcp.NewToolResultError(err.Error()), nil
 	}
-	return structured(taskListResponse(backend, list, list, source, args.RepoPath))
+	active := currentTasks(all)
+	visible := selectCurrentTasks(active, taskCurrentLimit)
+	return structured(taskCurrentResponse(backend, visible, active, all, source, args.RepoPath))
+}
+
+func selectCurrentTasks(active []tasks.Task, limit int) []tasks.Task {
+	selected := make([]tasks.Task, 0, len(active))
+	for _, task := range active {
+		if !isExecutableTask(task) {
+			continue
+		}
+		selected = append(selected, task)
+	}
+	sort.SliceStable(selected, func(i, j int) bool {
+		left, right := selected[i], selected[j]
+		if currentStatusRank(left.Status) != currentStatusRank(right.Status) {
+			return currentStatusRank(left.Status) < currentStatusRank(right.Status)
+		}
+		if currentPriorityRank(left.Priority) != currentPriorityRank(right.Priority) {
+			return currentPriorityRank(left.Priority) < currentPriorityRank(right.Priority)
+		}
+		if !left.UpdatedAt.Equal(right.UpdatedAt) {
+			return left.UpdatedAt.After(right.UpdatedAt)
+		}
+		return left.ID < right.ID
+	})
+	if limit > 0 && len(selected) > limit {
+		selected = selected[:limit]
+	}
+	return selected
+}
+
+func isExecutableTask(task tasks.Task) bool {
+	if task.Status != "todo" && task.Status != "in_progress" {
+		return false
+	}
+	return !strings.EqualFold(task.TaskType, "epic") && !hasTag(task.Tags, "goal")
+}
+
+func currentStatusRank(status string) int {
+	if status == "in_progress" {
+		return 0
+	}
+	return 1
+}
+
+func currentPriorityRank(priority string) int {
+	switch priority {
+	case "critical":
+		return 0
+	case "high":
+		return 1
+	case "medium":
+		return 2
+	case "low":
+		return 3
+	default:
+		return 4
+	}
+}
+
+func taskCurrentResponse(backend taskBackend, visible []tasks.Task, active []tasks.Task, all []tasks.Task, source string, repoPath string) map[string]any {
+	out := taskListResponse(backend, visible, all, source, repoPath)
+	delete(out, "counts_by_status")
+	delete(out, "tasks_total")
+
+	executableTotal := 0
+	for _, task := range active {
+		if isExecutableTask(task) {
+			executableTotal++
+		}
+	}
+	dueToLimit := executableTotal - len(visible)
+	if dueToLimit < 0 {
+		dueToLimit = 0
+	}
+	out["active_counts_by_status"] = countTasksByStatus(active)
+	out["registry_counts_by_status"] = countTasksByStatus(all)
+	out["active_total"] = len(active)
+	out["executable_total"] = executableTotal
+	out["registry_total"] = len(all)
+	out["selection_policy"] = "in_progress then todo; priority; latest updated_at; id; excludes blocked, epic and goal tasks"
+	out["truncated"] = dueToLimit > 0
+	out["omitted"] = map[string]int{
+		"due_to_limit":             dueToLimit,
+		"non_executable_by_policy": len(active) - executableTotal,
+	}
+	freshness := map[string]string{"revision": taskRegistryRevision(all)}
+	if latest := latestTaskUpdate(all); latest != "" {
+		freshness["latest_updated_at"] = latest
+	}
+	out["freshness"] = freshness
+	if repairRequired, _ := out["repair_required"].(bool); repairRequired {
+		return out
+	}
+	if len(visible) > 0 {
+		out["next_action"] = map[string]any{
+			"tool": "task",
+			"args": map[string]any{"repo_path": repoPath, "action": "get", "id": visible[0].ID},
+		}
+		out["next_call"] = "Run next_action for the highest-ranked task; use task action=list with status=blocked only for blocker context."
+		return out
+	}
+	out["next_action"] = map[string]any{
+		"tool": "task",
+		"args": map[string]any{"repo_path": repoPath, "action": "list"},
+	}
+	out["next_call"] = "No executable task is current; run next_action to inspect the registry."
+	return out
+}
+
+type taskRevisionItem struct {
+	ID         string    `json:"id"`
+	Status     string    `json:"status"`
+	Title      string    `json:"title"`
+	Priority   string    `json:"priority,omitempty"`
+	ModelLevel string    `json:"model_level,omitempty"`
+	TaskType   string    `json:"task_type,omitempty"`
+	ParentID   string    `json:"parent_id,omitempty"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+func taskRegistryRevision(all []tasks.Task) string {
+	items := make([]taskRevisionItem, 0, len(all))
+	for _, task := range all {
+		items = append(items, taskRevisionItem{
+			ID: task.ID, Status: task.Status, Title: task.Title, Priority: task.Priority,
+			ModelLevel: task.ModelLevel, TaskType: task.TaskType, ParentID: task.ParentID, UpdatedAt: task.UpdatedAt,
+		})
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].ID < items[j].ID })
+	payload, err := json.Marshal(items)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(payload)
+	return "sha256:" + hex.EncodeToString(sum[:12])
+}
+
+func latestTaskUpdate(all []tasks.Task) string {
+	var latest time.Time
+	for _, task := range all {
+		if task.UpdatedAt.After(latest) {
+			latest = task.UpdatedAt
+		}
+	}
+	if latest.IsZero() {
+		return ""
+	}
+	return latest.UTC().Format(time.RFC3339Nano)
 }
 
 func taskActionGet(ctx context.Context, req basemcp.CallToolRequest, deps *Server) (*basemcp.CallToolResult, error) {
