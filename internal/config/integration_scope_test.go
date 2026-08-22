@@ -34,12 +34,13 @@ func TestIntegrationRepositoryScope(t *testing.T) {
 	}
 }
 
-func TestIntegrationRepositoryScopeEmptyAllowlistKeepsLegacyBehavior(t *testing.T) {
-	if !(&JiraConfig{}).IsEnabledForRepository("") {
-		t.Fatal("unscoped Jira should remain enabled without repository context")
+func TestIntegrationRepositoryScopeEmptyAllowlistDeniesEverywhere(t *testing.T) {
+	repository := t.TempDir()
+	if (&JiraConfig{}).IsEnabledForRepository(repository) {
+		t.Fatal("Jira should be disabled without an explicit allowed repository")
 	}
-	if !(&ConfluenceConfig{}).IsEnabledForRepository("") {
-		t.Fatal("unscoped Confluence should remain enabled without repository context")
+	if (&ConfluenceConfig{}).IsEnabledForRepository(repository) {
+		t.Fatal("Confluence should be disabled without an explicit allowed repository")
 	}
 }
 

@@ -126,7 +126,11 @@ func TestEveryRegisteredToolPublishesAllFourAnnotations(t *testing.T) {
 		}
 	}
 
-	tools := New(allLayersConfig()).ListTools()
+	repoPath := t.TempDir()
+	cfg := allLayersConfig()
+	cfg.Integrations.Jira.AllowedRepositories = []string{repoPath}
+	cfg.Integrations.Confluence.AllowedRepositories = []string{repoPath}
+	tools := NewForRepository(cfg, repoPath).ListTools()
 	check := func(got *bool, want bool, name, field string) {
 		if got == nil {
 			t.Errorf("%q: %s is nil; all four hints must be set explicitly", name, field)

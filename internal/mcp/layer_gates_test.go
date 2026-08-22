@@ -71,10 +71,11 @@ func TestConfigToolsFollowIntegrations(t *testing.T) {
 		t.Fatal("config tools registered with models off and no integrations")
 	}
 
+	repoPath := t.TempDir()
 	cfg = &config.Config{}
 	cfg.Layers.Models = config.LayerConfig{Enabled: &off}
-	cfg.Integrations.Jira = &config.JiraConfig{}
-	srv := New(cfg)
+	cfg.Integrations.Jira = &config.JiraConfig{AllowedRepositories: []string{repoPath}}
+	srv := NewForRepository(cfg, repoPath)
 	for _, tool := range []string{"config_read", "config_reload", "jira_search"} {
 		if _, ok := srv.ListTools()[tool]; !ok {
 			t.Errorf("%s missing with models=false and jira enabled", tool)

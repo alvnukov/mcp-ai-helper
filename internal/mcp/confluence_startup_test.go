@@ -26,15 +26,17 @@ func TestConfluenceToolsAnswerFromProcessStart(t *testing.T) {
 	defer wiki.Close()
 
 	enabled := true
+	repoPath := t.TempDir()
 	cfg := &config.Config{Integrations: config.IntegrationsConfig{
 		Confluence: &config.ConfluenceConfig{
-			URL:     wiki.URL,
-			APIKey:  "test",
-			Enabled: &enabled,
+			URL:                 wiki.URL,
+			APIKey:              "test",
+			AllowedRepositories: []string{repoPath},
+			Enabled:             &enabled,
 		},
 	}}
 
-	srv := New(cfg)
+	srv := NewForRepository(cfg, repoPath)
 	tool, ok := srv.ListTools()["confluence"]
 	if !ok {
 		t.Fatal("confluence is not registered")

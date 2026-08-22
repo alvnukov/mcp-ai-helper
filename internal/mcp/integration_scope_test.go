@@ -29,12 +29,12 @@ func TestNewForRepositoryScopesIntegrationTools(t *testing.T) {
 	}
 }
 
-func TestNewKeepsUnscopedIntegrationTools(t *testing.T) {
+func TestNewHidesUnscopedIntegrationTools(t *testing.T) {
 	cfg := integrationScopeTestConfig("")
 	tools := New(cfg).ListTools()
 	for _, name := range []string{"jira_read", "confluence"} {
-		if _, ok := tools[name]; !ok {
-			t.Errorf("%s should keep legacy unscoped registration", name)
+		if _, ok := tools[name]; ok {
+			t.Errorf("%s should be hidden without an explicit allowed repository", name)
 		}
 	}
 }

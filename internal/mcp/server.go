@@ -274,7 +274,7 @@ func serverVersion() string {
 }
 
 // New constructs an MCP server without a startup repository context.
-// Scoped integrations therefore fail closed; unscoped integrations keep the legacy behavior.
+// Integrations fail closed because no repository can be explicitly allowed.
 func New(cfg *config.Config) *server.MCPServer {
 	return NewForRepository(cfg, "")
 }

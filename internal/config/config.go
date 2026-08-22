@@ -512,7 +512,7 @@ func (j *JiraConfig) IsEnabledForRepository(repoPath string) bool {
 
 func repositoryAllowed(allowedRepositories []string, repoPath string) bool {
 	if len(allowedRepositories) == 0 {
-		return true
+		return false
 	}
 	repository, ok := normalizeRepositoryPath(repoPath)
 	if !ok {

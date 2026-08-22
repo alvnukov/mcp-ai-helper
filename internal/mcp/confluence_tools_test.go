@@ -139,7 +139,11 @@ func TestConfWritesAreRefusedWithoutAnIntegration(t *testing.T) {
 func confluenceSchema(t *testing.T) (map[string]json.RawMessage, []string) {
 	t.Helper()
 
-	tool, ok := New(allLayersConfig()).ListTools()["confluence"]
+	repoPath := t.TempDir()
+	cfg := allLayersConfig()
+	cfg.Integrations.Jira.AllowedRepositories = []string{repoPath}
+	cfg.Integrations.Confluence.AllowedRepositories = []string{repoPath}
+	tool, ok := NewForRepository(cfg, repoPath).ListTools()["confluence"]
 	if !ok {
 		t.Fatal("confluence is not registered")
 	}

@@ -16,11 +16,16 @@ import (
 // connection failed" — no way to tell a missing api key from a broken URL.
 func TestJiraToolsAnswerWithTheStartupError(t *testing.T) {
 	enabled := true
+	repoPath := t.TempDir()
 	cfg := &config.Config{Integrations: config.IntegrationsConfig{
-		Jira: &config.JiraConfig{URL: "https://jira.example.com", Enabled: &enabled},
+		Jira: &config.JiraConfig{
+			URL:                 "https://jira.example.com",
+			AllowedRepositories: []string{repoPath},
+			Enabled:             &enabled,
+		},
 	}}
 
-	srv := New(cfg)
+	srv := NewForRepository(cfg, repoPath)
 	tool, ok := srv.ListTools()["jira_search"]
 	if !ok {
 		t.Fatal("jira_search is not registered")
