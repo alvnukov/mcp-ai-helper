@@ -87,7 +87,7 @@ func TestEveryRegisteredToolPublishesAllFourAnnotations(t *testing.T) {
 			toolHints{readOnly: false, destructive: true, idempotent: true, openWorld: false},
 			"overwrites local state with a value the caller names",
 			[]string{
-				"task_registry_init", "config_reload", "config_option_set", "config_option_reset",
+				"task_registry_init", "config_reload", "config_allow_repository", "config_option_set", "config_option_reset",
 				"feature_enable", "feature_disable", "feature_reset",
 				"issue_accept", "task_export", "task_ui_stop",
 			},

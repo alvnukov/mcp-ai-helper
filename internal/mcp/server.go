@@ -309,35 +309,39 @@ func NewForRepository(cfg *config.Config, repoPath string) *server.MCPServer {
 		registerGuidance(srv, deps)
 	}
 
-	// Config tools follow visible consumers. Reload can make an integration
-	// fail closed immediately, but adding tools to the client surface still
-	// requires a process restart.
-	if cfg.LayerEnabled("models") || jiraOn || confluenceOn {
-		reloadConfig := func(path string) (*config.Config, error) {
-			if strings.TrimSpace(path) == "" {
-				deps.mu.RLock()
-				path = deps.cfg.SourcePath
-				deps.mu.RUnlock()
-			}
-			next, err := config.Load(path)
-			if err != nil {
-				return nil, err
-			}
-			chat, cmds, pipes, store, backend := buildDeps(next)
-			deps.mu.Lock()
-			deps.cfg = next
-			deps.chat = chat
-			deps.commands = cmds
-			deps.pipelines = pipes
-			deps.taskStore = store
-			deps.taskBackend = backend
-			deps.notesStore = buildNotesStore()
-			deps.secretMask = buildSecretMask(next)
-			deps.jiraClient, deps.jiraClientErr = buildJiraClient(next, repoPath)
-			deps.confluenceClient, deps.confluenceClientErr = buildConfluenceClient(next, repoPath)
-			deps.mu.Unlock()
-			return next, nil
+	// config_allow_repository is bootstrap surface: it must remain callable
+	// while fail-closed integration tools and the regular config suite are hidden.
+	reloadConfig := func(path string) (*config.Config, error) {
+		if strings.TrimSpace(path) == "" {
+			deps.mu.RLock()
+			path = deps.cfg.SourcePath
+			deps.mu.RUnlock()
 		}
+		next, err := config.Load(path)
+		if err != nil {
+			return nil, err
+		}
+		chat, cmds, pipes, store, backend := buildDeps(next)
+		deps.mu.Lock()
+		deps.cfg = next
+		deps.chat = chat
+		deps.commands = cmds
+		deps.pipelines = pipes
+		deps.taskStore = store
+		deps.taskBackend = backend
+		deps.notesStore = buildNotesStore()
+		deps.secretMask = buildSecretMask(next)
+		deps.jiraClient, deps.jiraClientErr = buildJiraClient(next, repoPath)
+		deps.confluenceClient, deps.confluenceClientErr = buildConfluenceClient(next, repoPath)
+		deps.mu.Unlock()
+		return next, nil
+	}
+	registerConfigAllowRepositoryTool(srv, deps, reloadConfig, repoPath)
+
+	// The wider config suite follows visible consumers to keep the default
+	// surface compact. Reload can fail closed immediately, but adding tools to
+	// the client surface still requires a process restart.
+	if cfg.LayerEnabled("models") || jiraOn || confluenceOn {
 		registerConfigTools(srv, deps, reloadConfig)
 	}
 
