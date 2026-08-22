@@ -746,7 +746,7 @@ const protectedLeanCommandMessage = "policy_denied: command appears to access pr
 // The denial has to name a way forward that exists. Full replacement was
 // removed deliberately, so pointing at config_replace left the caller with a
 // guard it could not satisfy and a tool it could not call.
-const protectedConfigCommandMessage = "current helper config cannot be edited from pipeline/command tools; inspect it with config_read, set an allowlisted scalar with config_option_set, and for any other field edit the file directly and then call config_reload"
+const protectedConfigCommandMessage = "current helper config cannot be read or edited from pipeline/command tools; inspect it with config_read, set an allowlisted scalar with config_option_set/config_option_reset, and for any other field report needs_user_action and ask the user to edit it, then call config_reload"
 
 func rejectProtectedConfigCommand(cmd string, protectedPath string) error {
 	normalized := normalizeCommandPath(cmd)

@@ -45,6 +45,7 @@ func (a actions) names() []string {
 func dispatch(deps *Server, tool string, handlers actions) server.ToolHandlerFunc {
 	return func(ctx context.Context, req basemcp.CallToolRequest) (*basemcp.CallToolResult, error) {
 		argsMap, _ := req.Params.Arguments.(map[string]any)
+		action, _ := argsMap["action"].(string)
 		if deps != nil {
 			if repoPath, _ := argsMap["repo_path"].(string); strings.TrimSpace(repoPath) != "" {
 				repoCfg, err := config.LoadRepoConfig(repoPath)
@@ -54,9 +55,13 @@ func dispatch(deps *Server, tool string, handlers actions) server.ToolHandlerFun
 				if repoCfg.ToolDenied(tool) {
 					return basemcp.NewToolResultError(fmt.Sprintf("tool %q is denied by repo-local config", tool)), nil
 				}
+				if _, known := handlers[action]; known {
+					if err := deps.inspectGenericAccess(tool, action, argsMap, repoCfg); err != nil {
+						return basemcp.NewToolResultError(err.Error()), nil
+					}
+				}
 			}
 		}
-		action, _ := argsMap["action"].(string)
 		if handler, ok := handlers[action]; ok {
 			return handler(ctx, req)
 		}

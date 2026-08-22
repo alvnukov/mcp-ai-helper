@@ -19,8 +19,8 @@ func Schema() map[string]any {
 			"Call config_schema before editing config when field meaning is unclear.",
 			"Use config_read to inspect the active sanitized config.",
 			"Use config_option_set/config_option_reset for allowlisted scalar option edits; prefer them over full YAML replacement.",
-			"There is no full-replacement tool: a field outside the config_option_set allowlist, assistant_guidance among them, is edited in the config file directly.",
-			"Use config_reload after an external config edit; config_option_set and config_option_reset reload by default.",
+			"There is no full-replacement tool: for a field outside the config_option_set allowlist, report needs_user_action and ask the user to edit the helper config instead of reading or editing it through generic helper tools.",
+			"After the user edits the helper config, use config_reload; config_option_set and config_option_reset reload by default.",
 			"Use language_profiles before code edits so format/test/lint commands are selected by language instead of ad hoc shell habits.",
 		},
 		"fields": []FieldDoc{
