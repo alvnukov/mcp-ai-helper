@@ -39,8 +39,8 @@ type Server struct {
 	taskUI              *taskUIServer
 }
 
-func buildJiraClient(cfg *config.Config) (*jira.Client, error) {
-	if cfg.Integrations.Jira == nil || !cfg.Integrations.Jira.IsEnabled() {
+func buildJiraClient(cfg *config.Config, repoPath string) (*jira.Client, error) {
+	if cfg.Integrations.Jira == nil || !cfg.Integrations.Jira.IsEnabledForRepository(repoPath) {
 		return nil, nil
 	}
 	jc, err := jira.NewClient(*cfg.Integrations.Jira)
@@ -50,8 +50,8 @@ func buildJiraClient(cfg *config.Config) (*jira.Client, error) {
 	return jc, nil
 }
 
-func buildConfluenceClient(cfg *config.Config) (*confluence.Client, error) {
-	if cfg.Integrations.Confluence == nil || !cfg.Integrations.Confluence.IsEnabled() {
+func buildConfluenceClient(cfg *config.Config, repoPath string) (*confluence.Client, error) {
+	if cfg.Integrations.Confluence == nil || !cfg.Integrations.Confluence.IsEnabledForRepository(repoPath) {
 		return nil, nil
 	}
 	cc, err := confluence.NewClient(confluence.Config{
@@ -273,8 +273,14 @@ func serverVersion() string {
 	return "dev"
 }
 
-// New constructs an MCP server with all configured helper tools.
+// New constructs an MCP server without a startup repository context.
+// Scoped integrations therefore fail closed; unscoped integrations keep the legacy behavior.
 func New(cfg *config.Config) *server.MCPServer {
+	return NewForRepository(cfg, "")
+}
+
+// NewForRepository constructs the startup tool surface for one local repository.
+func NewForRepository(cfg *config.Config, repoPath string) *server.MCPServer {
 	srv := server.NewMCPServer(
 		"mcp-ai-helper",
 		serverVersion(),
@@ -284,11 +290,13 @@ func New(cfg *config.Config) *server.MCPServer {
 	)
 
 	deps := &Server{cfg: cfg, secretMask: buildSecretMask(cfg)}
-	deps.jiraClient, deps.jiraClientErr = buildJiraClient(cfg)
+	jiraOn := cfg.Integrations.Jira != nil && cfg.Integrations.Jira.IsEnabledForRepository(repoPath)
+	confluenceOn := cfg.Integrations.Confluence != nil && cfg.Integrations.Confluence.IsEnabledForRepository(repoPath)
+	deps.jiraClient, deps.jiraClientErr = buildJiraClient(cfg, repoPath)
 	// The confluence client belongs to process start, not just to reload:
-	// the conf_* tools are registered from this same config, and without a
-	// client here they answer "not configured" until a reload builds one.
-	deps.confluenceClient, deps.confluenceClientErr = buildConfluenceClient(cfg)
+	// the confluence tool is registered from this same config, and without a
+	// client here it answers "not configured" until a reload builds one.
+	deps.confluenceClient, deps.confluenceClientErr = buildConfluenceClient(cfg, repoPath)
 	deps.chat, deps.commands, deps.pipelines, deps.taskStore, deps.taskBackend = buildDeps(cfg)
 	deps.notesStore = buildNotesStore()
 
@@ -301,13 +309,10 @@ func New(cfg *config.Config) *server.MCPServer {
 		registerGuidance(srv, deps)
 	}
 
-	// Config tools follow their consumers. The models layer is one; the
-	// integrations are the other, because with models off and Jira or
-	// Confluence on, a config reload is the only way to fix their
-	// credentials mid-session. Confluence is checked directly because
-	// LayerEnabled has no case for it and defaults to true.
-	confluenceOn := cfg.Integrations.Confluence != nil && cfg.Integrations.Confluence.IsEnabled()
-	if cfg.LayerEnabled("models") || cfg.LayerEnabled("jira") || confluenceOn {
+	// Config tools follow visible consumers. Reload can make an integration
+	// fail closed immediately, but adding tools to the client surface still
+	// requires a process restart.
+	if cfg.LayerEnabled("models") || jiraOn || confluenceOn {
 		reloadConfig := func(path string) (*config.Config, error) {
 			if strings.TrimSpace(path) == "" {
 				deps.mu.RLock()
@@ -328,8 +333,8 @@ func New(cfg *config.Config) *server.MCPServer {
 			deps.taskBackend = backend
 			deps.notesStore = buildNotesStore()
 			deps.secretMask = buildSecretMask(next)
-			deps.jiraClient, deps.jiraClientErr = buildJiraClient(next)
-			deps.confluenceClient, deps.confluenceClientErr = buildConfluenceClient(next)
+			deps.jiraClient, deps.jiraClientErr = buildJiraClient(next, repoPath)
+			deps.confluenceClient, deps.confluenceClientErr = buildConfluenceClient(next, repoPath)
 			deps.mu.Unlock()
 			return next, nil
 		}
@@ -372,10 +377,10 @@ func New(cfg *config.Config) *server.MCPServer {
 		}
 	}
 
-	if cfg.Integrations.Jira != nil && cfg.Integrations.Jira.IsEnabled() {
+	if jiraOn {
 		registerJiraTools(srv, deps)
 	}
-	if cfg.Integrations.Confluence != nil && cfg.Integrations.Confluence.IsEnabled() {
+	if confluenceOn {
 		registerConfluenceTools(srv, deps)
 	}
 

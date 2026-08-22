@@ -402,13 +402,14 @@ type IntegrationsConfig struct {
 
 // ConfluenceConfig holds Confluence connection settings.
 type ConfluenceConfig struct {
-	URL           string   `yaml:"url" json:"url"`
-	Username      string   `yaml:"username" json:"username"`
-	APIKey        string   `yaml:"api_key" json:"-"`
-	APIKeyEnv     string   `yaml:"api_key_env" json:"-"`
-	AllowedSpaces []string `yaml:"allowed_spaces" json:"allowed_spaces"`
-	ReadOnly      *bool    `yaml:"read_only" json:"read_only"`
-	Enabled       *bool    `yaml:"enabled" json:"enabled"`
+	URL                 string   `yaml:"url" json:"url"`
+	Username            string   `yaml:"username" json:"username"`
+	APIKey              string   `yaml:"api_key" json:"-"`
+	APIKeyEnv           string   `yaml:"api_key_env" json:"-"`
+	AllowedSpaces       []string `yaml:"allowed_spaces" json:"allowed_spaces"`
+	AllowedRepositories []string `yaml:"allowed_repositories" json:"allowed_repositories"`
+	ReadOnly            *bool    `yaml:"read_only" json:"read_only"`
+	Enabled             *bool    `yaml:"enabled" json:"enabled"`
 }
 
 // TaskRegistryConfig controls which task registry backend is used.
@@ -430,6 +431,11 @@ func (c *ConfluenceConfig) IsEnabled() bool {
 		return false
 	}
 	return c.Enabled == nil || *c.Enabled
+}
+
+// IsEnabledForRepository combines the integration switch with its local repository scope.
+func (c *ConfluenceConfig) IsEnabledForRepository(repoPath string) bool {
+	return c.IsEnabled() && repositoryAllowed(c.AllowedRepositories, repoPath)
 }
 
 // ResolvedAPIKey returns the API key: direct value first, then env fallback.
@@ -461,13 +467,14 @@ func (c *ConfluenceConfig) IsSpaceAllowed(spaceKey string) bool {
 
 // JiraConfig holds Jira connection settings.
 type JiraConfig struct {
-	URL             string   `yaml:"url" json:"url"`
-	Username        string   `yaml:"username" json:"username"`
-	APIKey          string   `yaml:"api_key" json:"-"`
-	APIKeyEnv       string   `yaml:"api_key_env" json:"-"`
-	AllowedProjects []string `yaml:"allowed_projects" json:"allowed_projects"`
-	ReadOnly        *bool    `yaml:"read_only" json:"read_only"`
-	Enabled         *bool    `yaml:"enabled" json:"enabled"`
+	URL                 string   `yaml:"url" json:"url"`
+	Username            string   `yaml:"username" json:"username"`
+	APIKey              string   `yaml:"api_key" json:"-"`
+	APIKeyEnv           string   `yaml:"api_key_env" json:"-"`
+	AllowedProjects     []string `yaml:"allowed_projects" json:"allowed_projects"`
+	AllowedRepositories []string `yaml:"allowed_repositories" json:"allowed_repositories"`
+	ReadOnly            *bool    `yaml:"read_only" json:"read_only"`
+	Enabled             *bool    `yaml:"enabled" json:"enabled"`
 }
 
 // CanMutate returns false when read_only is explicitly true.
@@ -496,6 +503,66 @@ func (j *JiraConfig) IsEnabled() bool {
 		return false
 	}
 	return j.Enabled == nil || *j.Enabled
+}
+
+// IsEnabledForRepository combines the integration switch with its local repository scope.
+func (j *JiraConfig) IsEnabledForRepository(repoPath string) bool {
+	return j.IsEnabled() && repositoryAllowed(j.AllowedRepositories, repoPath)
+}
+
+func repositoryAllowed(allowedRepositories []string, repoPath string) bool {
+	if len(allowedRepositories) == 0 {
+		return true
+	}
+	repository, ok := normalizeRepositoryPath(repoPath)
+	if !ok {
+		return false
+	}
+	for _, allowedRepository := range allowedRepositories {
+		root, valid := normalizeRepositoryPath(allowedRepository)
+		if !valid {
+			continue
+		}
+		relative, err := filepath.Rel(root, repository)
+		if err != nil {
+			continue
+		}
+		if relative == "." || (relative != ".." && !strings.HasPrefix(relative, ".."+string(os.PathSeparator))) {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeRepositoryPath(path string) (string, bool) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", false
+	}
+	if path == "~" || strings.HasPrefix(path, "~"+string(os.PathSeparator)) {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", false
+		}
+		path = filepath.Join(home, strings.TrimPrefix(path, "~"+string(os.PathSeparator)))
+	}
+	if !filepath.IsAbs(path) {
+		return "", false
+	}
+	path = filepath.Clean(path)
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		path = resolved
+	}
+	return path, true
+}
+
+func validateRepositoryAllowlist(field string, repositories []string) error {
+	for index, repository := range repositories {
+		if _, ok := normalizeRepositoryPath(repository); !ok {
+			return fmt.Errorf("%s[%d] must be an absolute path or use ~", field, index)
+		}
+	}
+	return nil
 }
 
 // ResolvedAPIKey returns the API key: direct value first, then env fallback.
@@ -878,6 +945,13 @@ integrations:
     # url: https://your-domain.atlassian.net
     # username: bot@example.com
     # api_key_env: JIRA_API_KEY
+    # allowed_repositories: [/absolute/path/to/project]
+    enabled: false
+  confluence:
+    # url: https://your-domain.atlassian.net/wiki/rest/api
+    # username: bot@example.com
+    # api_key_env: CONFLUENCE_API_KEY
+    # allowed_repositories: [/absolute/path/to/project]
     enabled: false
 `
 }
@@ -1056,6 +1130,16 @@ func applyDefaults(cfg *Config) {
 
 // Validate checks cross-references and provider/model invariants.
 func (c *Config) Validate() error {
+	if c.Integrations.Jira != nil {
+		if err := validateRepositoryAllowlist("integrations.jira.allowed_repositories", c.Integrations.Jira.AllowedRepositories); err != nil {
+			return err
+		}
+	}
+	if c.Integrations.Confluence != nil {
+		if err := validateRepositoryAllowlist("integrations.confluence.allowed_repositories", c.Integrations.Confluence.AllowedRepositories); err != nil {
+			return err
+		}
+	}
 	for id, provider := range c.Providers {
 		if provider.Type == "" {
 			provider.Type = "generic"

@@ -160,4 +160,17 @@ integrations:
     url: https://your-domain.atlassian.net
     username: bot@example.com
     api_key_env: JIRA_API_KEY
+    allowed_projects: [VEGA]
+    # Global-only local repository scope. Descendant paths are included.
+    allowed_repositories:
+      - /absolute/path/to/vega-project
+    enabled: true
+  confluence:
+    url: https://your-domain.atlassian.net/wiki/rest/api
+    username: bot@example.com
+    api_key_env: CONFLUENCE_API_KEY
+    allowed_spaces: [VEGA]
+    allowed_repositories:
+      - /absolute/path/to/vega-project
+    read_only: true
     enabled: true

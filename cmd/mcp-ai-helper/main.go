@@ -59,7 +59,11 @@ func serve() {
 		os.Exit(1)
 	}
 
-	srv := mcpserver.New(cfg)
+	repoPath, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "resolve startup repository: %v; scoped integrations will stay hidden\n", err)
+	}
+	srv := mcpserver.NewForRepository(cfg, repoPath)
 
 	go func() {
 		sig := make(chan os.Signal, 1)
