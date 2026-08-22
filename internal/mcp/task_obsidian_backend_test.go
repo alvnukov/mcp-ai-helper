@@ -377,22 +377,35 @@ func TestObsidianWriterQuotesColonScalars(t *testing.T) {
 	}
 }
 
-func TestObsidianListAllAutoInitializesMissingRegistryDir(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "missing-registry")
+func TestObsidianListAllReportsMissingRegistryWithoutMutation(t *testing.T) {
+	repo := t.TempDir()
+	dir := filepath.Join(repo, "missing-registry")
 	backend := newObsidianTaskBackend(dir)
-	all, _, err := backend.ListAll(t.Context(), "")
+	all, _, err := backend.ListAll(t.Context(), repo)
 	if err != nil {
-		t.Fatalf("ListAll should auto-initialize missing registry dir: %v", err)
+		t.Fatalf("ListAll should return recovery diagnostics: %v", err)
 	}
 	if len(all) != 0 {
 		t.Fatalf("expected 0 tasks, got %d", len(all))
 	}
-	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
-		t.Fatalf("registry dir was not created: info=%v err=%v", info, err)
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("read action created registry dir: %v", err)
 	}
 	meta := backend.(*obsidianTaskBackend).ListMetadata()
-	if !strings.Contains(meta.Validation, "0 task") {
-		t.Fatalf("validation = %q", meta.Validation)
+	if meta.RegistryPath != dir || len(meta.Diagnostics) != 1 || meta.Diagnostics[0].Code != "registry_missing" {
+		t.Fatalf("missing registry metadata = %+v", meta)
+	}
+	response := taskListResponse(backend, all, all, "obsidian_registry", repo)
+	if response["repair_required"] != true || response["requested_repo_path"] != repo {
+		t.Fatalf("repair diagnostics = %+v", response)
+	}
+	nextAction, ok := response["next_action"].(map[string]any)
+	if !ok || nextAction["tool"] != "task_registry_init" {
+		t.Fatalf("next_action = %#v", response["next_action"])
+	}
+	args, ok := nextAction["args"].(map[string]any)
+	if !ok || args["repo_path"] != repo || args["path"] != "missing-registry" || args["dry_run"] != true {
+		t.Fatalf("next_action args = %#v", nextAction["args"])
 	}
 }
 
@@ -426,39 +439,33 @@ func TestObsidianListAllDegradesOnInvalidNote(t *testing.T) {
 	}
 }
 
-func TestObsidianListAllAutoHealsFilenameIDMismatch(t *testing.T) {
+func TestObsidianListAllReportsFilenameIDMismatchWithoutMutation(t *testing.T) {
 	dir := t.TempDir()
 	backend := newObsidianTaskBackend(dir)
 	mismatched := []byte("---\nid: canonical-task\ntitle: Canonical Task\nstatus: todo\n---\n\n## Body\n\nOriginal body.\n")
-	if err := os.WriteFile(filepath.Join(dir, "wrong-name.md"), mismatched, 0o644); err != nil {
+	wrongPath := filepath.Join(dir, "wrong-name.md")
+	if err := os.WriteFile(wrongPath, mismatched, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	all, _, err := backend.ListAll(t.Context(), "")
 	if err != nil {
 		t.Fatalf("ListAll: %v", err)
 	}
-	if len(all) != 1 || all[0].ID != "canonical-task" || all[0].Body != "Original body." {
-		t.Fatalf("tasks = %#v", all)
+	if len(all) != 0 {
+		t.Fatalf("mismatched projection should be omitted, got %#v", all)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "wrong-name.md")); !os.IsNotExist(err) {
-		t.Fatalf("wrong-name.md should be renamed, got err=%v", err)
+	if _, err := os.Stat(wrongPath); err != nil {
+		t.Fatalf("read action renamed source note: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "canonical-task.md")); err != nil {
-		t.Fatalf("canonical-task.md missing after auto-heal: %v", err)
+	if _, err := os.Stat(filepath.Join(dir, "canonical-task.md")); !os.IsNotExist(err) {
+		t.Fatalf("read action created canonical note: %v", err)
 	}
 	meta := backend.(*obsidianTaskBackend).ListMetadata()
-	if len(meta.Diagnostics) != 1 || meta.Diagnostics[0].Code != "projection_id_auto_healed" {
+	if len(meta.Diagnostics) != 1 || meta.Diagnostics[0].Code != "projection_id_mismatch" {
 		t.Fatalf("diagnostics = %#v", meta.Diagnostics)
 	}
-	if !stringSliceContains(meta.ChangedFiles, "wrong-name.md") || !stringSliceContains(meta.ChangedFiles, "canonical-task.md") {
-		t.Fatalf("changed files = %#v", meta.ChangedFiles)
-	}
-	got, _, err := backend.Get(t.Context(), "", "canonical-task")
-	if err != nil {
-		t.Fatalf("Get canonical-task after auto-heal: %v", err)
-	}
-	if got.Title != "Canonical Task" {
-		t.Fatalf("title = %q", got.Title)
+	if len(meta.ChangedFiles) != 0 {
+		t.Fatalf("read action reported changed files: %#v", meta.ChangedFiles)
 	}
 }
 
@@ -716,7 +723,7 @@ func TestTaskListResponseIncludesCountsAndRegistryMetadata(t *testing.T) {
 		{ID: "done-task", Status: "done", Title: "Done"},
 	}
 
-	response := taskListResponse(backend, all[:1], all, "obsidian_registry")
+	response := taskListResponse(backend, all[:1], all, "obsidian_registry", t.TempDir())
 
 	counts, ok := response["counts_by_status"].(map[string]int)
 	if !ok {
@@ -911,42 +918,33 @@ func TestObsidianBackendRelativeDirResolvesAgainstRepoPath(t *testing.T) {
 	if len(listed) != 0 {
 		t.Fatalf("tasks = %d, want 0", len(listed))
 	}
-	if info, err := os.Stat(filepath.Join(repo, "obsidian-tasks")); err != nil || !info.IsDir() {
-		t.Fatalf("registry dir was not created inside repo: info=%v err=%v", info, err)
+	registryPath := filepath.Join(repo, "obsidian-tasks")
+	if _, err := os.Stat(registryPath); !os.IsNotExist(err) {
+		t.Fatalf("read action created registry dir: %v", err)
+	}
+	meta := backend.(*obsidianTaskBackend).ListMetadata()
+	if meta.RegistryPath != registryPath || len(meta.Diagnostics) != 1 || meta.Diagnostics[0].Code != "registry_missing" {
+		t.Fatalf("relative registry diagnostics = %+v", meta)
 	}
 }
 
-// First access to a missing registry must create it silently and tell the
-// model the registry was just created and is empty; later scans must not
-// repeat that claim.
-func TestObsidianBackendReportsRegistryCreationOnce(t *testing.T) {
+func TestObsidianUpsertExplicitlyInitializesMissingRegistry(t *testing.T) {
 	repo := t.TempDir()
 	notesDir := filepath.Join(repo, "notes")
 	backend := newObsidianTaskBackend(notesDir)
 
+	if _, err := backend.Upsert(t.Context(), tasks.AddRequest{RepoPath: repo, ID: "first-task", Title: "First task", Status: "todo"}); err != nil {
+		t.Fatalf("explicit Upsert should initialize registry: %v", err)
+	}
+	if info, err := os.Stat(notesDir); err != nil || !info.IsDir() {
+		t.Fatalf("explicit Upsert did not create registry: info=%v err=%v", info, err)
+	}
 	listed, _, err := backend.ListCurrent(t.Context(), repo)
 	if err != nil {
-		t.Fatalf("ListCurrent: %v", err)
+		t.Fatalf("ListCurrent after explicit init: %v", err)
 	}
-	meta := backend.(*obsidianTaskBackend).ListMetadata()
-	if !meta.RegistryCreated || meta.RegistryPath != notesDir {
-		t.Fatalf("creation metadata = %+v, want created at %s", meta, notesDir)
-	}
-	response := taskListResponse(backend, listed, listed, "obsidian_registry")
-	created, ok := response["registry_created"].(bool)
-	if !ok || !created {
-		t.Fatalf("registry_created missing from list response: %+v", response)
-	}
-	note, _ := response["registry_note"].(string)
-	if !strings.Contains(note, "currently empty") {
-		t.Fatalf("registry_note = %q", note)
-	}
-
-	if _, _, err := backend.ListCurrent(t.Context(), repo); err != nil {
-		t.Fatalf("second ListCurrent: %v", err)
-	}
-	if meta := backend.(*obsidianTaskBackend).ListMetadata(); meta.RegistryCreated {
-		t.Fatal("registry_created must not repeat after the first scan")
+	if len(listed) != 1 || listed[0].ID != "first-task" {
+		t.Fatalf("tasks after explicit init = %#v", listed)
 	}
 }
 

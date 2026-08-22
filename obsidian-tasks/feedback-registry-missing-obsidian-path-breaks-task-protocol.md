@@ -1,7 +1,7 @@
 ---
 id: feedback-registry-missing-obsidian-path-breaks-task-protocol
 title: 'Feedback: registry management breaks when configured Obsidian path is missing'
-status: todo
+status: done
 priority: high
 model_level: medium
 tags:
@@ -12,7 +12,7 @@ tags:
     - config
     - diagnostics
 created_at: "2026-06-17T09:31:46.431472Z"
-updated_at: "2026-06-17T09:31:46.431472Z"
+updated_at: "2026-08-22T16:45:40.035156Z"
 ---
 
 ## Body

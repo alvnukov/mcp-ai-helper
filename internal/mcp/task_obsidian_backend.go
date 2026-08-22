@@ -511,7 +511,7 @@ func withObsidianWorktreeContext(repoPath string, items []tasks.Task) []tasks.Ta
 }
 
 func (b *obsidianTaskBackend) readAll() ([]tasks.Task, error) {
-	scan, err := b.scanNotes(true)
+	scan, err := b.scanNotes(false)
 	if err != nil {
 		b.setListMetadata(taskListMetadata{})
 		return nil, err
@@ -522,8 +522,21 @@ func (b *obsidianTaskBackend) readAll() ([]tasks.Task, error) {
 
 func (b *obsidianTaskBackend) scanNotes(autoHeal bool) (obsidianTaskScan, error) {
 	// #nosec G703 -- b.dir is the validated task_registry path from config; safefs roots bound every access under it.
-	_, statErr := os.Stat(b.dir)
-	root, err := b.ensureRoot()
+	info, statErr := os.Stat(b.dir)
+	if errors.Is(statErr, os.ErrNotExist) {
+		scan := obsidianTaskScan{Tasks: []tasks.Task{}}
+		scan.Metadata.RegistryPath = b.dir
+		scan.addDiagnostic("registry_missing", "", "configured Obsidian task registry does not exist; initialize it explicitly with task_registry_init", "error")
+		scan.finishValidation()
+		return scan, nil
+	}
+	if statErr != nil {
+		return obsidianTaskScan{}, fmt.Errorf("stat obsidian task registry: %w", statErr)
+	}
+	if !info.IsDir() {
+		return obsidianTaskScan{}, fmt.Errorf("obsidian task registry path is not a directory: %s", b.dir)
+	}
+	root, err := b.openRoot()
 	if err != nil {
 		return obsidianTaskScan{}, err
 	}
@@ -533,10 +546,6 @@ func (b *obsidianTaskBackend) scanNotes(autoHeal bool) (obsidianTaskScan, error)
 		return obsidianTaskScan{}, fmt.Errorf("read obsidian task dir: %w", err)
 	}
 	scan := obsidianTaskScan{Tasks: make([]tasks.Task, 0, len(entries))}
-	if errors.Is(statErr, os.ErrNotExist) {
-		scan.Metadata.RegistryCreated = true
-		scan.Metadata.RegistryPath = b.dir
-	}
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
 			continue

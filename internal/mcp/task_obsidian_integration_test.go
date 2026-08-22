@@ -147,23 +147,23 @@ func TestRepoLocalTaskRegistryBackendSelection(t *testing.T) {
 	}
 }
 
-func TestObsidianBackendAutoInitializesMissingRegistryDir(t *testing.T) {
+func TestObsidianBackendReportsMissingRegistryWithoutInitialization(t *testing.T) {
 	missingDir := filepath.Join(t.TempDir(), "missing-obsidian-tasks")
 	backend := newObsidianTaskBackend(missingDir)
 
 	tasks, _, err := backend.ListCurrent(context.Background(), "/test-repo")
 	if err != nil {
-		t.Fatalf("ListCurrent should auto-initialize missing registry dir: %v", err)
+		t.Fatalf("ListCurrent should return recovery diagnostics: %v", err)
 	}
 	if len(tasks) != 0 {
 		t.Fatalf("tasks = %d, want 0", len(tasks))
 	}
-	if info, err := os.Stat(missingDir); err != nil || !info.IsDir() {
-		t.Fatalf("missing registry dir was not created: info=%v err=%v", info, err)
+	if _, err := os.Stat(missingDir); !os.IsNotExist(err) {
+		t.Fatalf("read action created missing registry dir: %v", err)
 	}
 	meta := backend.(*obsidianTaskBackend).ListMetadata()
-	if !strings.Contains(meta.Validation, "0 task") {
-		t.Fatalf("validation = %q", meta.Validation)
+	if meta.RegistryPath != missingDir || len(meta.Diagnostics) != 1 || meta.Diagnostics[0].Code != "registry_missing" {
+		t.Fatalf("missing registry metadata = %+v", meta)
 	}
 }
 

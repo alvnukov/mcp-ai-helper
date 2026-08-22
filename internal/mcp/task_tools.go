@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 
 	basemcp "github.com/mark3labs/mcp-go/mcp"
@@ -58,7 +59,7 @@ func taskActionCurrent(ctx context.Context, req basemcp.CallToolRequest, deps *S
 	if err != nil {
 		return basemcp.NewToolResultError(err.Error()), nil
 	}
-	return structured(taskListResponse(backend, list, list, source))
+	return structured(taskListResponse(backend, list, list, source, args.RepoPath))
 }
 
 func taskActionGet(ctx context.Context, req basemcp.CallToolRequest, deps *Server) (*basemcp.CallToolResult, error) {
@@ -93,7 +94,7 @@ func taskActionList(ctx context.Context, req basemcp.CallToolRequest, deps *Serv
 	if err != nil {
 		return basemcp.NewToolResultError(err.Error()), nil
 	}
-	return structured(taskListResponse(backend, filterTasks(list, args), list, source))
+	return structured(taskListResponse(backend, filterTasks(list, args), list, source, args.RepoPath))
 }
 
 func taskActionSearch(ctx context.Context, req basemcp.CallToolRequest, deps *Server) (*basemcp.CallToolResult, error) {
@@ -112,7 +113,7 @@ func taskActionSearch(ctx context.Context, req basemcp.CallToolRequest, deps *Se
 	if err != nil {
 		return basemcp.NewToolResultError(err.Error()), nil
 	}
-	return structured(taskListResponse(backend, filterTasks(list, args), list, source))
+	return structured(taskListResponse(backend, filterTasks(list, args), list, source, args.RepoPath))
 }
 
 func taskActionUpsert(ctx context.Context, req basemcp.CallToolRequest, deps *Server) (*basemcp.CallToolResult, error) {
@@ -315,7 +316,7 @@ type taskListItem struct {
 	ProjectionSource        string   `json:"projection_source,omitempty"`
 }
 
-func taskListResponse(backend taskBackend, visible []tasks.Task, counted []tasks.Task, source string) map[string]any {
+func taskListResponse(backend taskBackend, visible []tasks.Task, counted []tasks.Task, source string, repoPath string) map[string]any {
 	out := map[string]any{
 		"tasks":            summarizeTaskList(visible),
 		"source":           source,
@@ -336,10 +337,22 @@ func taskListResponse(backend taskBackend, visible []tasks.Task, counted []tasks
 		if len(meta.ChangedFiles) > 0 {
 			out["changed_files"] = meta.ChangedFiles
 		}
-		if meta.RegistryCreated {
-			out["registry_created"] = true
+		for _, diagnostic := range meta.Diagnostics {
+			if diagnostic.Code != "registry_missing" {
+				continue
+			}
+			args := map[string]any{"repo_path": repoPath, "backend": "obsidian", "dry_run": true}
+			if repo, err := filepath.Abs(strings.TrimSpace(repoPath)); err == nil {
+				if relative, relErr := filepath.Rel(repo, meta.RegistryPath); relErr == nil && relative != "." && filepath.IsLocal(relative) {
+					args["path"] = filepath.ToSlash(relative)
+				}
+			}
+			out["repair_required"] = true
 			out["registry_path"] = meta.RegistryPath
-			out["registry_note"] = "Task registry was created just now and is currently empty; add the first task with task action=upsert (title required)."
+			out["requested_repo_path"] = repoPath
+			out["next_action"] = map[string]any{"tool": "task_registry_init", "args": args}
+			out["next_call"] = "Run next_action as a dry run, then repeat it with dry_run=false after review."
+			break
 		}
 	}
 	return out
