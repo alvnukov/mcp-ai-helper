@@ -7,6 +7,7 @@ import (
 
 	"github.com/alvnukov/mcp-ai-helper/internal/accesspolicy"
 	"github.com/alvnukov/mcp-ai-helper/internal/config"
+	"github.com/alvnukov/mcp-ai-helper/internal/pipeline"
 )
 
 func (s *Server) inspectGenericAccess(tool string, action string, args map[string]any, repoCfg *config.RepoConfig) error {
@@ -90,7 +91,7 @@ func inspectRunAccess(policy *accesspolicy.Policy, action string, args map[strin
 			if err := policy.CheckCommand("run", action, command); err != nil {
 				return err
 			}
-		case "guarded_replace", "write_file":
+		case "guarded_replace", pipeline.WorkflowStepWriteFile:
 			path, _ := stepArgs["path"].(string)
 			if err := policy.CheckPath("run", action, path); err != nil {
 				return err

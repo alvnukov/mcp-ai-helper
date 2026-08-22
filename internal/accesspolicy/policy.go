@@ -57,7 +57,8 @@ func New(repoPath string, taskRegistryPath string, helperConfigPath string) *Pol
 	if strings.TrimSpace(taskRegistryPath) != "" {
 		taskRoots = append(taskRoots, resolveAgainst(repoPath, taskRegistryPath))
 	}
-	configFiles := []string{filepath.Join(repoPath, ".mcp-ai-helper.yaml")}
+	configFiles := make([]string, 0, 2)
+	configFiles = append(configFiles, filepath.Join(repoPath, ".mcp-ai-helper.yaml"))
 	if strings.TrimSpace(helperConfigPath) == "" {
 		helperConfigPath = defaultConfigPath()
 	}

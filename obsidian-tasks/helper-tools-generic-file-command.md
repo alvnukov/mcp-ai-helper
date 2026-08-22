@@ -25,7 +25,7 @@ verification_plan:
     - Run make quality because the policy path is shared by all command and generic file/edit entry points.
     - Inspect the owned-file diff and commit code plus task transition atomically.
 created_at: "2026-08-22T09:19:53.145837Z"
-updated_at: "2026-08-22T09:48:27.421972Z"
+updated_at: "2026-08-22T09:54:13.811562Z"
 ---
 
 ## Body

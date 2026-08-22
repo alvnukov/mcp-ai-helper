@@ -121,6 +121,9 @@ type WorkflowRequest struct {
 	Vars          map[string]string `json:"vars,omitempty"`
 }
 
+// WorkflowStepWriteFile is the canonical whole-file workflow step name.
+const WorkflowStepWriteFile = "write_file"
+
 // WorkflowStep is one deterministic workflow DSL step.
 type WorkflowStep struct {
 	ID        string         `json:"id"`
