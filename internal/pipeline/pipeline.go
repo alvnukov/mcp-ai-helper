@@ -533,7 +533,7 @@ func (r *Runner) runWorkflowSteps(ctx context.Context, req WorkflowRequest, wave
 	var stateMu sync.Mutex
 	fileLocks := newFileLockSet()
 
-	for _, wave := range waves {
+	for waveIndex, wave := range waves {
 		var wg sync.WaitGroup
 
 		for i := range wave {
@@ -589,6 +589,19 @@ func (r *Runner) runWorkflowSteps(ctx context.Context, req WorkflowRequest, wave
 		wg.Wait()
 
 		if result.Status != "ok" {
+			reason := fmt.Sprintf("workflow stopped after an earlier step returned status %q", result.Status)
+			if result.FailedStepID != "" {
+				reason = fmt.Sprintf("workflow stopped after step %q returned status %q", result.FailedStepID, result.Status)
+			}
+			for _, remainingWave := range waves[waveIndex+1:] {
+				for _, step := range remainingWave {
+					sr := WorkflowStepResult{ID: step.ID, Tool: step.Tool, Status: "skipped", Reason: reason}
+					result.StepResults = append(result.StepResults, sr)
+					if step.ID != "" {
+						stepResults[step.ID] = sr
+					}
+				}
+			}
 			break
 		}
 	}

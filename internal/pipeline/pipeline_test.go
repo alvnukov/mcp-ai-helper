@@ -349,6 +349,19 @@ func TestRunWorkflowFailedGateCannotRaceCloseout(t *testing.T) {
 	if result.Status != "failed" || result.FailedStepID != "gate" {
 		t.Fatalf("workflow result = %#v, want failed gate", result)
 	}
+	wantStepStatuses := map[string]string{"gate": "failed", "done": "skipped", "commit": "skipped"}
+	if len(result.StepResults) != len(wantStepStatuses) {
+		t.Fatalf("step results = %#v, want one result per requested step", result.StepResults)
+	}
+	for _, stepResult := range result.StepResults {
+		wantStatus, exists := wantStepStatuses[stepResult.ID]
+		if !exists || stepResult.Status != wantStatus {
+			t.Fatalf("step result = %#v, want statuses %#v", stepResult, wantStepStatuses)
+		}
+		if stepResult.Status == "skipped" && !strings.Contains(stepResult.Reason, "gate") {
+			t.Fatalf("skipped step reason = %q, want failed step id", stepResult.Reason)
+		}
+	}
 	if result.CommitResult != nil {
 		t.Fatalf("commit raced the failed gate: %#v", result.CommitResult)
 	}
